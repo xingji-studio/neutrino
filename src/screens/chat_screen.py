@@ -1,3 +1,4 @@
+import json
 import os
 import time
 from pathlib import Path
@@ -11,6 +12,7 @@ from textual.widgets import Input, Static
 from textual.worker import Worker, WorkerState
 
 from src.llm.client import LLMClient
+from src.llm.tools import get_tool_definitions, execute_tool
 from src.models.config import save_session
 from src.widgets import NeutrinoHeader
 
@@ -69,7 +71,7 @@ class ChatScreen(Screen):
     def on_mount(self) -> None:
         self._render_system_info()
         for msg in self._loaded_messages:
-            self._append_message(msg["role"], msg["content"])
+            self._display_loaded_message(msg)
         if self.initial_message:
             self.query_one("#chat-input", Input).value = self.initial_message
             self._send_message(self.initial_message)
@@ -78,6 +80,17 @@ class ChatScreen(Screen):
         model_name = self.model_config.get("name", "unknown")
         provider = self.model_config.get("provider", "unknown")
         self._append_message("system", f"Model: {provider}/{model_name} | Intensity: {self.intensity}")
+
+    def _display_loaded_message(self, msg: dict) -> None:
+        role = msg.get("role")
+        if role == "tool":
+            self._append_tool_message(
+                msg.get("name", ""),
+                msg.get("arguments", {}),
+                msg.get("result", "")
+            )
+        else:
+            self._append_message(role, msg.get("content", ""))
 
     def _append_message(self, role: str, content: str) -> None:
         self.messages.append({"role": role, "content": content})
@@ -92,6 +105,32 @@ class ChatScreen(Screen):
         else:
             widget = Static(content, classes="msg-other")
 
+        chat_log.mount(widget)
+        chat_log.scroll_end(animate=False)
+
+    def _append_tool_message(self, name: str, arguments: dict, result: str) -> None:
+        self.messages.append({
+            "role": "tool",
+            "name": name,
+            "arguments": arguments,
+            "result": result
+        })
+        chat_log = self.query_one("#chat-log", VerticalScroll)
+
+        args_text = ""
+        if name == "run_command":
+            args_text = arguments.get("command", "")
+        else:
+            args_text = arguments.get("path", "")
+            if name == "write_file" and not args_text:
+                args_text = arguments.get("path", "")
+
+        header = f"[bold cyan]⚙ {name}[/bold cyan]"
+        if args_text:
+            header += f"\n  {args_text}"
+
+        result_text = result.strip() if result else "(no output)"
+        widget = Static(f"{header}\n[dim]{result_text}[/dim]", classes="msg-tool")
         chat_log.mount(widget)
         chat_log.scroll_end(animate=False)
 
@@ -124,10 +163,10 @@ class ChatScreen(Screen):
         indicator = self.query_one("#pause-indicator", Static)
         pause_container = self.query_one("#pause-container")
         if self.is_paused:
-            indicator.update("[yellow]PAUSED - Press ESC to resume[/yellow]")
+            indicator.update("[yellow]PAUSED - Press ESC two times to resume[/yellow]")
             pause_container.styles.display = "block"
         elif self.is_streaming:
-            indicator.update("[dim]Streaming... Press ESC to pause[/dim]")
+            indicator.update("[dim]Streaming... Press ESC two times to pause[/dim]")
             pause_container.styles.display = "block"
         else:
             pause_container.styles.display = "none"
@@ -158,7 +197,9 @@ class ChatScreen(Screen):
         self.app.pop_screen()
 
     def _save_session(self) -> None:
-        chat_messages = [m for m in self.messages if m.get("role") in ("user", "assistant")]
+        chat_messages = [
+            m for m in self.messages if m.get("role") in ("user", "assistant", "tool")
+        ]
         if chat_messages:
             try:
                 self.session_id = save_session(
@@ -190,31 +231,77 @@ class ChatScreen(Screen):
         self._update_input_state()
         self._update_pause_indicator()
 
-        system_prompt = load_prompt()
-        api_messages = [{"role": "system", "content": system_prompt}]
-        for m in self.messages:
-            if m["role"] in ("user", "assistant"):
-                api_messages.append({"role": m["role"], "content": m["content"]})
+        api_messages = self._build_api_messages()
 
         self.current_stream_worker = self.run_worker(
-            self._stream_response(api_messages),
+            self._agent_loop(api_messages),
             name="stream-response"
         )
 
-    async def _stream_response(self, messages: list) -> None:
-        client = LLMClient(self.model_config, self.intensity)
-        self.streaming_content = ""
+    def _build_api_messages(self) -> list:
+        system_prompt = load_prompt()
+        api_messages = [{"role": "system", "content": system_prompt}]
+        for m in self.messages:
+            if m.get("role") in ("user", "assistant"):
+                api_messages.append({"role": m["role"], "content": m["content"]})
+        return api_messages
+
+    async def _agent_loop(self, api_messages: list) -> None:
+        tools = get_tool_definitions()
         try:
-            async for token in client.stream(messages):
+            while True:
+                client = LLMClient(self.model_config, self.intensity)
+                self.streaming_content = ""
+                has_content = False
+
+                async for chunk in client.stream_turn(api_messages, tools=tools):
+                    if self.is_paused:
+                        break
+                    self.streaming_content += chunk
+                    self._update_streaming(self.streaming_content)
+                    has_content = True
+
                 if self.is_paused:
                     break
-                self.streaming_content += token
-                self._update_streaming(self.streaming_content)
 
-            if not self.is_paused:
-                self._finalize_streaming(self.streaming_content)
-                self.messages.append({"role": "assistant", "content": self.streaming_content})
-                self._on_stream_done()
+                if not client.tool_calls:
+                    if has_content:
+                        self._finalize_streaming(self.streaming_content)
+                        self.messages.append({"role": "assistant", "content": self.streaming_content})
+                    break
+
+                if has_content:
+                    self._finalize_streaming(self.streaming_content)
+                    self.messages.append({"role": "assistant", "content": self.streaming_content})
+
+                assistant_msg = {
+                    "role": "assistant",
+                    "content": self.streaming_content if has_content else "",
+                    "tool_calls": [
+                        {
+                            "id": tc["id"],
+                            "type": "function",
+                            "function": {"name": tc["name"], "arguments": tc["arguments"]}
+                        }
+                        for tc in client.tool_calls
+                    ]
+                }
+                api_messages.append(assistant_msg)
+
+                for tc in client.tool_calls:
+                    try:
+                        arguments = json.loads(tc["arguments"]) if tc["arguments"].strip() else {}
+                    except json.JSONDecodeError:
+                        arguments = {}
+                    result = await execute_tool(tc["name"], arguments)
+                    self._append_tool_message(tc["name"], arguments, result)
+                    api_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc["id"],
+                        "content": result
+                    })
+
+            self._on_stream_done()
         except Exception as e:
             error_msg = f"\n[Error: {e}]"
             self._finalize_streaming(self.streaming_content + error_msg)

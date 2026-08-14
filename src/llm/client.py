@@ -1,6 +1,6 @@
 import json
 import httpx
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 from src.models.config import INTENSITY_PARAMS
 
@@ -12,19 +12,25 @@ class LLMClient:
         params = INTENSITY_PARAMS.get(intensity, INTENSITY_PARAMS["High"])
         self.temperature = params["temperature"]
         self.top_p = params["top_p"]
+        self.tool_calls: list = []
 
-    async def stream(self, messages: list) -> AsyncGenerator[str, None]:
+    async def stream_turn(
+        self,
+        messages: list,
+        tools: Optional[list] = None,
+    ) -> AsyncGenerator[str, None]:
+        """Stream a single assistant turn.
+
+        Yields content text chunks for display. When the stream completes,
+        `self.tool_calls` holds any tool calls the model requested, as a list
+        of dicts: {"id", "name", "arguments"}.
+        """
+        self.tool_calls = []
         url = self.model["url"].rstrip("/") + "/chat/completions"
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.model['api_key']}"
         }
-
-        provider = self.model.get("provider", "")
-        if provider == "Anthropic":
-            async for chunk in self._stream_anthropic(messages):
-                yield chunk
-            return
 
         payload = {
             "model": self.model["name"],
@@ -33,59 +39,12 @@ class LLMClient:
             "top_p": self.top_p,
             "stream": True
         }
+        if tools:
+            payload["tools"] = tools
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            try:
-                async with client.stream("POST", url, json=payload, headers=headers) as resp:
-                    resp.raise_for_status()
-                    async for line in resp.aiter_lines():
-                        line = line.strip()
-                        if not line:
-                            continue
-                        if line.startswith("data: "):
-                            data = line[6:]
-                            if data == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(data)
-                                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                                content = delta.get("content", "")
-                                if content:
-                                    yield content
-                            except json.JSONDecodeError:
-                                continue
-            except httpx.HTTPStatusError as e:
-                yield f"\n[Error: HTTP {e.response.status_code} - {e.response.text}]"
-            except httpx.RequestError as e:
-                yield f"\n[Error: Connection failed - {e}]"
+        tool_calls_by_index = {}
 
-    async def _stream_anthropic(self, messages: list) -> AsyncGenerator[str, None]:
-        url = self.model["url"].rstrip("/") + "/messages"
-        headers = {
-            "Content-Type": "application/json",
-            "x-api-key": self.model["api_key"],
-            "anthropic-version": "2023-06-01"
-        }
-
-        system_msg = None
-        chat_messages = []
-        for m in messages:
-            if m["role"] == "system":
-                system_msg = m["content"]
-            else:
-                chat_messages.append({"role": m["role"], "content": m["content"]})
-
-        payload = {
-            "model": self.model["name"],
-            "messages": chat_messages,
-            "max_tokens": 4096,
-            "temperature": self.temperature,
-            "stream": True
-        }
-        if system_msg:
-            payload["system"] = system_msg
-
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             try:
                 async with client.stream("POST", url, json=payload, headers=headers) as resp:
                     resp.raise_for_status()
@@ -94,42 +53,41 @@ class LLMClient:
                         if not line or not line.startswith("data: "):
                             continue
                         data = line[6:]
+                        if data == "[DONE]":
+                            break
                         try:
                             chunk = json.loads(data)
-                            if chunk.get("type") == "content_block_delta":
-                                delta = chunk.get("delta", {})
-                                content = delta.get("text", "")
-                                if content:
-                                    yield content
                         except json.JSONDecodeError:
                             continue
+                        choice = chunk.get("choices", [{}])[0]
+                        delta = choice.get("delta", {})
+
+                        content = delta.get("content", "")
+                        if content:
+                            yield content
+
+                        for tc in delta.get("tool_calls", []) or []:
+                            idx = tc.get("index", 0)
+                            entry = tool_calls_by_index.setdefault(
+                                idx, {"id": "", "name": "", "arguments": ""}
+                            )
+                            if tc.get("id"):
+                                entry["id"] = tc["id"]
+                            fn = tc.get("function", {})
+                            if fn.get("name"):
+                                entry["name"] = fn["name"]
+                            if fn.get("arguments"):
+                                entry["arguments"] += fn["arguments"]
             except httpx.HTTPStatusError as e:
                 yield f"\n[Error: HTTP {e.response.status_code}]"
             except httpx.RequestError as e:
                 yield f"\n[Error: Connection failed - {e}]"
 
-    async def non_stream(self, messages: list) -> str:
-        url = self.model["url"].rstrip("/") + "/chat/completions"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.model['api_key']}"
-        }
+        self.tool_calls = [
+            tool_calls_by_index[i] for i in sorted(tool_calls_by_index)
+        ]
 
-        payload = {
-            "model": self.model["name"],
-            "messages": messages,
-            "temperature": self.temperature,
-            "top_p": self.top_p,
-            "stream": False
-        }
-
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            try:
-                resp = await client.post(url, json=payload, headers=headers)
-                resp.raise_for_status()
-                data = resp.json()
-                return data["choices"][0]["message"]["content"]
-            except httpx.HTTPStatusError as e:
-                return f"[Error: HTTP {e.response.status_code} - {e.response.text}]"
-            except httpx.RequestError as e:
-                return f"[Error: Connection failed - {e}]"
+    async def stream(self, messages: list) -> AsyncGenerator[str, None]:
+        """Legacy plain-text stream (no tools)."""
+        async for chunk in self.stream_turn(messages, tools=None):
+            yield chunk

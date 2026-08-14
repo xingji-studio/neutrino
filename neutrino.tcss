@@ -102,6 +102,14 @@ Screen {
     border-left: solid #e0af68;
 }
 
+.msg-tool {
+    color: #7aa2f7;
+    margin-bottom: 1;
+    margin-top: 1;
+    padding: 0 1;
+    border-left: solid #99d9ea;
+}
+
 #pause-container {
     height: 1;
     align: center middle;
