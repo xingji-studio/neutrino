@@ -94,8 +94,6 @@ class NeutrinoApp(App):
             self.selected_model_name = data.get("model", "deepseek-chat")
         if data.get("intensity"):
             self.selected_intensity = data.get("intensity", "High")
-        screen.is_streaming = False
-        screen.is_paused = False
         self.push_screen(screen)
 
     def action_open_model_config(self) -> None:

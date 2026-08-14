@@ -1,4 +1,5 @@
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Center, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Button, Static
@@ -9,11 +10,11 @@ from src.widgets import NeutrinoHeader
 
 class HistoryScreen(Screen):
     BINDINGS = [
-        ("escape", "go_back", "Back"),
-        ("up", "move_up", ""),
-        ("down", "move_down", ""),
-        ("enter", "load_selected", ""),
-        ("delete", "delete_selected", "Delete"),
+        Binding("escape", "go_back", "Back", priority=True),
+        Binding("up", "move_up", "", priority=True),
+        Binding("down", "move_down", "", priority=True),
+        Binding("enter", "load_selected", "", priority=True),
+        Binding("delete", "delete_selected", "Delete", priority=True),
     ]
 
     def __init__(self):
@@ -76,13 +77,13 @@ class HistoryScreen(Screen):
             self.selected_idx = (self.selected_idx + 1) % len(self.sessions)
             self._refresh_display()
 
-    def action_load_selected(self) -> None:
+    async def action_load_selected(self) -> None:
         if not self.sessions:
             return
         session = self.sessions[self.selected_idx]
         data = load_session(session["id"])
         if data:
-            self.app.pop_screen()
+            await self.app.pop_screen()
             self.app.load_session(data)
 
     def action_delete_selected(self) -> None:
