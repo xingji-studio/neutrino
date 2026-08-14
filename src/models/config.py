@@ -60,7 +60,13 @@ DEFAULT_MODELS = {
 
 DEFAULT_CONFIG = {
     "language": "en",
-    "theme": "default"
+    "theme": "default",
+    "selected_provider": "DeepSeek",
+    "selected_model": "deepseek-chat",
+    "selected_intensity": "High",
+    "selected_model_url": "https://api.deepseek.com/v1",
+    "selected_model_api_key": "",
+    "selected_model_streaming": True
 }
 
 INTENSITY_LEVELS = ["Low", "Medium", "High", "Max", "Ultra"]
@@ -140,30 +146,57 @@ def get_models_by_provider():
     return result
 
 
-def save_session(messages, model_name, provider, intensity):
+def save_session(messages, model_name, provider, intensity, cwd=None, session_id=None):
     ensure_dirs()
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    now = datetime.now()
+    if session_id is None:
+        session_id = now.strftime("%Y%m%d_%H%M%S_%f")
+    if cwd is None:
+        cwd = os.getcwd()
+
+    existing = load_session(session_id)
+    created_at = existing.get("created_at") if existing else now.isoformat()
+
+    title = ""
+    for msg in messages:
+        if msg.get("role") == "user":
+            title = msg["content"][:80]
+            break
+
     session = {
-        "id": timestamp,
-        "created_at": datetime.now().isoformat(),
-        "updated_at": datetime.now().isoformat(),
+        "id": session_id,
+        "created_at": created_at,
+        "updated_at": now.isoformat(),
         "model": model_name,
         "provider": provider,
         "intensity": intensity,
+        "cwd": cwd,
+        "title": title,
         "messages": messages
     }
-    path = SESSION_DIR / f"{timestamp}.json"
+    path = SESSION_DIR / f"{session_id}.json"
     with open(path, "w", encoding="utf-8") as f:
         json.dump(session, f, indent=2, ensure_ascii=False)
-    return timestamp
+    return session_id
 
 
 def load_session(session_id):
     path = SESSION_DIR / f"{session_id}.json"
     if not path.exists():
         return None
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return None
+
+
+def delete_session(session_id):
+    path = SESSION_DIR / f"{session_id}.json"
+    if path.exists():
+        path.unlink()
+        return True
+    return False
 
 
 def list_sessions():
@@ -176,12 +209,15 @@ def list_sessions():
             sessions.append({
                 "id": data.get("id", f.stem),
                 "created_at": data.get("created_at", ""),
+                "updated_at": data.get("updated_at", ""),
                 "model": data.get("model", ""),
                 "provider": data.get("provider", ""),
                 "intensity": data.get("intensity", ""),
+                "cwd": data.get("cwd", ""),
+                "title": data.get("title", ""),
                 "message_count": len(data.get("messages", []))
             })
         except (json.JSONDecodeError, IOError):
             pass
-    sessions.sort(key=lambda s: s["created_at"], reverse=True)
+    sessions.sort(key=lambda s: s.get("updated_at") or s.get("created_at", ""), reverse=True)
     return sessions

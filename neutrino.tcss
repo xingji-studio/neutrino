@@ -162,17 +162,33 @@ Screen {
 
 #model-container {
     align: center middle;
+    width: 100%;
+    height: 100%;
 }
 
 #history-container {
     align: center middle;
 }
 
-#model-content {
-    margin-top: 2;
+.page-title {
+    height: 3;
+    color: #99d9ea;
+    text-style: bold;
+    content-align: center middle;
+}
+
+.model-options {
+    height: 1fr;
+}
+
+.option {
+    width: 100%;
+    margin: 0 1;
+    padding: 0 1;
     color: #c0caf5;
 }
 
-#model-content > * {
-    margin-bottom: 0;
+.option.selected {
+    background: #28393d;
+    color: #99d9ea;
 }

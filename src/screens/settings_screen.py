@@ -19,7 +19,7 @@ class SettingsScreen(Screen):
             Horizontal(
                 Label("Language:"),
                 Select(
-                    [("en", "English"), ("zh", "中文")],
+                    [("English", "en"), ("中文", "zh")],
                     id="lang-select",
                     value="en"
                 ),

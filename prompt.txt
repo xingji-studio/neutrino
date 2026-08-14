@@ -17,4 +17,4 @@ Guidelines:
 - Use the tools available to you to explore the codebase before making changes.
 - Verify your changes by running tests and linting when possible.
 
-Language: Communicate in English by default. The user can switch languages.
+Language: Always respond in the same language the user writes in.

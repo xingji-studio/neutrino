@@ -1,3 +1,4 @@
+import os
 import time
 from pathlib import Path
 from typing import Optional
@@ -42,6 +43,7 @@ class ChatScreen(Screen):
         self.current_stream_worker: Optional[Worker] = None
         self.queued_message: Optional[str] = None
         self.last_esc_time = 0
+        self.session_id: Optional[str] = None
         self._load_config()
 
     def _load_config(self) -> None:
@@ -156,13 +158,16 @@ class ChatScreen(Screen):
         self.app.pop_screen()
 
     def _save_session(self) -> None:
-        if len(self.messages) > 1:
+        chat_messages = [m for m in self.messages if m.get("role") in ("user", "assistant")]
+        if chat_messages:
             try:
-                save_session(
-                    self.messages,
+                self.session_id = save_session(
+                    chat_messages,
                     self.model_config.get("name", "unknown"),
                     self.model_config.get("provider", "unknown"),
-                    self.intensity
+                    self.intensity,
+                    cwd=os.getcwd(),
+                    session_id=self.session_id
                 )
             except Exception:
                 pass
@@ -179,6 +184,7 @@ class ChatScreen(Screen):
             self.queued_message = text
             return
 
+        self._save_session()
         self.is_streaming = True
         self._show_thinking(True)
         self._update_input_state()
@@ -220,6 +226,7 @@ class ChatScreen(Screen):
         self._show_thinking(False)
         self._update_input_state()
         self._update_pause_indicator()
+        self._save_session()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         text = event.value.strip()

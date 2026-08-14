@@ -3,6 +3,7 @@ import os
 from textual.app import App
 from textual.reactive import reactive
 
+from src.models.config import load_config, save_config
 from src.screens.start_menu import StartMenu
 from src.screens.model_select import ModelSelectScreen
 from src.screens.chat_screen import ChatScreen
@@ -38,6 +39,16 @@ class NeutrinoApp(App):
         self.selected_model_url = "https://api.deepseek.com/v1"
         self.selected_model_api_key = ""
         self.selected_model_streaming = True
+        self._restore_selection()
+
+    def _restore_selection(self) -> None:
+        config = load_config()
+        self.selected_provider = config.get("selected_provider", "DeepSeek")
+        self.selected_model_name = config.get("selected_model", "deepseek-chat")
+        self.selected_intensity = config.get("selected_intensity", "High")
+        self.selected_model_url = config.get("selected_model_url", "https://api.deepseek.com/v1")
+        self.selected_model_api_key = config.get("selected_model_api_key", "")
+        self.selected_model_streaming = config.get("selected_model_streaming", True)
 
     def on_mount(self) -> None:
         self.push_screen("start")
@@ -50,6 +61,15 @@ class NeutrinoApp(App):
         self.selected_model_streaming = model.get("supports_streaming", True)
         self.selected_intensity = intensity
 
+        config = load_config()
+        config["selected_provider"] = provider_name
+        config["selected_model"] = model["name"]
+        config["selected_intensity"] = intensity
+        config["selected_model_url"] = model["url"]
+        config["selected_model_api_key"] = model.get("api_key", "")
+        config["selected_model_streaming"] = model.get("supports_streaming", True)
+        save_config(config)
+
     def start_new_chat(self, initial_message: str = "") -> None:
         screen = ChatScreen(initial_message=initial_message)
         self.push_screen(screen)
@@ -57,6 +77,7 @@ class NeutrinoApp(App):
     def load_session(self, data: dict) -> None:
         screen = ChatScreen()
         screen._loaded_messages = data.get("messages", [])
+        screen.session_id = data.get("id")
         if data.get("provider"):
             screen.model_config = {
                 "provider": data.get("provider", "DeepSeek"),
@@ -67,6 +88,12 @@ class NeutrinoApp(App):
             }
         if data.get("intensity"):
             screen.intensity = data.get("intensity", "High")
+        if data.get("provider"):
+            self.selected_provider = data.get("provider", "DeepSeek")
+        if data.get("model"):
+            self.selected_model_name = data.get("model", "deepseek-chat")
+        if data.get("intensity"):
+            self.selected_intensity = data.get("intensity", "High")
         screen.is_streaming = False
         screen.is_paused = False
         self.push_screen(screen)
