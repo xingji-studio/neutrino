@@ -157,10 +157,11 @@ export function drawTabButton(
   w: number,
   label: string,
   selected: boolean,
+  align: "center" | "left" = "center",
 ): void {
   const h = 3;
   const labelW = displayWidth(label);
-  const lx = x + Math.floor((w - labelW) / 2);
+  const lx = align === "left" ? x + 3 : x + Math.floor((w - labelW) / 2);
   if (selected) {
     buf.fillRect(x, y, w, h, { bg: C.highlightBg });
     buf.writeText(lx, y + 1, label, { fg: C.accent, bg: C.highlightBg, bold: true });

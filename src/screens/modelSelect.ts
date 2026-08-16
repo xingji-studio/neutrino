@@ -4,7 +4,7 @@ import type { Key } from "../terminal/input.js";
 import { C } from "../colors.js";
 import { INTENSITY_LEVELS, getModelsByProvider, type ModelInfo } from "../config.js";
 import { drawHeader } from "../header.js";
-import { centerVertically } from "../ui.js";
+import { drawTabButton } from "../ui.js";
 
 export class ModelSelectScreen extends Screen {
   private level = 0;
@@ -13,6 +13,7 @@ export class ModelSelectScreen extends Screen {
   private selectedProviderIdx = 0;
   private selectedModelIdx = 0;
   private selectedIntensityIdx = 2;
+  private scrollBtn = 0;
 
   onActivate(): void {
     const map = getModelsByProvider();
@@ -21,6 +22,7 @@ export class ModelSelectScreen extends Screen {
     this.selectedProviderIdx = 0;
     this.selectedModelIdx = 0;
     this.selectedIntensityIdx = 2;
+    this.scrollBtn = 0;
   }
 
   private currentList(): string[] {
@@ -101,37 +103,33 @@ export class ModelSelectScreen extends Screen {
     const list = this.currentList();
     const idx = this.currentIdx();
 
-    const title = "Model Selection";
+    buf.centerText(2, "Model Selection", { fg: C.accent, bold: true });
+
     let subtitle = "";
     if (this.level === 0) subtitle = "Select a provider";
     else if (this.level === 1) subtitle = this.providers[this.selectedProviderIdx] ?? "";
     else subtitle = `Model: ${this.currentModelName()} - Select Intensity`;
+    buf.centerText(3, subtitle, { fg: C.white });
 
-    const contentLines: { text: string; selected: boolean }[] = list.map((name, i) => ({
-      text: name,
-      selected: i === idx,
-    }));
+    const listTop = 5;
+    const btnH = 3;
+    const btnGap = 0;
+    const stride = btnH + btnGap;
+    const hintRow = h - 1;
+    const maxVisible = Math.max(1, Math.floor((hintRow - listTop) / stride));
 
-    const totalLines = 1 + 1 + 1 + contentLines.length;
-    const top = centerVertically(h, totalLines);
+    if (idx < this.scrollBtn) this.scrollBtn = idx;
+    if (idx >= this.scrollBtn + maxVisible) this.scrollBtn = idx - maxVisible + 1;
+    if (this.scrollBtn < 0) this.scrollBtn = 0;
 
-    let y = top;
-    buf.centerText(y, title, { fg: C.accent, bold: true });
-    y += 1;
-    buf.centerText(y, subtitle, { fg: C.assistant });
-    y += 1;
-
-    for (const line of contentLines) {
-      const prefix = line.selected ? "▸ " : "  ";
-      const text = prefix + line.text;
-      buf.centerText(y, text, line.selected ? { fg: C.accent, bg: C.highlightBg } : { fg: C.assistant });
-      y += 1;
+    let y = listTop;
+    for (let i = this.scrollBtn; i < list.length; i++) {
+      if (y + btnH > hintRow) break;
+      drawTabButton(buf, 1, y, w - 2, list[i], i === idx, "left");
+      y += stride;
     }
 
-    const hintY = y + 1;
-    if (hintY < h) {
-      buf.centerText(hintY, "↑/↓ navigate  ·  Enter confirm  ·  Esc back", { fg: C.dim });
-    }
+    buf.centerText(hintRow, "↑/↓ select  ·  Enter confirm  ·  Esc back", { fg: C.dim });
   }
 
   private currentModelName(): string {
