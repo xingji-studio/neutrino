@@ -94,6 +94,11 @@ export interface ChatMessage {
 
 export type SessionMessage = ChatMessage | ToolMessage;
 
+export interface TokenUsage {
+  prompt: number;
+  completion: number;
+}
+
 export interface SessionData {
   id: string;
   created_at: string;
@@ -104,6 +109,7 @@ export interface SessionData {
   cwd: string;
   title: string;
   messages: SessionMessage[];
+  tokens?: TokenUsage;
 }
 
 export function ensureDirs(): void {
@@ -163,6 +169,7 @@ export function saveSession(
   intensity: string,
   cwd?: string,
   sessionId?: string,
+  tokens?: TokenUsage,
 ): string {
   ensureDirs();
   const now = new Date();
@@ -188,6 +195,7 @@ export function saveSession(
     cwd: cwd ?? process.cwd(),
     title,
     messages,
+    tokens,
   };
 
   const filePath = path.join(SESSION_DIR, `${id}.json`);

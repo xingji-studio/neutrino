@@ -7,6 +7,12 @@ export interface ToolCall {
   arguments: string;
 }
 
+export interface UsageInfo {
+  prompt: number;
+  completion: number;
+  total: number;
+}
+
 interface ApiMessage {
   role: string;
   content?: string;
@@ -22,6 +28,7 @@ export class LLMClient {
   temperature: number;
   top_p: number;
   toolCalls: ToolCall[] = [];
+  usage: UsageInfo | null = null;
 
   constructor(model: ModelInfo, provider: string, intensity: string) {
     this.model = model;
@@ -34,6 +41,7 @@ export class LLMClient {
 
   async *streamTurn(messages: ApiMessage[], tools?: ToolDefinition[]): AsyncGenerator<string> {
     this.toolCalls = [];
+    this.usage = null;
     try {
       if (this.provider === "Anthropic") {
         yield* this.streamAnthropic(messages);
@@ -57,6 +65,7 @@ export class LLMClient {
       temperature: this.temperature,
       top_p: this.top_p,
       stream: true,
+      stream_options: { include_usage: true },
     };
     if (tools && tools.length) payload.tools = tools;
 
@@ -103,6 +112,14 @@ export class LLMClient {
           chunk = JSON.parse(data);
         } catch {
           continue;
+        }
+        const usage = (chunk as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } }).usage;
+        if (usage) {
+          this.usage = {
+            prompt: usage.prompt_tokens ?? 0,
+            completion: usage.completion_tokens ?? 0,
+            total: usage.total_tokens ?? (usage.prompt_tokens ?? 0) + (usage.completion_tokens ?? 0),
+          };
         }
         const choice = (chunk as { choices?: Array<{ delta?: Record<string, unknown> }> }).choices?.[0];
         const delta = choice?.delta ?? {};

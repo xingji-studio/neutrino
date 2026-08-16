@@ -7,6 +7,7 @@ import {
   saveSession,
   type ModelInfo,
   type SessionMessage,
+  type TokenUsage,
 } from "../config.js";
 import { drawHeader } from "../header.js";
 import { drawInputBox, wrapText } from "../ui.js";
@@ -60,10 +61,14 @@ export class ChatScreen extends Screen {
   loadedProvider: string | null = null;
   loadedModel: string | null = null;
   loadedIntensity: string | null = null;
+  loadedTokens: TokenUsage | null = null;
 
   modelProvider = "DeepSeek";
   model: ModelInfo = { name: "deepseek-chat", url: "https://api.deepseek.com/v1", api_key: "", supports_streaming: true };
   intensity = "High";
+
+  private tokens: TokenUsage = { prompt: 0, completion: 0 };
+  private showInfo = false;
 
   private messages: Msg[] = [];
   private streamingContent: string | null = null;
@@ -95,6 +100,9 @@ export class ChatScreen extends Screen {
       supports_streaming: st.selectedModelStreaming,
     };
     this.intensity = this.loadedIntensity ?? st.selectedIntensity;
+    if (this.loadedTokens) {
+      this.tokens = { prompt: this.loadedTokens.prompt, completion: this.loadedTokens.completion };
+    }
     this.messages.push({
       role: "system",
       content: `Model: ${this.modelProvider}/${this.model.name} | Intensity: ${this.intensity}`,
@@ -110,6 +118,11 @@ export class ChatScreen extends Screen {
   }
 
   onKey(key: Key): void {
+    if (this.showInfo) {
+      this.showInfo = false;
+      this.app.render();
+      if (key.name === "escape") return;
+    }
     if (key.name === "escape") {
       const now = Date.now();
       if (now - this.lastEscTime < 400) {
@@ -214,6 +227,18 @@ export class ChatScreen extends Screen {
   }
 
   onMouse(ev: MouseEvent): void {
+    if (ev.type === "click") {
+      if (ev.y === 0 && ev.x >= this.app.width - 3) {
+        this.showInfo = !this.showInfo;
+        this.app.render();
+        return;
+      }
+      if (this.showInfo) {
+        this.showInfo = false;
+        this.app.render();
+      }
+      return;
+    }
     if (ev.type === "wheel") {
       if (ev.dir === -1) {
         this.followBottom = false;
@@ -303,6 +328,13 @@ export class ChatScreen extends Screen {
           this.app.render();
         }
 
+        if (client.usage) {
+          this.tokens.prompt += client.usage.prompt;
+          this.tokens.completion += client.usage.completion;
+        } else {
+          this.tokens.completion += Math.max(1, Math.ceil(content.length / 4));
+        }
+
         if (token !== this.turnToken) {
           if (content) this.messages.push({ role: "assistant", content });
           this.streamingContent = null;
@@ -381,6 +413,7 @@ export class ChatScreen extends Screen {
         this.intensity,
         process.cwd(),
         this.sessionId ?? undefined,
+        this.tokens,
       );
     } catch {
       // ignore save errors
@@ -472,5 +505,35 @@ export class ChatScreen extends Screen {
     const pathAvail = Math.max(0, hintX - 2);
     buf.writeText(1, hintY, ellipsize(process.cwd(), pathAvail), { fg: C.dim });
     buf.writeText(hintX, hintY, hints, { fg: C.dim });
+
+    this.renderInfoOverlay(buf);
+  }
+
+  private renderInfoOverlay(buf: Buffer): void {
+    const w = buf.width;
+    buf.set(w - 2, 0, "ⓘ", { fg: C.accent, bg: C.highlightBg, bold: true });
+    if (!this.showInfo) return;
+
+    const total = this.tokens.prompt + this.tokens.completion;
+    const lines = [
+      "Tokens",
+      `Prompt: ${this.tokens.prompt}`,
+      `Completion: ${this.tokens.completion}`,
+      `Total: ${total}`,
+    ];
+    let contentW = 8;
+    for (const l of lines) contentW = Math.max(contentW, displayWidth(l));
+    let boxW = contentW + 4;
+    if (boxW > w - 2) boxW = Math.max(6, w - 2);
+    const boxX = w - 1 - boxW;
+    const boxY = 1;
+    const boxH = lines.length + 2;
+
+    buf.fillRect(boxX, boxY, boxW, boxH, { bg: C.black });
+    buf.drawBox(boxX, boxY, boxW, boxH, { fg: C.accent });
+    for (let i = 0; i < lines.length; i++) {
+      const style = i === 0 ? { fg: C.accent, bg: C.black, bold: true } : { fg: C.assistant, bg: C.black };
+      buf.writeText(boxX + 2, boxY + 1 + i, lines[i].slice(0, boxW - 4), style);
+    }
   }
 }
