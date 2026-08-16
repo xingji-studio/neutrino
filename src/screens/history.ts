@@ -61,10 +61,10 @@ export class HistoryScreen extends Screen {
     const w = buf.width;
     const h = buf.height;
 
-    buf.centerText(1, "History", { fg: C.accent, bold: true });
-    buf.centerText(2, "Select a session to load", { fg: C.dim });
+    buf.centerText(2, "History", { fg: C.accent, bold: true });
+    buf.centerText(3, "Select a session to load", { fg: C.dim });
 
-    const listTop = 4;
+    const listTop = 5;
     const listBottom = h - 2;
     const viewH = Math.max(1, listBottom - listTop);
 
