@@ -1,0 +1,34 @@
+{
+  "name": "neutrino",
+  "version": "0.1.0",
+  "description": "XINGJI Neutrino - a CLI coding agent in the terminal.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "neutrino": "dist/bin.js"
+  },
+  "main": "dist/app.js",
+  "files": [
+    "dist",
+    "assets"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "cli",
+    "agent",
+    "ai",
+    "terminal",
+    "llm",
+    "coding"
+  ],
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}

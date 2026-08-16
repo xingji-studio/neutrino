@@ -1,0 +1,21 @@
+export interface AppState {
+  selectedProvider: string;
+  selectedModelName: string;
+  selectedModelUrl: string;
+  selectedModelApiKey: string;
+  selectedModelStreaming: boolean;
+  selectedIntensity: string;
+  isThinking: boolean;
+}
+
+export function defaultState(): AppState {
+  return {
+    selectedProvider: "DeepSeek",
+    selectedModelName: "deepseek-chat",
+    selectedModelUrl: "https://api.deepseek.com/v1",
+    selectedModelApiKey: "",
+    selectedModelStreaming: true,
+    selectedIntensity: "High",
+    isThinking: false,
+  };
+}
