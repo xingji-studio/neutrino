@@ -2,23 +2,38 @@ import type { Buffer } from "../terminal/buffer.js";
 import { Screen } from "../terminal/screen.js";
 import type { Key, MouseEvent } from "../terminal/input.js";
 import { C } from "../colors.js";
-import { deleteSession, listSessions, loadSession, type SessionMeta } from "../config.js";
 import { drawHeader } from "../header.js";
+import { truncateByWidth } from "../width.js";
+import {
+  listAgentSessions,
+  loadAgentMessages,
+  type AgentId,
+  type AgentSessionMeta,
+} from "../agents.js";
+import { AgentConversationScreen } from "./agentConversation.js";
 
-export class HistoryScreen extends Screen {
-  private sessions: SessionMeta[] = [];
+export class AgentHistoryScreen extends Screen {
+  private agent: AgentId;
+  private label: string;
+  private sessions: AgentSessionMeta[] = [];
   private selectedIdx = 0;
   private scrollTop = 0;
 
+  constructor(agent: AgentId, label: string) {
+    super();
+    this.agent = agent;
+    this.label = label;
+  }
+
   onActivate(): void {
-    this.sessions = listSessions();
-    this.selectedIdx = this.sessions.length > 0 ? 1 : 0;
+    this.sessions = listAgentSessions(this.agent);
+    this.selectedIdx = 0;
     this.scrollTop = 0;
   }
 
   private move(delta: number): void {
-    const count = this.sessions.length + 1;
-    this.selectedIdx = (this.selectedIdx + delta + count) % count;
+    if (this.sessions.length === 0) return;
+    this.selectedIdx = (this.selectedIdx + delta + this.sessions.length) % this.sessions.length;
     this.app.render();
   }
 
@@ -26,7 +41,6 @@ export class HistoryScreen extends Screen {
     if (key.name === "up") this.move(-1);
     else if (key.name === "down") this.move(1);
     else if (key.name === "enter" || key.name === "return") this.loadSelected();
-    else if (key.name === "delete") this.deleteSelected();
     else if (key.name === "escape") this.app.popScreen();
   }
 
@@ -38,27 +52,10 @@ export class HistoryScreen extends Screen {
   }
 
   private loadSelected(): void {
-    if (this.selectedIdx === 0) {
-      this.app.openAgentSelect();
-      return;
-    }
-    const session = this.sessions[this.selectedIdx - 1];
-    if (!session) return;
-    const data = loadSession(session.id);
-    if (data) {
-      this.app.popScreen();
-      this.app.loadSession(data);
-    }
-  }
-
-  private deleteSelected(): void {
-    if (this.selectedIdx === 0) return;
-    const session = this.sessions[this.selectedIdx - 1];
-    if (!session) return;
-    deleteSession(session.id);
-    this.sessions = listSessions();
-    this.selectedIdx = Math.min(this.selectedIdx, this.sessions.length);
-    this.app.render();
+    if (this.selectedIdx < 0 || this.selectedIdx >= this.sessions.length) return;
+    const s = this.sessions[this.selectedIdx];
+    const messages = loadAgentMessages(this.agent, s.id);
+    this.app.pushScreen(new AgentConversationScreen(`${this.label} · ${s.title || s.id}`, messages));
   }
 
   render(buf: Buffer): void {
@@ -66,26 +63,26 @@ export class HistoryScreen extends Screen {
     const w = buf.width;
     const h = buf.height;
 
-    buf.centerText(2, "History", { fg: C.accent, bold: true });
-    buf.centerText(3, "Select a session to load", { fg: C.dim });
+    buf.centerText(2, this.label, { fg: C.accent, bold: true });
+    buf.centerText(3, "Select a session to view", { fg: C.dim });
 
     const listTop = 5;
     const listBottom = h - 2;
     const viewH = Math.max(1, listBottom - listTop);
 
+    if (this.sessions.length === 0) {
+      buf.centerText(listTop + 1, "No sessions yet", { fg: C.dim });
+      buf.centerText(listBottom, "Esc back", { fg: C.dim });
+      return;
+    }
+
     const rows: string[] = [];
     const itemBounds: { start: number; end: number }[] = [];
-
-    rows.push("Open other Agent's history");
-    itemBounds.push({ start: 0, end: 1 });
-    rows.push("");
-
     for (const s of this.sessions) {
       const start = rows.length;
-      const created = (s.created_at || "").slice(0, 19);
-      rows.push(`${created} | ${s.provider}/${s.model} (${s.intensity}) | ${s.message_count} msgs`);
-      if (s.title) rows.push(`    ${s.title}`);
-      if (s.cwd) rows.push(`    ${s.cwd}`);
+      const created = (s.updated_at || s.created_at || "").slice(0, 19);
+      rows.push(`${created} | ${s.title || s.id}`);
+      if (s.model) rows.push(`    ${s.model}`);
       itemBounds.push({ start, end: rows.length });
     }
 
@@ -104,16 +101,10 @@ export class HistoryScreen extends Screen {
       if (ri < 0 || ri >= rows.length) break;
       const isSelected = ri >= selected.start && ri < selected.end;
       const isSelectedFirst = ri === selected.start;
-      const row = rows[ri];
-      const prefix = isSelectedFirst ? "▸ " : "  ";
-      const style = isSelected ? { fg: C.accent, bg: C.highlightBg } : { fg: C.assistant };
-      buf.writeText(0, y, (prefix + row).slice(0, w), style);
+      const text = (isSelectedFirst ? "▸ " : "  ") + rows[ri];
+      buf.writeText(0, y, truncateByWidth(text, w), isSelected ? { fg: C.accent, bg: C.highlightBg } : { fg: C.assistant });
     }
 
-    if (this.sessions.length === 0) {
-      buf.centerText(listTop + 1, "No sessions yet", { fg: C.dim });
-    }
-
-    buf.centerText(listBottom, "↑/↓ select  ·  Enter load  ·  Delete delete  ·  Esc back", { fg: C.dim });
+    buf.centerText(listBottom, "↑/↓ select  ·  Enter view  ·  Esc back", { fg: C.dim });
   }
 }

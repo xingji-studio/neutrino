@@ -1,9 +1,9 @@
 {
-  "name": "neutrino",
+  "name": "@xingjisoft/neutrino",
   "version": "0.1.0",
   "description": "XINGJI Neutrino - a CLI coding agent in the terminal.",
   "type": "module",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "bin": {
     "neutrino": "dist/bin.js"
   },

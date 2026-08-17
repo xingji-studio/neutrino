@@ -7,6 +7,7 @@ import { defaultState, type AppState } from "./state.js";
 import { loadConfig, saveConfig, type ModelInfo, type SessionData } from "./config.js";
 import { ChatScreen } from "./screens/chat.js";
 import { HistoryScreen } from "./screens/history.js";
+import { AgentSelectScreen } from "./screens/agentSelect.js";
 import { ModelSelectScreen } from "./screens/modelSelect.js";
 import { SettingsScreen } from "./screens/settings.js";
 import { StartScreen } from "./screens/start.js";
@@ -156,6 +157,11 @@ export class App {
   openHistory(): void {
     if (this.screens.some((s) => s instanceof HistoryScreen)) return;
     this.pushScreen(new HistoryScreen());
+  }
+
+  openAgentSelect(): void {
+    if (this.screens.some((s) => s instanceof AgentSelectScreen)) return;
+    this.pushScreen(new AgentSelectScreen());
   }
 
   openSettings(): void {
