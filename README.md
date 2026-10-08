@@ -107,10 +107,22 @@ The agent can call the following tools during a conversation:
 
 ```sh
 npm run build    # compile TypeScript to dist/
+npm test         # build, then run every test below
+```
+
+Individual tests:
+
+```sh
 node scripts/test-mouse.mjs      # verify mouse escape-sequence parsing
 node scripts/test-cursor.mjs     # verify click-to-position-cursor math
 node scripts/test-selection.mjs  # verify selection highlighting & text extraction
+node scripts/test-render.mjs     # fuzz the diff renderer + render the chat screen,
+                                 # asserting no stale/residual cells are left behind
 ```
+
+### Rendering model
+
+The screen is drawn into a `Buffer` of cells which is diffed against the previous frame, so only changed rows are emitted. Rows are erased to the end of the line before being repainted, and the buffer keeps double-width glyphs consistent (writing over one half of a wide character blanks the other half). Together these guarantee that a repainted row can never leave a stale cell behind.
 
 ## License
 

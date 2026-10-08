@@ -74,11 +74,16 @@ export class Renderer {
   }
 
   private renderRow(y: number, row: import("./buffer.js").Cell[]): string {
-    let s = `\x1b[${y + 1};1H`;
+    // Move to the row, reset attributes and erase the whole line first. The
+    // erase is belt-and-braces: every cell is written below anyway, but this
+    // guarantees no stale glyph can survive even if a row somehow ends up
+    // shorter than what was on screen before (this is what produced the
+    // "residual line above the input box" artefact).
+    let s = `\x1b[${y + 1};1H\x1b[0m\x1b[K`;
     let lastKey = "";
     for (let x = 0; x < row.length; x++) {
       const cell = row[x];
-      if (cell.ch === "") continue;
+      if (cell.ch === "") continue; // tail of the wide glyph to the left
       const sk = styleKey(cell.style);
       if (sk !== lastKey) {
         s += sgr(cell.style);

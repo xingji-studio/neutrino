@@ -12,6 +12,10 @@ function normalize(style: Style): Style {
   return style.bg ? style : { ...style, bg: C.black };
 }
 
+function cellWidth(ch: string): number {
+  return ch ? wcwidth(ch.codePointAt(0) ?? 0) : 0;
+}
+
 export class Buffer {
   width: number;
   height: number;
@@ -25,10 +29,63 @@ export class Buffer {
     );
   }
 
+  /**
+   * Write a single cell, keeping the wide-glyph invariant intact. The renderer
+   * (and the selection logic) rely on the rule that a `""` cell is *always* the
+   * right half of a double-width glyph at `x - 1`. If the invariant is broken an
+   * orphan tail is left behind: the renderer skips it, so that column is never
+   * repainted and a stale glyph from the previous frame stays on screen (the
+   * "residual line" bug). To preserve it we blank the *other* half whenever we
+   * overwrite one half of a wide glyph.
+   */
+  private overwriteCell(x: number, y: number, ch: string, style: Style): void {
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return;
+    const row = this.cells[y];
+    const prev = row[x];
+    if (prev.ch === "" && x > 0) {
+      // We're overwriting a wide glyph's tail: blank its head.
+      row[x - 1] = { ch: " ", style: row[x - 1].style };
+    } else if (cellWidth(prev.ch) === 2 && x + 1 < this.width) {
+      // We're overwriting a wide glyph's head: blank its tail.
+      row[x + 1] = { ch: " ", style: row[x + 1].style };
+    }
+    row[x] = { ch, style: normalize(style) };
+  }
+
+  /**
+   * Mark `x` as the tail (`""`) of the wide glyph at `x - 1`. Unlike
+   * `overwriteCell` this never blanks the cell to the left, because that cell is
+   * the glyph we are currently writing.
+   */
+  private writeTail(x: number, y: number, style: Style): void {
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return;
+    const row = this.cells[y];
+    const prev = row[x];
+    if (cellWidth(prev.ch) === 2 && x + 1 < this.width) {
+      row[x + 1] = { ch: " ", style: row[x + 1].style };
+    }
+    row[x] = { ch: "", style: normalize(style) };
+  }
+
+  private writeChar(x: number, y: number, ch: string, style: Style): void {
+    if (cellWidth(ch) === 2) {
+      if (x + 1 >= this.width) {
+        // No room for the tail: degrade to a space so the line never overflows
+        // (which would make the terminal wrap and scroll).
+        this.overwriteCell(x, y, " ", style);
+        return;
+      }
+      this.overwriteCell(x, y, ch, style);
+      this.writeTail(x + 1, y, style);
+      return;
+    }
+    this.overwriteCell(x, y, ch, style);
+  }
+
   set(x: number, y: number, ch: string, style: Style = EMPTY_STYLE): void {
     if (ch === "\r" || ch === "\n") return;
-    if (y < 0 || y >= this.height || x < 0 || x >= this.width) return;
-    this.cells[y][x] = { ch, style: normalize(style) };
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return;
+    this.writeChar(x, y, ch, style);
   }
 
   writeText(x: number, y: number, text: string, style: Style = EMPTY_STYLE): void {
@@ -37,8 +94,10 @@ export class Buffer {
     for (const ch of text) {
       const w = wcwidth(ch.codePointAt(0) ?? 0);
       if (w === 0) {
-        if (col - 1 >= x && col - 1 >= 0 && col - 1 < this.width) {
-          this.cells[y][col - 1].ch += ch;
+        // Combining mark: attach it to the glyph immediately to the left.
+        const px = col - 1;
+        if (px >= 0 && px < this.width && this.cells[y][px].ch !== "") {
+          this.cells[y][px].ch += ch;
         }
         continue;
       }
@@ -47,10 +106,7 @@ export class Buffer {
         col += w;
         continue;
       }
-      this.cells[y][col] = { ch, style: normalize(style) };
-      if (w === 2 && col + 1 < this.width) {
-        this.cells[y][col + 1] = { ch: "", style: normalize(style) };
-      }
+      this.writeChar(col, y, ch, style);
       col += w;
     }
   }
