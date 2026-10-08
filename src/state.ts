@@ -8,6 +8,8 @@ export interface AppState {
   isThinking: boolean;
   /** Blink phase for the "thinking" indicator in the top status bar. */
   blinkOn: boolean;
+  /** Blink phase for the text cursors (true = lit, false = hidden). */
+  cursorOn: boolean;
 }
 
 export function defaultState(): AppState {
@@ -20,5 +22,6 @@ export function defaultState(): AppState {
     selectedIntensity: "High",
     isThinking: false,
     blinkOn: false,
+    cursorOn: true,
   };
 }

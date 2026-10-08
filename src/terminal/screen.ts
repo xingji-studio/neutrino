@@ -11,6 +11,12 @@ export abstract class Screen {
 
   abstract render(buf: Buffer): void;
 
+  /** Whether this screen currently shows a blinking text cursor. Used by the
+   *  app to run (or stop) the cursor blink timer. */
+  showsCursor(): boolean {
+    return false;
+  }
+
   onActivate(): void {}
 
   onDeactivate(): void {}

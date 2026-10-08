@@ -113,6 +113,11 @@ export class ChatScreen extends Screen {
     }
   }
 
+  showsCursor(): boolean {
+    // The chat input is always focused; a cursor is drawn when it holds text.
+    return this.inputValue.length > 0;
+  }
+
   onKey(key: Key): void {
     if (this.showInfo) {
       this.showInfo = false;
@@ -510,6 +515,7 @@ export class ChatScreen extends Screen {
     drawInputBox(buf, 1, inputY, inW, this.inputValue, this.cursor, {
       active: true,
       dimmed: this.busy,
+      cursorOn: this.app.state.cursorOn,
       placeholder: "Type a message...",
     });
 

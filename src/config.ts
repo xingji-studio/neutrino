@@ -281,3 +281,22 @@ export function loadPrompt(): string {
     "You are Neutrino, a helpful AI coding assistant."
   );
 }
+
+let cachedVersion: string | null = null;
+
+/**
+ * Read the CLI version straight from the package's `package.json` so the
+ * displayed version can never drift out of sync with the published package.
+ * The result is cached after the first successful read.
+ */
+export function loadVersion(): string {
+  if (cachedVersion !== null) return cachedVersion;
+  try {
+    const raw = fs.readFileSync(path.join(PKG_ROOT, "package.json"), "utf-8");
+    const pkg = JSON.parse(raw) as { version?: unknown };
+    cachedVersion = typeof pkg.version === "string" ? pkg.version : "";
+  } catch {
+    cachedVersion = "";
+  }
+  return cachedVersion;
+}

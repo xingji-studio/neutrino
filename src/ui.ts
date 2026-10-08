@@ -70,6 +70,9 @@ export interface InputBoxOptions {
   active?: boolean;
   dimmed?: boolean;
   placeholder?: string;
+  /** Blink phase of the text cursor. When false the cursor is hidden (the
+   *  character underneath is shown normally). */
+  cursorOn?: boolean;
 }
 
 export interface InputWindow {
@@ -170,6 +173,7 @@ export function drawInputBox(
   const active = opts.active ?? true;
   const dimmed = opts.dimmed ?? false;
   const placeholder = opts.placeholder ?? "";
+  const cursorOn = opts.cursorOn ?? true;
   const h = 3;
   const innerX = x + 2;
   const innerW = w - 4;
@@ -190,23 +194,51 @@ export function drawInputBox(
 
   const win = computeInputWindow(value, cursorPos, innerW);
   const chars = Array.from(value);
+  // Codepoint index of the cursor (cursorPos is a UTF-16 offset).
+  const cursorCp = Math.min(Array.from(value.slice(0, cursorPos)).length, chars.length);
   const visible = chars.slice(win.startCp, win.startCp + win.visibleCount).join("");
   buf.writeText(innerX, innerY, visible, textStyle);
 
-  const cursorScreenCol = cursorColAt(value, cursorPos, win);
-  if (active && cursorScreenCol >= 0 && cursorScreenCol < innerW) {
-    buf.set(innerX + cursorScreenCol, innerY, " ", { fg: C.black, bg: C.accent });
+  // Blinking block cursor. While it is "on" the character underneath is drawn
+  // inside the block in the opposite colour so the text stays legible instead
+  // of being hidden by the cursor.
+  const cursorScreenCol = cursorColAt(chars, cursorCp, win);
+  if (active && cursorOn && cursorScreenCol >= 0 && cursorScreenCol < innerW) {
+    drawBlockCursor(buf, innerX + cursorScreenCol, innerY, chars, cursorCp, cursorScreenCol, innerW);
   }
 }
 
-function cursorColAt(value: string, cursorPos: number, win: InputWindow): number {
-  const chars = Array.from(value);
-  const cursorCp = Math.min(Array.from(value.slice(0, cursorPos)).length, chars.length);
+function cursorColAt(chars: string[], cursorCp: number, win: InputWindow): number {
   let col = win.prefixW;
   for (let i = win.startCp; i < cursorCp; i++) {
     col += wcwidth(chars[i].codePointAt(0) ?? 0);
   }
   return col - win.prefixW;
+}
+
+/**
+ * Draw a single block cursor cell. The glyph under the cursor (the character
+ * immediately to its right) is rendered in the opposite colour — a dark glyph
+ * on the accent block — so it remains readable. Past the end of the text, or
+ * when the glyph would not fit, a solid block is drawn instead.
+ */
+function drawBlockCursor(
+  buf: Buffer,
+  x: number,
+  y: number,
+  chars: string[],
+  cursorCp: number,
+  col: number,
+  innerW: number,
+): void {
+  const cursorStyle: Style = { fg: C.black, bg: C.accent };
+  const ch = cursorCp < chars.length ? chars[cursorCp] : "";
+  const cw = ch ? wcwidth(ch.codePointAt(0) ?? 0) : 0;
+  if (ch && ch !== " " && cw >= 1 && col + cw <= innerW) {
+    buf.writeText(x, y, ch, cursorStyle);
+  } else {
+    buf.set(x, y, " ", cursorStyle);
+  }
 }
 
 function textStylePlaceholder(active: boolean): Style {

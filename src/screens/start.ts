@@ -2,7 +2,7 @@ import type { Buffer } from "../terminal/buffer.js";
 import { Screen } from "../terminal/screen.js";
 import type { Key, MouseEvent } from "../terminal/input.js";
 import { C } from "../colors.js";
-import { loadLogo } from "../config.js";
+import { loadLogo, loadVersion } from "../config.js";
 import { drawHeader } from "../header.js";
 import {
   centerVertically,
@@ -29,6 +29,10 @@ interface Layout {
   tabs: { x: number; w: number }[];
 }
 
+function isLowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
+}
+
 export class StartScreen extends Screen {
   private inputValue = "";
   private cursor = 0;
@@ -37,12 +41,29 @@ export class StartScreen extends Screen {
   private lastHoverX = -1;
   private lastHoverY = -1;
 
+  showsCursor(): boolean {
+    // The input cursor is only drawn for the focused, non-empty input box.
+    return this.focusIdx === 0 && this.inputValue.length > 0;
+  }
+
   onKey(key: Key): void {
-    if (key.name === "left" || key.name === "up") {
+    // When the input box is focused and holds text, left/right move the text
+    // cursor instead of switching between the input box and the tabs. When the
+    // input box is empty (or another control is focused), left/right switch.
+    // Up/down always switch.
+    if (key.name === "left" || key.name === "right") {
+      if (this.focusIdx === 0 && this.inputValue.length > 0) {
+        this.moveCursor(key.name === "left" ? -1 : 1);
+      } else {
+        this.move(key.name === "left" ? -1 : 1);
+      }
+      return;
+    }
+    if (key.name === "up") {
       this.move(-1);
       return;
     }
-    if (key.name === "right" || key.name === "down") {
+    if (key.name === "down") {
       this.move(1);
       return;
     }
@@ -186,6 +207,23 @@ export class StartScreen extends Screen {
     this.app.render();
   }
 
+  /** Move the text cursor by one character, staying within bounds and on
+   *  surrogate-pair boundaries. */
+  private moveCursor(delta: -1 | 1): void {
+    const len = this.inputValue.length;
+    let next = Math.max(0, Math.min(len, this.cursor + delta));
+    if (delta === 1) {
+      if (next < len && isLowSurrogate(this.inputValue.charCodeAt(next))) {
+        next = Math.min(len, next + 1);
+      }
+    } else if (next > 0 && isLowSurrogate(this.inputValue.charCodeAt(next))) {
+      next = Math.max(0, next - 1);
+    }
+    if (next === this.cursor) return;
+    this.cursor = next;
+    this.app.render();
+  }
+
   private enterTab(): void {
     if (this.focusIdx === 1) this.app.openModelConfig();
     else if (this.focusIdx === 2) this.app.openHistory();
@@ -216,6 +254,7 @@ export class StartScreen extends Screen {
 
     drawInputBox(buf, inputX, y, inputW, this.inputValue, this.cursor, {
       active: this.focusIdx === 0,
+      cursorOn: this.app.state.cursorOn,
       placeholder: "Type a message to start a new chat...",
     });
     y += INPUT_H + gap;
@@ -232,9 +271,25 @@ export class StartScreen extends Screen {
       tx += tw + tabGap;
     }
 
+    // The version label is pinned one row above the very bottom of the screen,
+    // leaving the last row blank. It is read from package.json at runtime so it
+    // can never drift out of sync with the published package version.
+    const version = loadVersion();
+    const versionY = h - 2;
+    const showVersion = version.length > 0 && versionY >= 1;
+
+    // The hint sits right below the tabs, but is dropped when it would land on
+    // or below the reserved version row so the two never collide.
     const hintY = y + TAB_H + 1;
-    if (hintY < h) {
-      drawHint(buf, hintY, "←/→ / ↑/↓ switch  ·  Enter confirm  ·  click to choose  ·  Ctrl+E model  ·  Ctrl+Q quit");
+    if (hintY < h && (!showVersion || hintY < versionY)) {
+      const nav = this.focusIdx === 0 && this.inputValue.length > 0
+        ? "←/→ move cursor  ·  ↑/↓ switch"
+        : "←/→ / ↑/↓ switch";
+      drawHint(buf, hintY, `${nav}  ·  Enter confirm  ·  click to choose  ·  Ctrl+E model  ·  Ctrl+Q quit`);
+    }
+
+    if (showVersion) {
+      buf.centerText(versionY, `v${version}`, { fg: C.dim });
     }
   }
 }

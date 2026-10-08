@@ -12,6 +12,8 @@ import { ModelSelectScreen } from "./screens/modelSelect.js";
 import { SettingsScreen } from "./screens/settings.js";
 import { StartScreen } from "./screens/start.js";
 
+const CURSOR_BLINK_MS = 530;
+
 export class App {
   state: AppState = defaultState();
   width: number;
@@ -23,6 +25,7 @@ export class App {
   private running = false;
   private sizeTimer: NodeJS.Timeout | null = null;
   private blinkTimer: NodeJS.Timeout | null = null;
+  private cursorTimer: NodeJS.Timeout | null = null;
   private resizeHandler = () => this.onResize();
 
   constructor() {
@@ -107,9 +110,32 @@ export class App {
       this.state.blinkOn = false;
     }
 
+    // The text cursor blinks whenever the top screen shows one. The timer is
+    // only kept alive while needed so idle screens don't repaint needlessly.
+    this.updateCursorBlink();
+
     const buf = new Buffer(this.width, this.height);
     this.top?.render(buf);
     this.renderer.render(buf);
+  }
+
+  private updateCursorBlink(): void {
+    const want = this.top?.showsCursor() ?? false;
+    if (want && !this.cursorTimer) {
+      this.cursorTimer = setInterval(() => {
+        this.state.cursorOn = !this.state.cursorOn;
+        this.render();
+      }, CURSOR_BLINK_MS);
+    } else if (!want && this.cursorTimer) {
+      clearInterval(this.cursorTimer);
+      this.cursorTimer = null;
+      this.state.cursorOn = true;
+    }
+  }
+
+  /** Reset the blink phase so the cursor is solid right after an interaction. */
+  private wakeCursor(): void {
+    this.state.cursorOn = true;
   }
 
   private handleEvent(ev: InputEvent): void {
@@ -119,12 +145,14 @@ export class App {
         this.quit();
         return;
       }
+      this.wakeCursor();
       if (k.ctrl && (k.name === "m" || k.name === "e")) {
         this.openModelConfig();
         return;
       }
       this.top?.onKey(k);
     } else {
+      if (ev.event.type === "click") this.wakeCursor();
       this.top?.onMouse(ev.event);
     }
   }
@@ -192,6 +220,10 @@ export class App {
     if (this.blinkTimer) {
       clearInterval(this.blinkTimer);
       this.blinkTimer = null;
+    }
+    if (this.cursorTimer) {
+      clearInterval(this.cursorTimer);
+      this.cursorTimer = null;
     }
     this.input.stop();
     this.renderer.dispose();
