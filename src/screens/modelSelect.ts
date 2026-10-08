@@ -1,10 +1,14 @@
 import type { Buffer } from "../terminal/buffer.js";
 import { Screen } from "../terminal/screen.js";
-import type { Key } from "../terminal/input.js";
+import type { Key, MouseEvent } from "../terminal/input.js";
 import { C } from "../colors.js";
 import { INTENSITY_LEVELS, getModelsByProvider, type ModelInfo } from "../config.js";
 import { drawHeader } from "../header.js";
-import { drawTabButton } from "../ui.js";
+import { drawHint, drawTabButton, inRect } from "../ui.js";
+
+const LIST_TOP = 5;
+const BTN_H = 3;
+const BTN_X = 1;
 
 export class ModelSelectScreen extends Screen {
   private level = 0;
@@ -14,6 +18,8 @@ export class ModelSelectScreen extends Screen {
   private selectedModelIdx = 0;
   private selectedIntensityIdx = 2;
   private scrollBtn = 0;
+  private lastHoverX = -1;
+  private lastHoverY = -1;
 
   onActivate(): void {
     const map = getModelsByProvider();
@@ -59,6 +65,7 @@ export class ModelSelectScreen extends Screen {
       if (this.providers.length === 0) return;
       this.level = 1;
       this.selectedModelIdx = 0;
+      this.scrollBtn = 0;
       this.app.render();
       return;
     }
@@ -66,6 +73,7 @@ export class ModelSelectScreen extends Screen {
       const models = this.modelMap[this.providers[this.selectedProviderIdx]] ?? [];
       if (models.length === 0) return;
       this.level = 2;
+      this.scrollBtn = 0;
       this.app.render();
       return;
     }
@@ -81,9 +89,58 @@ export class ModelSelectScreen extends Screen {
   private goBack(): void {
     if (this.level > 0) {
       this.level--;
+      this.scrollBtn = 0;
       this.app.render();
     } else {
       this.app.popScreen();
+    }
+  }
+
+  /** Map a terminal row to the list index rendered there, if any. */
+  private indexAtRow(y: number): number {
+    const list = this.currentList();
+    const h = this.app.height;
+    const hintRow = h - 1;
+    const maxVisible = Math.max(1, Math.floor((hintRow - LIST_TOP) / BTN_H));
+    const i = Math.floor((y - LIST_TOP) / BTN_H) + this.scrollBtn;
+    if (i < 0 || i >= list.length) return -1;
+    const visibleRow = LIST_TOP + (i - this.scrollBtn) * BTN_H;
+    if (visibleRow + BTN_H > hintRow) return -1;
+    return i;
+  }
+
+  onMouse(ev: MouseEvent): void {
+    if (ev.type === "move") {
+      if (ev.x === this.lastHoverX && ev.y === this.lastHoverY) return;
+      this.lastHoverX = ev.x;
+      this.lastHoverY = ev.y;
+      const list = this.currentList();
+      if (list.length === 0) return;
+      const i = this.indexAtRow(ev.y);
+      if (i >= 0 && i !== this.currentIdx()) {
+        this.setIdx(i);
+        this.app.render();
+      }
+      return;
+    }
+    if (ev.type === "wheel") {
+      this.move(ev.dir === -1 ? -1 : 1);
+      return;
+    }
+    if (ev.type === "click") {
+      if (ev.button === 2) {
+        this.goBack();
+        return;
+      }
+      if (ev.y < LIST_TOP || ev.y >= this.app.height - 1) return;
+      const i = this.indexAtRow(ev.y);
+      if (i < 0) return;
+      if (!inRect(ev.x, ev.y, { x: BTN_X, y: LIST_TOP + (i - this.scrollBtn) * BTN_H, w: this.app.width - 2, h: BTN_H })) {
+        return;
+      }
+      this.setIdx(i);
+      this.confirm();
+      return;
     }
   }
 
@@ -111,25 +168,24 @@ export class ModelSelectScreen extends Screen {
     else subtitle = `Model: ${this.currentModelName()} - Select Intensity`;
     buf.centerText(3, subtitle, { fg: C.white });
 
-    const listTop = 5;
-    const btnH = 3;
+    const btnH = BTN_H;
     const btnGap = 0;
     const stride = btnH + btnGap;
     const hintRow = h - 1;
-    const maxVisible = Math.max(1, Math.floor((hintRow - listTop) / stride));
+    const maxVisible = Math.max(1, Math.floor((hintRow - LIST_TOP) / stride));
 
     if (idx < this.scrollBtn) this.scrollBtn = idx;
     if (idx >= this.scrollBtn + maxVisible) this.scrollBtn = idx - maxVisible + 1;
     if (this.scrollBtn < 0) this.scrollBtn = 0;
 
-    let y = listTop;
+    let y = LIST_TOP;
     for (let i = this.scrollBtn; i < list.length; i++) {
       if (y + btnH > hintRow) break;
-      drawTabButton(buf, 1, y, w - 2, list[i], i === idx, "left");
+      drawTabButton(buf, BTN_X, y, w - 2, list[i], i === idx, "left");
       y += stride;
     }
 
-    buf.centerText(hintRow, "↑/↓ select  ·  Enter confirm  ·  Esc back", { fg: C.dim });
+    drawHint(buf, hintRow, "↑/↓ select  ·  Enter confirm  ·  click to choose  ·  right-click back  ·  Esc back");
   }
 
   private currentModelName(): string {

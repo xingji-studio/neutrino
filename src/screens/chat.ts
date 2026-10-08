@@ -10,7 +10,8 @@ import {
   type TokenUsage,
 } from "../config.js";
 import { drawHeader } from "../header.js";
-import { drawInputBox, wrapText } from "../ui.js";
+import { computeInputWindow, cursorFromColumn, drawInputBox, wrapText } from "../ui.js";
+import { drawSpans, renderMarkdownText, type Line, type Span } from "../markdown.js";
 import { ellipsize, displayWidth } from "../width.js";
 import { LLMClient } from "../llm/client.js";
 import { executeTool, getToolDefinitions } from "../llm/tools.js";
@@ -36,11 +37,6 @@ interface ToolMsg {
 type Msg =
   | { role: "user" | "assistant" | "system"; content: string }
   | ToolMsg;
-
-interface Line {
-  text: string;
-  style: Style;
-}
 
 const TOOLS = getToolDefinitions();
 
@@ -228,14 +224,32 @@ export class ChatScreen extends Screen {
 
   onMouse(ev: MouseEvent): void {
     if (ev.type === "click") {
-      if (ev.y === 0 && ev.x >= this.app.width - 3) {
-        this.showInfo = !this.showInfo;
+      if (ev.button === 2) return; // right click: no-op in chat
+      // header row: right corner toggles token stats, the rest opens model config
+      if (ev.y === 0) {
+        if (ev.x >= this.app.width - 3) {
+          this.showInfo = !this.showInfo;
+        } else {
+          this.app.openModelConfig();
+        }
         this.app.render();
         return;
       }
       if (this.showInfo) {
         this.showInfo = false;
         this.app.render();
+        return;
+      }
+      // click on the input box -> focus and position the cursor
+      const inputY = this.app.height - 4;
+      const inW = Math.max(12, this.app.width - 2);
+      if (ev.y === inputY + 1 && ev.x >= 3 && ev.x < 3 + (inW - 4)) {
+        const innerW = inW - 4;
+        const col = Math.min(innerW - 1, ev.x - 3);
+        const win = computeInputWindow(this.inputValue, this.cursor, innerW);
+        this.cursor = cursorFromColumn(this.inputValue, col, win);
+        this.app.render();
+        return;
       }
       return;
     }
@@ -422,31 +436,33 @@ export class ChatScreen extends Screen {
 
   private buildLines(width: number): Line[] {
     const lines: Line[] = [];
-    const push = (text: string, style: Style): void => {
-      for (const ln of wrapText(text, width)) lines.push({ text: ln, style });
+    const pushText = (text: string, style: Style): void => {
+      for (const ln of wrapText(text, width)) {
+        lines.push({ spans: [{ text: ln, style }] });
+      }
     };
     for (const m of this.messages) {
       if (m.role === "system") {
-        push(m.content, { fg: C.dim });
+        pushText(m.content, { fg: C.dim });
       } else if (m.role === "user") {
-        lines.push({ text: "You:", style: { fg: C.accent, bold: true } });
-        push(m.content, { fg: C.user });
-        lines.push({ text: "", style: {} });
+        lines.push({ spans: [{ text: "You:", style: { fg: C.accent, bold: true } }] });
+        lines.push(...renderMarkdownText(m.content, width, { fg: C.user }));
+        lines.push({ spans: [] });
       } else if (m.role === "assistant") {
-        lines.push({ text: "Neutrino:", style: { fg: C.accent, bold: true } });
-        push(m.content, { fg: C.assistant });
-        lines.push({ text: "", style: {} });
+        lines.push({ spans: [{ text: "Neutrino:", style: { fg: C.accent, bold: true } }] });
+        lines.push(...renderMarkdownText(m.content, width, { fg: C.assistant }));
+        lines.push({ spans: [] });
       } else if (m.role === "tool") {
-        lines.push({ text: `⚙ ${m.name}`, style: { fg: C.toolHeader, bold: true } });
+        lines.push({ spans: [{ text: `⚙ ${m.name}`, style: { fg: C.toolHeader, bold: true } }] });
         const argText = (m.arguments.command as string) ?? (m.arguments.path as string) ?? "";
-        if (argText) lines.push({ text: "  " + argText, style: { fg: C.dim } });
-        push(m.result || "(no output)", { fg: C.dim });
-        lines.push({ text: "", style: {} });
+        if (argText) lines.push({ spans: [{ text: "  " + argText, style: { fg: C.dim } }] });
+        pushText(m.result || "(no output)", { fg: C.dim });
+        lines.push({ spans: [] });
       }
     }
     if (this.streamingContent !== null) {
-      lines.push({ text: "Neutrino:", style: { fg: C.accent, bold: true } });
-      push(this.streamingContent, { fg: C.assistant });
+      lines.push({ spans: [{ text: "Neutrino:", style: { fg: C.accent, bold: true } }] });
+      lines.push(...renderMarkdownText(this.streamingContent, width, { fg: C.assistant }));
     }
     return lines;
   }
@@ -487,8 +503,7 @@ export class ChatScreen extends Screen {
     for (let y = logTop; y <= logBottom; y++) {
       const li = this.scrollTop + (y - logTop);
       if (li >= lines.length) break;
-      const line = lines[li];
-      buf.writeText(2, y, line.text.slice(0, w - 2), line.style);
+      drawSpans(buf, 2, y, lines[li].spans, Math.max(4, w - 4));
     }
 
     const inW = Math.max(12, w - 2);

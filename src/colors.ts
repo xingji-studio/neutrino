@@ -12,6 +12,7 @@ export const C = {
   white: [226, 232, 240] as RGB,
   green: [115, 218, 202] as RGB,
   red: [247, 118, 142] as RGB,
+  codeBg: [27, 35, 49] as RGB, // dark blue-grey used behind code blocks
 } as const;
 
 export interface Style {
@@ -20,6 +21,7 @@ export interface Style {
   bold?: boolean;
   dim?: boolean;
   inverse?: boolean;
+  italic?: boolean;
 }
 
 export const EMPTY_STYLE: Style = {};

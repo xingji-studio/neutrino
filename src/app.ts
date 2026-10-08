@@ -22,6 +22,7 @@ export class App {
   private input = new InputReader();
   private running = false;
   private sizeTimer: NodeJS.Timeout | null = null;
+  private blinkTimer: NodeJS.Timeout | null = null;
   private resizeHandler = () => this.onResize();
 
   constructor() {
@@ -91,6 +92,21 @@ export class App {
   }
 
   render(): void {
+    // Start/stop the "thinking" blink animation. While the agent is thinking,
+    // a timer toggles the blink phase and re-renders so the top status bar
+    // flashes to draw the user's attention.
+    if (this.state.isThinking && !this.blinkTimer) {
+      this.state.blinkOn = true;
+      this.blinkTimer = setInterval(() => {
+        this.state.blinkOn = !this.state.blinkOn;
+        this.render();
+      }, 500);
+    } else if (!this.state.isThinking && this.blinkTimer) {
+      clearInterval(this.blinkTimer);
+      this.blinkTimer = null;
+      this.state.blinkOn = false;
+    }
+
     const buf = new Buffer(this.width, this.height);
     this.top?.render(buf);
     this.renderer.render(buf);
@@ -173,6 +189,10 @@ export class App {
     if (this.running) return;
     this.running = true;
     if (this.sizeTimer) clearInterval(this.sizeTimer);
+    if (this.blinkTimer) {
+      clearInterval(this.blinkTimer);
+      this.blinkTimer = null;
+    }
     this.input.stop();
     this.renderer.dispose();
     process.exit(0);

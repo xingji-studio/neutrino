@@ -9,6 +9,7 @@ function styleKey(st: Style): string {
   if (st.bold) k += "B";
   if (st.dim) k += "d";
   if (st.inverse) k += "i";
+  if (st.italic) k += "I";
   return k;
 }
 
@@ -16,6 +17,7 @@ function sgr(st: Style): string {
   const codes: string[] = [];
   if (st.bold) codes.push("1");
   if (st.dim) codes.push("2");
+  if (st.italic) codes.push("3");
   if (st.inverse) codes.push("7");
   if (st.fg) codes.push(`38;2;${st.fg[0]};${st.fg[1]};${st.fg[2]}`);
   if (st.bg) codes.push(`48;2;${st.bg[0]};${st.bg[1]};${st.bg[2]}`);
@@ -41,11 +43,11 @@ export class Renderer {
   init(): void {
     this.write("\x1b[?1049h"); // alternate screen
     this.write("\x1b[?25l"); // hide cursor
-    this.write("\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?1015h"); // mouse tracking
+    this.write("\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?1015h"); // mouse tracking (incl. any-event for hover)
   }
 
   dispose(): void {
-    this.write("\x1b[?1000l\x1b[?1002l\x1b[?1006l\x1b[?1015l");
+    this.write("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l");
     this.write("\x1b[?25h");
     this.write("\x1b[?1049l");
     this.write("\x1b[0m");

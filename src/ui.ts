@@ -72,6 +72,92 @@ export interface InputBoxOptions {
   placeholder?: string;
 }
 
+export interface InputWindow {
+  /** Index (in UTF-16 code points) of the first visible character. */
+  startCp: number;
+  /** Display columns before the visible window. */
+  prefixW: number;
+  /** Number of visible characters. */
+  visibleCount: number;
+}
+
+/**
+ * Compute which part of the input value is visible inside the box, given the
+ * cursor position. Shared by `drawInputBox` and mouse click handling so the
+ * rendered text and click-to-position-cursor always agree.
+ */
+export function computeInputWindow(value: string, cursorPos: number, innerW: number): InputWindow {
+  const chars = Array.from(value);
+  const widths = chars.map((ch) => wcwidth(ch.codePointAt(0) ?? 0));
+  const cursorCp = Math.min(Array.from(value.slice(0, cursorPos)).length, chars.length);
+
+  let cursorCol = 0;
+  for (let i = 0; i < cursorCp; i++) cursorCol += widths[i];
+
+  let startCp = 0;
+  if (cursorCol >= innerW) {
+    let acc = 0;
+    startCp = cursorCp;
+    while (startCp > 0) {
+      const pw = widths[startCp - 1];
+      if (acc + pw <= innerW - 1) {
+        acc += pw;
+        startCp--;
+      } else {
+        break;
+      }
+    }
+  }
+
+  let prefixW = 0;
+  for (let i = 0; i < startCp; i++) prefixW += widths[i];
+
+  let visibleCount = 0;
+  let acc = 0;
+  for (let i = startCp; i < chars.length; i++) {
+    if (acc + widths[i] > innerW) break;
+    acc += widths[i];
+    visibleCount++;
+  }
+
+  return { startCp, prefixW, visibleCount };
+}
+
+/**
+ * Map a column inside the input box (0-based, relative to the inner area) to a
+ * cursor index in the full value.
+ */
+export function cursorFromColumn(value: string, col: number, win: InputWindow): number {
+  const chars = Array.from(value);
+  if (col <= 0) return win.startCp;
+  let acc = 0;
+  let i = win.startCp;
+  while (i < chars.length) {
+    const w = wcwidth(chars[i].codePointAt(0) ?? 0);
+    if (col < acc + w) return i;
+    acc += w;
+    i++;
+  }
+  return i;
+}
+
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export function inRect(px: number, py: number, r: Rect): boolean {
+  return px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h;
+}
+
+export function drawHint(buf: Buffer, y: number, text: string): void {
+  const max = buf.width;
+  const t = displayWidth(text) <= max ? text : truncateByWidth(text, max - 1) + "…";
+  buf.centerText(y, t, { fg: C.dim });
+}
+
 export function drawInputBox(
   buf: Buffer,
   x: number,
@@ -102,48 +188,25 @@ export function drawInputBox(
     return;
   }
 
+  const win = computeInputWindow(value, cursorPos, innerW);
   const chars = Array.from(value);
-  const widths = chars.map((ch) => wcwidth(ch.codePointAt(0) ?? 0));
-  const cursorCp = Math.min(Array.from(value.slice(0, cursorPos)).length, chars.length);
-
-  let cursorCol = 0;
-  for (let i = 0; i < cursorCp; i++) cursorCol += widths[i];
-
-  let startCp = 0;
-  if (cursorCol >= innerW) {
-    let acc = 0;
-    startCp = cursorCp;
-    while (startCp > 0) {
-      const pw = widths[startCp - 1];
-      if (acc + pw <= innerW - 1) {
-        acc += pw;
-        startCp--;
-      } else {
-        break;
-      }
-    }
-  }
-
-  let prefixW = 0;
-  for (let i = 0; i < startCp; i++) prefixW += widths[i];
-
-  let endCp = chars.length;
-  let acc = 0;
-  for (let i = startCp; i < chars.length; i++) {
-    if (acc + widths[i] > innerW) {
-      endCp = i;
-      break;
-    }
-    acc += widths[i];
-  }
-
-  const visible = chars.slice(startCp, endCp).join("");
+  const visible = chars.slice(win.startCp, win.startCp + win.visibleCount).join("");
   buf.writeText(innerX, innerY, visible, textStyle);
 
-  const cursorScreenCol = cursorCol - prefixW;
+  const cursorScreenCol = cursorColAt(value, cursorPos, win);
   if (active && cursorScreenCol >= 0 && cursorScreenCol < innerW) {
     buf.set(innerX + cursorScreenCol, innerY, " ", { fg: C.black, bg: C.accent });
   }
+}
+
+function cursorColAt(value: string, cursorPos: number, win: InputWindow): number {
+  const chars = Array.from(value);
+  const cursorCp = Math.min(Array.from(value.slice(0, cursorPos)).length, chars.length);
+  let col = win.prefixW;
+  for (let i = win.startCp; i < cursorCp; i++) {
+    col += wcwidth(chars[i].codePointAt(0) ?? 0);
+  }
+  return col - win.prefixW;
 }
 
 function textStylePlaceholder(active: boolean): Style {

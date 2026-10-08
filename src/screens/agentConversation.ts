@@ -1,16 +1,12 @@
 import type { Buffer } from "../terminal/buffer.js";
 import { Screen } from "../terminal/screen.js";
 import type { Key, MouseEvent } from "../terminal/input.js";
-import { C, type Style } from "../colors.js";
+import { C } from "../colors.js";
 import { drawHeader } from "../header.js";
-import { wrapText } from "../ui.js";
+import { drawHint } from "../ui.js";
+import { drawSpans, renderMarkdownText, type Line } from "../markdown.js";
 import { ellipsize } from "../width.js";
 import type { AgentMessage } from "../agents.js";
-
-interface Line {
-  text: string;
-  style: Style;
-}
 
 export class AgentConversationScreen extends Screen {
   private title: string;
@@ -53,24 +49,22 @@ export class AgentConversationScreen extends Screen {
         this.scrollTop += 3;
       }
       this.app.render();
+    } else if (ev.type === "click" && ev.button === 2) {
+      this.app.popScreen();
     }
   }
 
   private buildLines(width: number): Line[] {
     const lines: Line[] = [];
-    const push = (text: string, style: Style): void => {
-      for (const ln of wrapText(text, width)) lines.push({ text: ln, style });
-    };
     for (const m of this.messages) {
       if (m.role === "user") {
-        lines.push({ text: "You:", style: { fg: C.accent, bold: true } });
-        push(m.content, { fg: C.user });
-        lines.push({ text: "", style: {} });
+        lines.push({ spans: [{ text: "You:", style: { fg: C.accent, bold: true } }] });
+        lines.push(...renderMarkdownText(m.content, width, { fg: C.user }));
       } else {
-        lines.push({ text: "Assistant:", style: { fg: C.accent, bold: true } });
-        push(m.content, { fg: C.assistant });
-        lines.push({ text: "", style: {} });
+        lines.push({ spans: [{ text: "Assistant:", style: { fg: C.accent, bold: true } }] });
+        lines.push(...renderMarkdownText(m.content, width, { fg: C.assistant }));
       }
+      lines.push({ spans: [] });
     }
     return lines;
   }
@@ -97,10 +91,9 @@ export class AgentConversationScreen extends Screen {
     for (let y = logTop; y <= logBottom; y++) {
       const li = this.scrollTop + (y - logTop);
       if (li >= lines.length) break;
-      const line = lines[li];
-      buf.writeText(2, y, line.text.slice(0, w - 2), line.style);
+      drawSpans(buf, 2, y, lines[li].spans, Math.max(4, w - 4));
     }
 
-    buf.centerText(h - 1, "↑/↓ scroll  ·  Esc back", { fg: C.dim });
+    drawHint(buf, h - 1, "↑/↓ scroll  ·  wheel scroll  ·  right-click back  ·  Esc back");
   }
 }

@@ -11,7 +11,8 @@ export interface Key {
 
 export type MouseEvent =
   | { type: "wheel"; dir: -1 | 1; x: number; y: number }
-  | { type: "click"; x: number; y: number; button: number };
+  | { type: "click"; x: number; y: number; button: number }
+  | { type: "move"; x: number; y: number };
 
 export type InputEvent =
   | { type: "key"; key: Key }
@@ -166,6 +167,16 @@ export class InputReader {
     }
   }
 
+  /**
+   * Parse SGR (extended) mouse sequences: ESC [ < b ; x ; y M/m
+   *
+   * Button codes (SGR mode, any-event tracking ?1003):
+   *   0/1/2  left/middle/right press
+   *   3      release (ignored)
+   *   32     motion with no buttons held (hover)
+   *   35     motion with left button held (drag)
+   *   64/65  wheel up / wheel down
+   */
   private handleMouse(s: string, final: string): void {
     const parts = s.slice(1).split(";");
     if (parts.length < 3) return;
@@ -177,6 +188,9 @@ export class InputReader {
       this.emitMouse({ type: "wheel", dir: -1, x, y });
     } else if (b === 65) {
       this.emitMouse({ type: "wheel", dir: 1, x, y });
+    } else if (final === "M" && (b === 32 || b === 35)) {
+      // hover / drag motion
+      this.emitMouse({ type: "move", x, y });
     } else if (final === "M" && (b === 0 || b === 1 || b === 2)) {
       this.emitMouse({ type: "click", x, y, button: b });
     }

@@ -6,6 +6,8 @@ export interface AppState {
   selectedModelStreaming: boolean;
   selectedIntensity: string;
   isThinking: boolean;
+  /** Blink phase for the "thinking" indicator in the top status bar. */
+  blinkOn: boolean;
 }
 
 export function defaultState(): AppState {
@@ -17,5 +19,6 @@ export function defaultState(): AppState {
     selectedModelStreaming: true,
     selectedIntensity: "High",
     isThinking: false,
+    blinkOn: false,
   };
 }

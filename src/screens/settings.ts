@@ -1,13 +1,15 @@
 import type { Buffer } from "../terminal/buffer.js";
 import { Screen } from "../terminal/screen.js";
-import type { Key } from "../terminal/input.js";
+import type { Key, MouseEvent } from "../terminal/input.js";
 import { C } from "../colors.js";
 import { INTENSITY_LEVELS, MODEL_FILE, loadConfig, saveConfig } from "../config.js";
 import { drawHeader } from "../header.js";
-import { centerVertically } from "../ui.js";
+import { centerVertically, drawHint } from "../ui.js";
 
 export class SettingsScreen extends Screen {
   private intensityIdx = 2;
+  private lastHoverX = -1;
+  private lastHoverY = -1;
 
   onActivate(): void {
     const config = loadConfig();
@@ -29,6 +31,68 @@ export class SettingsScreen extends Screen {
       this.save();
       this.app.popScreen();
     }
+  }
+
+  onMouse(ev: MouseEvent): void {
+    const layout = this.layout();
+    if (!layout) return;
+
+    if (ev.type === "move") {
+      if (ev.x === this.lastHoverX && ev.y === this.lastHoverY) return;
+      this.lastHoverX = ev.x;
+      this.lastHoverY = ev.y;
+      for (let i = 0; i < layout.optionYs.length; i++) {
+        if (ev.y === layout.optionYs[i] && i !== this.intensityIdx) {
+          this.intensityIdx = i;
+          this.app.render();
+          return;
+        }
+      }
+      return;
+    }
+
+    if (ev.type === "wheel") {
+      this.intensityIdx =
+        (this.intensityIdx + (ev.dir === -1 ? -1 : 1) + INTENSITY_LEVELS.length) % INTENSITY_LEVELS.length;
+      this.app.render();
+      return;
+    }
+
+    if (ev.type === "click") {
+      if (ev.button === 2) {
+        this.save();
+        this.app.popScreen();
+        return;
+      }
+      for (let i = 0; i < layout.optionYs.length; i++) {
+        if (ev.y === layout.optionYs[i]) {
+          this.intensityIdx = i;
+          this.save();
+          this.app.render();
+          return;
+        }
+      }
+      if (ev.y === layout.hintY) {
+        this.save();
+        this.app.popScreen();
+      }
+    }
+  }
+
+  private layout(): { optionYs: number[]; hintY: number } | null {
+    const h = this.app.height;
+    const lines: string[] = [
+      "Settings",
+      "",
+      `Model: ${this.app.state.selectedProvider}/${this.app.state.selectedModelName}`,
+      `Default intensity:`,
+    ];
+    const total = lines.length + INTENSITY_LEVELS.length + 2;
+    const top = centerVertically(h, total);
+    const optionYs = INTENSITY_LEVELS.map((_, i) => top + 4 + i);
+    const hintY = top + 4 + INTENSITY_LEVELS.length + 2;
+    if (hintY > h - 1) return null;
+    return { optionYs, hintY };
   }
 
   private save(): void {
@@ -74,7 +138,7 @@ export class SettingsScreen extends Screen {
     buf.centerText(y, `model.json: ${MODEL_FILE}`, { fg: C.dim });
     y += 1;
     if (y < h) {
-      buf.centerText(y, "↑/↓ change  ·  Enter apply  ·  Esc back", { fg: C.dim });
+      drawHint(buf, y, "↑/↓ change  ·  Enter apply  ·  click to choose  ·  right-click back  ·  Esc back");
     }
   }
 }

@@ -5,6 +5,7 @@ A CLI coding agent that lives in your terminal. Neutrino gives you an interactiv
 ## Features
 
 - **Interactive terminal UI** — logo screen, chat, model select, history, and settings screens.
+- **Full mouse support** — hover to highlight, click to select/open/position the cursor, wheel to scroll, right-click to go back (like OpenCode).
 - **LLM providers** — ships with DeepSeek, OpenAI, and Anthropic presets; works with any OpenAI-compatible endpoint.
 - **Tool calling** — the agent can run shell commands, read files, write files, and list directories in your working directory.
 - **Streaming responses** — token-by-token output with pause/resume (`ESC ESC`).
@@ -52,9 +53,20 @@ Type a message on the start screen and press `Enter` to begin a new chat.
 | `Ctrl+B` | Back to menu (from chat) |
 | `Ctrl+L` | Clear conversation (from chat) |
 | `Esc Esc` | Pause / resume streaming |
-| `PgUp` / `PgDn`, scroll | Scroll chat history |
-| Click `ⓘ` (chat header) | Toggle token usage stats |
+| `PgUp` / `PgDn` | Scroll chat history |
 | `Ctrl+C` / `Ctrl+Q` | Quit |
+
+### Mouse
+
+| Action | Effect |
+| --- | --- |
+| Hover over an item | Highlight / select it in lists and menus |
+| Click an item | Select and confirm (open a screen, load a session, apply a setting…) |
+| Click the input box | Focus it and place the cursor at the clicked position |
+| Click the header (left of `ⓘ`) | Open the model selector |
+| Click `ⓘ` (chat header) | Toggle token usage stats |
+| Scroll wheel | Scroll the chat/log, or move through lists |
+| Right-click | Go back (like `Esc`) |
 
 ## Configuration
 
@@ -89,6 +101,8 @@ The agent can call the following tools during a conversation:
 
 ```sh
 npm run build    # compile TypeScript to dist/
+node scripts/test-mouse.mjs    # verify mouse escape-sequence parsing
+node scripts/test-cursor.mjs   # verify click-to-position-cursor math
 ```
 
 ## License
