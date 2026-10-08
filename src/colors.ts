@@ -13,6 +13,7 @@ export const C = {
   green: [115, 218, 202] as RGB,
   red: [247, 118, 142] as RGB,
   codeBg: [27, 35, 49] as RGB, // dark blue-grey used behind code blocks
+  selection: [56, 92, 138] as RGB, // muted blue used to highlight selected text
 } as const;
 
 export interface Style {

@@ -1,3 +1,5 @@
+import type { Selection } from "./selection.js";
+
 export interface AppState {
   selectedProvider: string;
   selectedModelName: string;
@@ -10,6 +12,8 @@ export interface AppState {
   blinkOn: boolean;
   /** Blink phase for the text cursors (true = lit, false = hidden). */
   cursorOn: boolean;
+  /** Active mouse text selection, or null when nothing is selected. */
+  selection: Selection | null;
 }
 
 export function defaultState(): AppState {
@@ -23,5 +27,6 @@ export function defaultState(): AppState {
     isThinking: false,
     blinkOn: false,
     cursorOn: true,
+    selection: null,
   };
 }

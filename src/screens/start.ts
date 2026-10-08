@@ -283,9 +283,9 @@ export class StartScreen extends Screen {
     const hintY = y + TAB_H + 1;
     if (hintY < h && (!showVersion || hintY < versionY)) {
       const nav = this.focusIdx === 0 && this.inputValue.length > 0
-        ? "←/→ move cursor  ·  ↑/↓ switch"
+        ? "←/→ move cursor · ↑/↓ switch"
         : "←/→ / ↑/↓ switch";
-      drawHint(buf, hintY, `${nav}  ·  Enter confirm  ·  click to choose  ·  Ctrl+E model  ·  Ctrl+Q quit`);
+      drawHint(buf, hintY, `${nav} · Enter confirm · drag to copy · Ctrl+E model · Ctrl+Q quit`);
     }
 
     if (showVersion) {

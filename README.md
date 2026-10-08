@@ -6,6 +6,7 @@ A CLI coding agent that lives in your terminal. Neutrino gives you an interactiv
 
 - **Interactive terminal UI** — logo screen, chat, model select, history, and settings screens.
 - **Full mouse support** — hover to highlight, click to select/open/position the cursor, wheel to scroll, right-click to go back (like OpenCode).
+- **Select & copy** — drag the mouse over any text (agent output, the input box, menus, …) to select it; releasing the button copies the selection to the clipboard (via OSC 52, with a native fallback).
 - **LLM providers** — ships with DeepSeek, OpenAI, and Anthropic presets; works with any OpenAI-compatible endpoint.
 - **Tool calling** — the agent can run shell commands, read files, write files, and list directories in your working directory.
 - **Streaming responses** — token-by-token output with pause/resume (`ESC ESC`).
@@ -53,8 +54,10 @@ Type a message on the start screen and press `Enter` to begin a new chat.
 | `Ctrl+B` | Back to menu (from chat) |
 | `Ctrl+L` | Clear conversation (from chat) |
 | `Esc Esc` | Pause / resume streaming |
+| `Esc` | Clear an active selection |
 | `PgUp` / `PgDn` | Scroll chat history |
-| `Ctrl+C` / `Ctrl+Q` | Quit |
+| `Ctrl+C` | Copy the selection, or quit if nothing is selected |
+| `Ctrl+Q` | Quit |
 
 ### Mouse
 
@@ -63,10 +66,13 @@ Type a message on the start screen and press `Enter` to begin a new chat.
 | Hover over an item | Highlight / select it in lists and menus |
 | Click an item | Select and confirm (open a screen, load a session, apply a setting…) |
 | Click the input box | Focus it and place the cursor at the clicked position |
+| Click and drag | Select text under the rectangle; releasing copies it to the clipboard |
 | Click the header (left of `ⓘ`) | Open the model selector |
 | Click `ⓘ` (chat header) | Toggle token usage stats |
 | Scroll wheel | Scroll the chat/log, or move through lists |
 | Right-click | Go back (like `Esc`) |
+
+The selection highlight is drawn over whatever is on screen, so it works uniformly on the chat log, the input box and every menu. Selected text is copied with trailing whitespace trimmed per line (shell-style), so it can be pasted straight back into a terminal.
 
 ## Configuration
 
@@ -101,8 +107,9 @@ The agent can call the following tools during a conversation:
 
 ```sh
 npm run build    # compile TypeScript to dist/
-node scripts/test-mouse.mjs    # verify mouse escape-sequence parsing
-node scripts/test-cursor.mjs   # verify click-to-position-cursor math
+node scripts/test-mouse.mjs      # verify mouse escape-sequence parsing
+node scripts/test-cursor.mjs     # verify click-to-position-cursor math
+node scripts/test-selection.mjs  # verify selection highlighting & text extraction
 ```
 
 ## License

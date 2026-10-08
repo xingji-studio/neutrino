@@ -1,10 +1,13 @@
 import process from "node:process";
 import { Buffer } from "./terminal/buffer.js";
-import { InputReader, type InputEvent } from "./terminal/input.js";
+import { InputReader, type InputEvent, type MouseEvent } from "./terminal/input.js";
 import { Renderer } from "./terminal/renderer.js";
 import { Screen } from "./terminal/screen.js";
 import { defaultState, type AppState } from "./state.js";
 import { loadConfig, saveConfig, type ModelInfo, type SessionData } from "./config.js";
+import { C } from "./colors.js";
+import { applySelection, selectionText } from "./selection.js";
+import { copyToClipboard } from "./clipboard.js";
 import { ChatScreen } from "./screens/chat.js";
 import { HistoryScreen } from "./screens/history.js";
 import { AgentSelectScreen } from "./screens/agentSelect.js";
@@ -13,6 +16,7 @@ import { SettingsScreen } from "./screens/settings.js";
 import { StartScreen } from "./screens/start.js";
 
 const CURSOR_BLINK_MS = 530;
+const TOAST_MS = 1600;
 
 export class App {
   state: AppState = defaultState();
@@ -26,6 +30,17 @@ export class App {
   private sizeTimer: NodeJS.Timeout | null = null;
   private blinkTimer: NodeJS.Timeout | null = null;
   private cursorTimer: NodeJS.Timeout | null = null;
+  private toastTimer: NodeJS.Timeout | null = null;
+  private toast = "";
+  // Most recently rendered frame. Kept so a selection can be turned back into
+  // text without having to re-run the screen's render.
+  private lastBuffer: Buffer | null = null;
+  // Mouse selection bookkeeping. `pressed` is true between a left-button press
+  // and its release; `pressStart` is where the press landed, used as the anchor
+  // once the pointer starts moving (i.e. once it becomes a drag). A plain click
+  // never moves, so it is forwarded to the screen and leaves no selection.
+  private pressed = false;
+  private pressStart: { x: number; y: number } | null = null;
   private resizeHandler = () => this.onResize();
 
   constructor() {
@@ -84,12 +99,16 @@ export class App {
   pushScreen(screen: Screen): void {
     screen.app = this;
     this.screens.push(screen);
+    this.resetMouse();
+    this.state.selection = null;
     screen.onActivate();
     this.render();
   }
 
   popScreen(): void {
     const screen = this.screens.pop();
+    this.resetMouse();
+    this.state.selection = null;
     screen?.onDeactivate();
     this.render();
   }
@@ -116,7 +135,22 @@ export class App {
 
     const buf = new Buffer(this.width, this.height);
     this.top?.render(buf);
+    this.lastBuffer = buf;
+
+    // The selection overlay is painted over the finished frame, so it works on
+    // every screen (chat log, input box, menus, …) without each having to know
+    // about selection at all.
+    if (this.state.selection) applySelection(buf, this.state.selection);
+    this.drawToast(buf);
+
     this.renderer.render(buf);
+  }
+
+  private drawToast(buf: Buffer): void {
+    if (!this.toast) return;
+    const y = buf.height - 1;
+    buf.fillRect(0, y, buf.width, 1, { bg: C.black });
+    buf.centerText(y, ` ${this.toast} `, { fg: C.black, bg: C.accent, bold: true });
   }
 
   private updateCursorBlink(): void {
@@ -141,8 +175,25 @@ export class App {
   private handleEvent(ev: InputEvent): void {
     if (ev.type === "key") {
       const k = ev.key;
-      if (k.ctrl && (k.name === "c" || k.name === "q")) {
+      // Any keystroke ends a pending mouse gesture (in case a release was lost).
+      this.resetMouse();
+      if (k.ctrl && k.name === "q") {
         this.quit();
+        return;
+      }
+      if (k.ctrl && k.name === "c") {
+        // Ctrl+C copies the selection when there is one, otherwise it quits —
+        // the usual terminal convention.
+        if (this.state.selection) {
+          this.copySelection();
+          return;
+        }
+        this.quit();
+        return;
+      }
+      if (k.name === "escape" && this.state.selection) {
+        this.state.selection = null;
+        this.render();
         return;
       }
       this.wakeCursor();
@@ -152,9 +203,87 @@ export class App {
       }
       this.top?.onKey(k);
     } else {
-      if (ev.event.type === "click") this.wakeCursor();
-      this.top?.onMouse(ev.event);
+      this.handleMouse(ev.event);
     }
+  }
+
+  private handleMouse(ev: MouseEvent): void {
+    if (ev.type === "click") {
+      this.wakeCursor();
+      this.pressed = true;
+      this.pressStart = { x: ev.x, y: ev.y };
+      if (this.state.selection) {
+        this.state.selection = null;
+        this.render();
+      }
+      // Forward immediately so plain clicks (focus, tabs, header, …) keep
+      // working even in terminals that don't report button releases.
+      this.top?.onMouse(ev);
+      return;
+    }
+
+    if (ev.type === "move") {
+      if (this.pressed && this.pressStart) {
+        const s = this.pressStart;
+        if (ev.x !== s.x || ev.y !== s.y) {
+          // The pointer left the press cell, so this is a drag: grow/shrink the
+          // selection instead of forwarding a hover to the screen.
+          this.state.selection = { anchor: s, cursor: { x: ev.x, y: ev.y } };
+          this.render();
+        }
+        return;
+      }
+      this.top?.onMouse(ev);
+      return;
+    }
+
+    if (ev.type === "release") {
+      const sel = this.state.selection;
+      this.pressed = false;
+      this.pressStart = null;
+      if (sel) {
+        if (this.lastBuffer) {
+          const text = selectionText(this.lastBuffer, sel);
+          if (text.trim().length > 0) {
+            copyToClipboard(text);
+            this.showToast(`Copied ${text.length} char${text.length === 1 ? "" : "s"}`);
+            return;
+          }
+        }
+        this.render();
+      }
+      return;
+    }
+
+    if (ev.type === "wheel") {
+      if (this.state.selection) this.state.selection = null;
+      this.top?.onMouse(ev);
+    }
+  }
+
+  private resetMouse(): void {
+    this.pressed = false;
+    this.pressStart = null;
+  }
+
+  private copySelection(): void {
+    const sel = this.state.selection;
+    if (!sel || !this.lastBuffer) return;
+    const text = selectionText(this.lastBuffer, sel);
+    if (text.trim().length === 0) return;
+    copyToClipboard(text);
+    this.showToast(`Copied ${text.length} char${text.length === 1 ? "" : "s"}`);
+  }
+
+  private showToast(text: string): void {
+    this.toast = text;
+    if (this.toastTimer) clearTimeout(this.toastTimer);
+    this.toastTimer = setTimeout(() => {
+      this.toastTimer = null;
+      this.toast = "";
+      this.render();
+    }, TOAST_MS);
+    this.render();
   }
 
   setModelConfig(providerName: string, model: ModelInfo, intensity: string): void {
@@ -224,6 +353,10 @@ export class App {
     if (this.cursorTimer) {
       clearInterval(this.cursorTimer);
       this.cursorTimer = null;
+    }
+    if (this.toastTimer) {
+      clearTimeout(this.toastTimer);
+      this.toastTimer = null;
     }
     this.input.stop();
     this.renderer.dispose();

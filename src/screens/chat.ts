@@ -520,7 +520,7 @@ export class ChatScreen extends Screen {
     });
 
     const hintY = h - 1;
-    const hints = "Enter send  ·  ESC ESC pause  ·  Ctrl+B menu  ·  Ctrl+L clear";
+    const hints = "Enter send · ESC ESC pause · Ctrl+B menu · Ctrl+L clear · drag to copy";
     const hintW = displayWidth(hints);
     const hintX = Math.max(0, w - 1 - hintW);
     const pathAvail = Math.max(0, hintX - 2);

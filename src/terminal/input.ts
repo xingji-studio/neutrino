@@ -12,7 +12,8 @@ export interface Key {
 export type MouseEvent =
   | { type: "wheel"; dir: -1 | 1; x: number; y: number }
   | { type: "click"; x: number; y: number; button: number }
-  | { type: "move"; x: number; y: number };
+  | { type: "move"; x: number; y: number; drag: boolean }
+  | { type: "release"; x: number; y: number; button: number };
 
 export type InputEvent =
   | { type: "key"; key: Key }
@@ -170,12 +171,11 @@ export class InputReader {
   /**
    * Parse SGR (extended) mouse sequences: ESC [ < b ; x ; y M/m
    *
-   * Button codes (SGR mode, any-event tracking ?1003):
-   *   0/1/2  left/middle/right press
-   *   3      release (ignored)
-   *   32     motion with no buttons held (hover)
-   *   35     motion with left button held (drag)
-   *   64/65  wheel up / wheel down
+   * `b` is a bit field: the low two bits are the button (0 left, 1 middle,
+   * 2 right, 3 none/release), bit 5 (32) marks a motion event and bit 6 (64)
+   * marks a wheel event. A trailing `M` is a press/motion while `m` is a
+   * release. So motion with the left button held (a drag) is `b = 32`, whereas
+   * plain hover is `b = 35` (32 | 3).
    */
   private handleMouse(s: string, final: string): void {
     const parts = s.slice(1).split(";");
@@ -184,15 +184,25 @@ export class InputReader {
     const x = parseInt(parts[1], 10) - 1;
     const y = parseInt(parts[2], 10) - 1;
     if (Number.isNaN(b) || Number.isNaN(x) || Number.isNaN(y)) return;
-    if (b === 64) {
-      this.emitMouse({ type: "wheel", dir: -1, x, y });
-    } else if (b === 65) {
-      this.emitMouse({ type: "wheel", dir: 1, x, y });
-    } else if (final === "M" && (b === 32 || b === 35)) {
-      // hover / drag motion
-      this.emitMouse({ type: "move", x, y });
-    } else if (final === "M" && (b === 0 || b === 1 || b === 2)) {
-      this.emitMouse({ type: "click", x, y, button: b });
+
+    const button = b & 3;
+    const motion = (b & 32) !== 0;
+    const wheel = (b & 64) !== 0;
+
+    if (wheel) {
+      this.emitMouse({ type: "wheel", dir: button === 0 ? -1 : 1, x, y });
+      return;
+    }
+    if (final === "m") {
+      this.emitMouse({ type: "release", x, y, button });
+      return;
+    }
+    if (motion) {
+      this.emitMouse({ type: "move", x, y, drag: button === 0 });
+      return;
+    }
+    if (button !== 3) {
+      this.emitMouse({ type: "click", x, y, button });
     }
   }
 
