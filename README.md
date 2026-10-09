@@ -7,6 +7,7 @@ A CLI coding agent that lives in your terminal. Neutrino gives you an interactiv
 - **Interactive terminal UI** — logo screen, chat, model select, history, and settings screens.
 - **Full mouse support** — hover to highlight, click to select/open/position the cursor, wheel to scroll, right-click to go back (like OpenCode).
 - **Select & copy** — drag the mouse over any text (agent output, the input box, menus, …) to select it; releasing the button copies the selection to the clipboard (via OSC 52, with a native fallback).
+- **Paste-friendly input** — like OpenCode, a pasted block has its newlines turned into spaces so it stays one line, and only a manually typed `Enter` submits the message.
 - **LLM providers** — ships with DeepSeek, OpenAI, and Anthropic presets; works with any OpenAI-compatible endpoint.
 - **Tool calling** — the agent can run shell commands, read files, write files, and list directories in your working directory.
 - **Streaming responses** — token-by-token output with pause/resume (`ESC ESC`).
@@ -48,7 +49,7 @@ Type a message on the start screen and press `Enter` to begin a new chat.
 
 | Keys | Action |
 | --- | --- |
-| `Enter` | Send message / confirm |
+| `Enter` | Send message / confirm (only a manually typed Enter sends) |
 | `←`/`→`, `↑`/`↓` | Move focus / navigate |
 | `Ctrl+E` | Open model config |
 | `Ctrl+B` | Back to menu (from chat) |
@@ -113,6 +114,7 @@ npm test         # build, then run every test below
 Individual tests:
 
 ```sh
+node scripts/test-paste.mjs      # verify pasted newlines are flattened to spaces
 node scripts/test-mouse.mjs      # verify mouse escape-sequence parsing
 node scripts/test-cursor.mjs     # verify click-to-position-cursor math
 node scripts/test-selection.mjs  # verify selection highlighting & text extraction

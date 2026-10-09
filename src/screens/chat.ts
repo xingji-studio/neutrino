@@ -118,6 +118,15 @@ export class ChatScreen extends Screen {
     return this.inputValue.length > 0;
   }
 
+  onPaste(text: string): void {
+    if (!text) return;
+    if (this.showInfo) this.showInfo = false;
+    this.inputValue =
+      this.inputValue.slice(0, this.cursor) + text + this.inputValue.slice(this.cursor);
+    this.cursor += text.length;
+    this.app.render();
+  }
+
   onKey(key: Key): void {
     if (this.showInfo) {
       this.showInfo = false;

@@ -46,6 +46,17 @@ export class StartScreen extends Screen {
     return this.focusIdx === 0 && this.inputValue.length > 0;
   }
 
+  onPaste(text: string): void {
+    if (!text) return;
+    // A paste always targets the message box, so focus it first.
+    this.focusIdx = 0;
+    this.hoverIdx = -1;
+    this.inputValue =
+      this.inputValue.slice(0, this.cursor) + text + this.inputValue.slice(this.cursor);
+    this.cursor += text.length;
+    this.app.render();
+  }
+
   onKey(key: Key): void {
     // When the input box is focused and holds text, left/right move the text
     // cursor instead of switching between the input box and the tabs. When the

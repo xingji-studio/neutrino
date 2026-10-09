@@ -44,9 +44,11 @@ export class Renderer {
     this.write("\x1b[?1049h"); // alternate screen
     this.write("\x1b[?25l"); // hide cursor
     this.write("\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?1015h"); // mouse tracking (incl. any-event for hover)
+    this.write("\x1b[?2004h"); // bracketed paste (so pastes can be told apart from typing)
   }
 
   dispose(): void {
+    this.write("\x1b[?2004l");
     this.write("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l");
     this.write("\x1b[?25h");
     this.write("\x1b[?1049l");

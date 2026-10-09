@@ -173,6 +173,14 @@ export class App {
   }
 
   private handleEvent(ev: InputEvent): void {
+    if (ev.type === "paste") {
+      // Pasted text arrives with its newlines already flattened to spaces, so
+      // it is inserted into the input instead of being submitted.
+      this.resetMouse();
+      this.wakeCursor();
+      this.top?.onPaste(ev.text);
+      return;
+    }
     if (ev.type === "key") {
       const k = ev.key;
       // Any keystroke ends a pending mouse gesture (in case a release was lost).
