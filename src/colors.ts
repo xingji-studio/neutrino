@@ -14,6 +14,8 @@ export const C = {
   red: [247, 118, 142] as RGB,
   codeBg: [27, 35, 49] as RGB, // dark blue-grey used behind code blocks
   selection: [56, 92, 138] as RGB, // muted blue used to highlight selected text
+  scrollTrack: [45, 58, 62] as RGB, // dim groove behind the scrollbar thumb
+  scrollThumb: [130, 142, 190] as RGB, // draggable scrollbar thumb
 } as const;
 
 export interface Style {

@@ -1,5 +1,5 @@
 import type { Buffer } from "./terminal/buffer.js";
-import { C, type Style } from "./colors.js";
+import { C, type RGB, type Style } from "./colors.js";
 import { displayWidth, truncateByWidth, wcwidth } from "./width.js";
 
 function chunkByWidth(text: string, width: number): string[] {
@@ -159,6 +159,94 @@ export function drawHint(buf: Buffer, y: number, text: string): void {
   const max = buf.width;
   const t = displayWidth(text) <= max ? text : truncateByWidth(text, max - 1) + "…";
   buf.centerText(y, t, { fg: C.dim });
+}
+
+export interface ScrollbarOptions {
+  /** Colour of the groove. Defaults to `C.scrollTrack`. */
+  track?: RGB;
+  /** Colour of the thumb. Defaults to `C.scrollThumb`. */
+  thumb?: RGB;
+}
+
+/**
+ * Draw a vertical scrollbar in column `x`, spanning rows `top`..`bottom`
+ * (inclusive). It is a no-op when everything fits, so callers can render it
+ * unconditionally.
+ *
+ *   total    - total number of scrollable items/lines
+ *   viewport - how many of them are visible at once
+ *   offset   - index of the topmost visible item (i.e. the current scrollTop)
+ *
+ * The thumb length is proportional to `viewport / total` (at least one cell)
+ * and its position is proportional to `offset / (total - viewport)`, matching
+ * the usual GUI scrollbar behaviour.
+ */
+export interface ScrollbarGeometry {
+  /** Height of the groove in cells. */
+  trackH: number;
+  /** Height of the thumb in cells (at least 1). */
+  thumbH: number;
+  /** Largest allowed top row of the thumb, relative to the groove. */
+  maxThumbTop: number;
+  /** Largest valid scroll offset (total - viewport). */
+  maxOffset: number;
+  /** Current top row of the thumb, relative to the groove. */
+  thumbTop: number;
+}
+
+/**
+ * Geometry of a vertical scrollbar, shared by the drawing code and the app's
+ * hit-testing / dragging so the two can never disagree.
+ */
+export function scrollbarGeometry(
+  top: number,
+  bottom: number,
+  total: number,
+  viewport: number,
+  offset: number,
+): ScrollbarGeometry {
+  const trackH = Math.max(0, bottom - top + 1);
+  const thumbH = Math.max(1, Math.round((trackH * viewport) / total));
+  const maxThumbTop = Math.max(0, trackH - thumbH);
+  const maxOffset = Math.max(1, total - viewport);
+  const clamped = Math.max(0, Math.min(offset, maxOffset));
+  const thumbTop = maxThumbTop === 0 ? 0 : Math.round((maxThumbTop * clamped) / maxOffset);
+  return { trackH, thumbH, maxThumbTop, maxOffset, thumbTop };
+}
+
+/**
+ * Inverse of the thumb positioning above: the scroll offset that places the
+ * thumb's top at 'thumbTop'. Used while dragging the thumb; feeding the result
+ * back through scrollbarGeometry reproduces the same 'thumbTop'.
+ */
+export function offsetFromThumbTop(g: ScrollbarGeometry, thumbTop: number): number {
+  if (g.maxThumbTop === 0) return 0;
+  const t = Math.max(0, Math.min(thumbTop, g.maxThumbTop));
+  return Math.round((g.maxOffset * t) / g.maxThumbTop);
+}
+
+export function drawScrollbar(
+  buf: Buffer,
+  x: number,
+  top: number,
+  bottom: number,
+  total: number,
+  viewport: number,
+  offset: number,
+  opts: ScrollbarOptions = {},
+): void {
+  const trackH = bottom - top + 1;
+  if (trackH <= 0 || x < 0 || x >= buf.width) return;
+  if (total <= viewport || viewport <= 0) return; // nothing to scroll: hide it
+
+  const trackColor = opts.track ?? C.scrollTrack;
+  const thumbColor = opts.thumb ?? C.scrollThumb;
+
+  const g = scrollbarGeometry(top, bottom, total, viewport, offset);
+  for (let i = 0; i < g.trackH; i++) {
+    const isThumb = i >= g.thumbTop && i < g.thumbTop + g.thumbH;
+    buf.set(x, top + i, isThumb ? "█" : "│", { fg: isThumb ? thumbColor : trackColor });
+  }
 }
 
 export function drawInputBox(

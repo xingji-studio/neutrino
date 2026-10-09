@@ -7,6 +7,7 @@ import { defaultState, type AppState } from "./state.js";
 import { loadConfig, saveConfig, type ModelInfo, type SessionData } from "./config.js";
 import { C } from "./colors.js";
 import { applySelection, selectionText } from "./selection.js";
+import { offsetFromThumbTop, scrollbarGeometry } from "./ui.js";
 import { copyToClipboard } from "./clipboard.js";
 import { ChatScreen } from "./screens/chat.js";
 import { HistoryScreen } from "./screens/history.js";
@@ -41,6 +42,9 @@ export class App {
   // never moves, so it is forwarded to the screen and leaves no selection.
   private pressed = false;
   private pressStart: { x: number; y: number } | null = null;
+  // Active scrollbar drag: how many rows below the thumb's top the press
+  // landed, so the thumb stays under the pointer as it moves.
+  private barDrag: { grab: number } | null = null;
   private resizeHandler = () => this.onResize();
 
   constructor() {
@@ -218,6 +222,27 @@ export class App {
   private handleMouse(ev: MouseEvent): void {
     if (ev.type === "click") {
       this.wakeCursor();
+      // A left-press on the scrollbar starts a thumb drag rather than a text
+      // selection or a click on the screen behind it.
+      if (ev.button === 0) {
+        const bar = this.top?.scrollbar();
+        if (bar && ev.x >= bar.x && ev.y >= bar.top && ev.y <= bar.bottom) {
+          const g = scrollbarGeometry(bar.top, bar.bottom, bar.total, bar.viewport, bar.offset);
+          let grab = ev.y - bar.top - g.thumbTop;
+          if (grab < 0 || grab >= g.thumbH) {
+            // Pressed the groove: centre the thumb under the pointer.
+            grab = Math.floor(g.thumbH / 2);
+            const thumbTop = Math.max(0, Math.min(ev.y - bar.top - grab, g.maxThumbTop));
+            bar.scrollTo(offsetFromThumbTop(g, thumbTop));
+          }
+          this.barDrag = { grab };
+          this.pressed = false;
+          this.pressStart = null;
+          if (this.state.selection) this.state.selection = null;
+          this.render();
+          return;
+        }
+      }
       this.pressed = true;
       this.pressStart = { x: ev.x, y: ev.y };
       if (this.state.selection) {
@@ -231,6 +256,15 @@ export class App {
     }
 
     if (ev.type === "move") {
+      if (this.barDrag) {
+        const bar = this.top?.scrollbar();
+        if (bar) {
+          const g = scrollbarGeometry(bar.top, bar.bottom, bar.total, bar.viewport, bar.offset);
+          const thumbTop = Math.max(0, Math.min(ev.y - bar.top - this.barDrag.grab, g.maxThumbTop));
+          bar.scrollTo(offsetFromThumbTop(g, thumbTop));
+        }
+        return;
+      }
       if (this.pressed && this.pressStart) {
         const s = this.pressStart;
         if (ev.x !== s.x || ev.y !== s.y) {
@@ -249,6 +283,7 @@ export class App {
       const sel = this.state.selection;
       this.pressed = false;
       this.pressStart = null;
+      this.barDrag = null;
       if (sel) {
         if (this.lastBuffer) {
           const text = selectionText(this.lastBuffer, sel);
@@ -272,6 +307,7 @@ export class App {
   private resetMouse(): void {
     this.pressed = false;
     this.pressStart = null;
+    this.barDrag = null;
   }
 
   private copySelection(): void {

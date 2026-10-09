@@ -1,5 +1,5 @@
 import type { Buffer } from "../terminal/buffer.js";
-import { Screen } from "../terminal/screen.js";
+import { Screen, type ScrollbarHandle } from "../terminal/screen.js";
 import type { Key, MouseEvent } from "../terminal/input.js";
 import { C, type Style } from "../colors.js";
 import {
@@ -10,7 +10,7 @@ import {
   type TokenUsage,
 } from "../config.js";
 import { drawHeader } from "../header.js";
-import { computeInputWindow, cursorFromColumn, drawInputBox, wrapText } from "../ui.js";
+import { computeInputWindow, cursorFromColumn, drawInputBox, drawScrollbar, wrapText } from "../ui.js";
 import { drawSpans, renderMarkdownText, type Line, type Span } from "../markdown.js";
 import { ellipsize, displayWidth } from "../width.js";
 import { LLMClient } from "../llm/client.js";
@@ -76,6 +76,7 @@ export class ChatScreen extends Screen {
   private cursor = 0;
   private scrollTop = 0;
   private followBottom = true;
+  private scrollbarGeom: { x: number; top: number; bottom: number; total: number; viewport: number } | null = null;
   private lastEscTime = 0;
   private initialized = false;
 
@@ -276,6 +277,26 @@ export class ChatScreen extends Screen {
       }
       this.app.render();
     }
+  }
+
+  scrollbar(): ScrollbarHandle | null {
+    const g = this.scrollbarGeom;
+    if (!g || g.total <= g.viewport) return null;
+    return {
+      x: g.x,
+      top: g.top,
+      bottom: g.bottom,
+      total: g.total,
+      viewport: g.viewport,
+      offset: this.scrollTop,
+      scrollTo: (offset: number) => {
+        const maxScroll = Math.max(0, g.total - g.viewport);
+        this.scrollTop = Math.max(0, Math.min(offset, maxScroll));
+        // Dragging to the very bottom resumes auto-following new output.
+        this.followBottom = this.scrollTop >= maxScroll;
+        this.app.render();
+      },
+    };
   }
 
   private togglePause(): void {
@@ -514,11 +535,22 @@ export class ChatScreen extends Screen {
     }
     if (this.scrollTop < 0) this.scrollTop = 0;
 
+    // Remember the bar's geometry so a drag on the last column can scroll the
+    // log (see the scrollbar() method).
+    this.scrollbarGeom =
+      lines.length > viewH
+        ? { x: w - 1, top: logTop, bottom: logBottom, total: lines.length, viewport: viewH }
+        : null;
+
     for (let y = logTop; y <= logBottom; y++) {
       const li = this.scrollTop + (y - logTop);
       if (li >= lines.length) break;
       drawSpans(buf, 2, y, lines[li].spans, Math.max(4, w - 4));
     }
+
+    // A scrollbar on the right edge of the log, shown only when the
+    // conversation overflows the visible area.
+    drawScrollbar(buf, w - 1, logTop, logBottom, lines.length, viewH, this.scrollTop);
 
     const inW = Math.max(12, w - 2);
     drawInputBox(buf, 1, inputY, inW, this.inputValue, this.cursor, {
