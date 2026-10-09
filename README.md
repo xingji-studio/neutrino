@@ -8,6 +8,7 @@ A CLI coding agent that lives in your terminal. Neutrino gives you an interactiv
 - **Full mouse support** — hover to highlight, click to select/open/position the cursor, wheel to scroll, right-click to go back (like OpenCode).
 - **Select & copy** — drag the mouse over any text (agent output, the input box, menus, …) to select it; releasing the button copies the selection to the clipboard (via OSC 52, with a native fallback).
 - **Paste-friendly input** — like OpenCode, a pasted block has its newlines turned into spaces so it stays one line, and only a manually typed `Enter` submits the message.
+- **Faithful log rendering** — text in the chat log keeps its indentation, blank lines and column alignment; when a long tool-output line wraps, continuation lines stay indented instead of snapping back to the left margin.
 - **Scrollable context log** — a vertical scrollbar is drawn on the right edge of the chat (and the agent-conversation viewer) whenever the conversation is taller than the view. Scroll with the wheel, `PgUp`/`PgDn` or `↑`/`↓`, or grab the scrollbar with the mouse and drag it like in a GUI.
 - **LLM providers** — ships with DeepSeek, OpenAI, and Anthropic presets; works with any OpenAI-compatible endpoint.
 - **Tool calling** — the agent can run shell commands, read files, write files, and list directories in your working directory.
@@ -121,6 +122,8 @@ node scripts/test-mouse.mjs      # verify mouse escape-sequence parsing
 node scripts/test-cursor.mjs     # verify click-to-position-cursor math
 node scripts/test-selection.mjs  # verify selection highlighting & text extraction
 node scripts/test-scrollbar.mjs  # verify the conversation scrollbar size/position and drag maths
+node scripts/test-markdown.mjs   # verify markdown/table rendering (incl. ragged rows)
+node scripts/test-wrap.mjs       # verify indentation & spacing are preserved when wrapping
 node scripts/test-render.mjs     # fuzz the diff renderer + render the chat screen,
                                  # asserting no stale/residual cells are left behind
 ```

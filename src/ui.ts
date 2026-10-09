@@ -23,47 +23,84 @@ function chunkByWidth(text: string, width: number): string[] {
 
 export function wrapText(text: string, width: number): string[] {
   if (width <= 0) width = 1;
-  const lines: string[] = [];
-  for (const para of text.split("\n")) {
+  const out: string[] = [];
+  const paragraphs = text.replace(/\r\n?/g, "\n").split("\n");
+
+  for (const para of paragraphs) {
     if (para.length === 0) {
-      lines.push("");
+      out.push("");
       continue;
     }
-    let line = "";
-    let lineW = 0;
-    for (const word of para.split(" ")) {
-      const wordW = displayWidth(word);
-      if (line.length === 0) {
-        if (wordW <= width) {
-          line = word;
-          lineW = wordW;
-        } else {
-          const chunks = chunkByWidth(word, width);
-          for (let i = 0; i < chunks.length - 1; i++) lines.push(chunks[i]);
-          line = chunks[chunks.length - 1];
-          lineW = displayWidth(line);
-        }
+
+    // Preserve the original indentation. Continuation lines reuse it so
+    // wrapped command output / code keeps its nesting instead of being
+    // flattened to the left margin.
+    const leadMatch = para.match(/^[ \t]*/);
+    const leadRaw = leadMatch ? leadMatch[0] : "";
+    const indent = leadRaw.replace(/\t/g, "  ");
+    const indentW = displayWidth(indent);
+    const body = para.slice(leadRaw.length);
+
+    // Split into words and the whitespace runs between them so runs of spaces
+    // (alignment padding in command output) are kept verbatim rather than
+    // collapsed to a single space.
+    const parts = body.match(/\s+|\S+/g) ?? [];
+
+    let line = indent;
+    let lineW = indentW;
+    let hasContent = false;
+    // Whitespace seen since the last word. It is only emitted together with
+    // the next word, so a line break never leaves trailing blanks behind.
+    let pending = "";
+
+    const newLine = (): void => {
+      out.push(line);
+      line = " ".repeat(indentW);
+      lineW = indentW;
+      hasContent = false;
+    };
+
+    const placeWord = (word: string): void => {
+      const gap = hasContent ? pending : "";
+      pending = "";
+      const gapW = displayWidth(gap);
+      const w = displayWidth(word);
+      if (lineW + gapW + w <= width) {
+        line += gap + word;
+        lineW += gapW + w;
+        hasContent = true;
+        return;
+      }
+      // Does not fit: break the line and drop the gap that caused the break.
+      if (hasContent) newLine();
+      if (lineW + w <= width) {
+        line += word;
+        lineW += w;
+        hasContent = true;
+        return;
+      }
+      // Word is wider than an entire line: hard-wrap it by columns.
+      const avail = Math.max(1, width - lineW);
+      const chunks = chunkByWidth(word, avail);
+      for (let i = 0; i < chunks.length - 1; i++) {
+        line += chunks[i];
+        newLine();
+      }
+      line += chunks[chunks.length - 1];
+      lineW += displayWidth(chunks[chunks.length - 1]);
+      hasContent = true;
+    };
+
+    for (const part of parts) {
+      if (/^\s+$/.test(part)) {
+        pending += part.replace(/\t/g, "  ");
         continue;
       }
-      if (lineW + 1 + wordW <= width) {
-        line += " " + word;
-        lineW += 1 + wordW;
-      } else {
-        lines.push(line);
-        if (wordW <= width) {
-          line = word;
-          lineW = wordW;
-        } else {
-          const chunks = chunkByWidth(word, width);
-          for (let i = 0; i < chunks.length - 1; i++) lines.push(chunks[i]);
-          line = chunks[chunks.length - 1];
-          lineW = displayWidth(line);
-        }
-      }
+      placeWord(part);
     }
-    lines.push(line);
+    out.push(line);
   }
-  return lines;
+  return out;
 }
 
 export interface InputBoxOptions {
