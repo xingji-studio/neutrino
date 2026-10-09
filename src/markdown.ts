@@ -611,7 +611,7 @@ function renderTable(t: Extract<Block, { type: "table" }>, width: number): Line[
       const spans: Span[] = [];
       for (let c = 0; c < nCols; c++) {
         if (c === 0) spans.push({ text: "│ ", style: borderStyle });
-        const cellLine = wrapped[c][li]?.spans ?? [];
+        const cellLine = wrapped[c]?.[li]?.spans ?? [];
         for (const s of cellLine) {
           spans.push(isHeader ? { ...s, style: { ...s.style, bold: true } } : s);
         }

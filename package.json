@@ -17,7 +17,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node scripts/test-mouse.mjs && node scripts/test-cursor.mjs && node scripts/test-selection.mjs && node scripts/test-render.mjs",
+    "test": "npm run build && node scripts/test-mouse.mjs && node scripts/test-cursor.mjs && node scripts/test-selection.mjs && node scripts/test-render.mjs && node scripts/test-markdown.mjs",
     "prepare": "npm run build"
   },
   "keywords": [
