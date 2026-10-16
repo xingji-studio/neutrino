@@ -14,6 +14,7 @@ import { drawHeader } from "../header.js";
 import { computeInputWindow, cursorFromColumn, drawInputBox, drawScrollbar, wrapText } from "../ui.js";
 import { drawSpans, renderMarkdownText, type Line, type Span } from "../markdown.js";
 import { ellipsize, displayWidth } from "../width.js";
+import { sanitizeText } from "../sanitize.js";
 import { LLMClient, describeError } from "../llm/client.js";
 import { executeTool, getToolDefinitions } from "../llm/tools.js";
 import {
@@ -157,6 +158,10 @@ export class ChatScreen extends Screen {
   }
 
   onPaste(text: string): void {
+    if (!text) return;
+    // A pasted tab/ESC would otherwise sit in the input box and be re-emitted
+    // by the renderer on every frame, corrupting the rows around it.
+    text = sanitizeText(text, { singleLine: true });
     if (!text) return;
     if (this.showInfo) this.showInfo = false;
     this.inputValue =
@@ -656,14 +661,14 @@ export class ChatScreen extends Screen {
     for (let mi = 0; mi < this.messages.length; mi++) {
       const m = this.messages[mi];
       if (m.role === "system") {
-        pushText(m.content, { fg: C.dim });
+        pushText(sanitizeText(m.content), { fg: C.dim });
       } else if (m.role === "user") {
         add({ spans: [{ text: "You:", style: { fg: C.accent, bold: true } }] });
-        pushMarkdown(m.content, { fg: C.user });
+        pushMarkdown(sanitizeText(m.content), { fg: C.user });
         add({ spans: [] });
       } else if (m.role === "assistant") {
         add({ spans: [{ text: "Neutrino:", style: { fg: C.accent, bold: true } }] });
-        pushMarkdown(m.content, { fg: C.assistant });
+        pushMarkdown(sanitizeText(m.content), { fg: C.assistant });
         add({ spans: [] });
       } else if (m.role === "summary") {
         add({
@@ -674,19 +679,24 @@ export class ChatScreen extends Screen {
             },
           ],
         });
-        pushText(m.content, { fg: C.dim });
+        pushText(sanitizeText(m.content), { fg: C.dim });
         add({ spans: [] });
       } else if (m.role === "tool") {
         // Header + the command/path always show; the (often huge) output body is
         // collapsed by default and toggled by clicking the block.
         add({ spans: [{ text: `⚙ ${m.name}`, style: { fg: C.toolHeader, bold: true } }] }, mi);
-        const argText = (m.arguments.command as string) ?? (m.arguments.path as string) ?? "";
+        const argText = sanitizeText(
+          (m.arguments.command as string) ?? (m.arguments.path as string) ?? "",
+          { singleLine: true },
+        );
         if (argText) add({ spans: [{ text: "  " + argText, style: { fg: C.dim } }] }, mi);
+        // Command output routinely carries ANSI colours and tabs; clean it once
+        // so the collapsed line count and the expanded body agree.
+        const body = sanitizeText(m.result || "");
         if (this.expandedTools.has(mi)) {
-          pushText(m.result || "(no output)", { fg: C.dim }, mi);
+          pushText(body || "(no output)", { fg: C.dim }, mi);
           add({ spans: [{ text: "  ▾ click to collapse", style: { fg: C.toolHeader } }] }, mi);
         } else {
-          const body = m.result || "";
           const n = body ? body.split("\n").length : 0;
           const summary = n > 0 ? `${n} line${n === 1 ? "" : "s"} hidden` : "no output";
           add({ spans: [{ text: `  ▸ ${summary} — click to expand`, style: { fg: C.dim } }] }, mi);
@@ -696,7 +706,7 @@ export class ChatScreen extends Screen {
     }
     if (this.streamingContent !== null) {
       add({ spans: [{ text: "Neutrino:", style: { fg: C.accent, bold: true } }] });
-      pushMarkdown(this.streamingContent, { fg: C.assistant });
+      pushMarkdown(sanitizeText(this.streamingContent), { fg: C.assistant });
     }
     this.toolLineIndex = toolLineIndex;
     return lines;

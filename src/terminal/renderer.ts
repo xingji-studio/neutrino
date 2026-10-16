@@ -1,6 +1,7 @@
 import process from "node:process";
 import type { Buffer } from "./buffer.js";
 import { type Style } from "../colors.js";
+import { isControlChar } from "../sanitize.js";
 
 function styleKey(st: Style): string {
   let k = "";
@@ -124,7 +125,11 @@ export class Renderer {
         s += sgr(cell.style);
         lastKey = sk;
       }
-      s += cell.ch;
+      // Final safety net: the byte stream is the one place a stray control
+      // character would be executed by the terminal (cursor moves, screen
+      // clears, …). The Buffer already neutralises them; this guarantees it
+      // even if a cell is ever populated by some other path.
+      s += isControlChar(cell.ch) ? " " : cell.ch;
     }
     s += "\x1b[0m";
     return s;

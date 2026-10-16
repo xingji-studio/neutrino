@@ -1,5 +1,6 @@
 import { C, EMPTY_STYLE, type Style } from "../colors.js";
 import { displayWidth, wcwidth } from "../width.js";
+import { isControlChar } from "../sanitize.js";
 
 export interface Cell {
   ch: string;
@@ -75,6 +76,11 @@ export class Buffer {
   }
 
   private writeChar(x: number, y: number, ch: string, style: Style): void {
+    // A control character (ESC, TAB, CR, …) would be written verbatim by the
+    // renderer and interpreted by the terminal as a command. Neutralise it to a
+    // space, which matches the single-column width wcwidth() reports for it, so
+    // the layout stays exactly as the caller measured it.
+    if (isControlChar(ch)) ch = " ";
     if (cellWidth(ch) === 2) {
       if (x + 1 >= this.width) {
         // No room for the tail: degrade to a space so the line never overflows
@@ -90,7 +96,6 @@ export class Buffer {
   }
 
   set(x: number, y: number, ch: string, style: Style = EMPTY_STYLE): void {
-    if (ch === "\r" || ch === "\n") return;
     if (x < 0 || x >= this.width || y < 0 || y >= this.height) return;
     this.writeChar(x, y, ch, style);
   }
@@ -99,8 +104,13 @@ export class Buffer {
     if (y < 0 || y >= this.height) return;
     let col = x;
     for (const ch of text) {
+      // Measure the character as the caller will have measured it, *then*
+      // neutralise control codes, so the column bookkeeping stays identical to
+      // the wrapping done upstream (see sanitize.ts).
+      const ctrl = isControlChar(ch);
       const w = wcwidth(ch.codePointAt(0) ?? 0);
       if (w === 0) {
+        if (ctrl) continue; // zero-width control (NUL): drop it
         // Combining mark: attach it to the glyph immediately to the left.
         const px = col - 1;
         if (px >= 0 && px < this.width && this.cells[y][px].ch !== "") {
@@ -113,7 +123,7 @@ export class Buffer {
         col += w;
         continue;
       }
-      this.writeChar(col, y, ch, style);
+      this.writeChar(col, y, ctrl ? " " : ch, style);
       col += w;
     }
   }

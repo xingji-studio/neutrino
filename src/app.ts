@@ -262,6 +262,15 @@ export class App {
     }
 
     if (ev.type === "move") {
+      // A release can be lost (the pointer left the window, the terminal did
+      // not report button-up, …). Motion with no button held means the gesture
+      // is over, so drop any stale press/drag instead of letting a bare hover
+      // keep scrolling the log or grow a phantom selection.
+      if (!ev.drag) {
+        this.pressed = false;
+        this.pressStart = null;
+        this.barDrag = null;
+      }
       if (this.barDrag) {
         const bar = this.top?.scrollbar();
         if (bar) {
