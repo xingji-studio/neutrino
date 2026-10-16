@@ -13,7 +13,7 @@ import { drawHeader } from "../header.js";
 import { computeInputWindow, cursorFromColumn, drawInputBox, drawScrollbar, wrapText } from "../ui.js";
 import { drawSpans, renderMarkdownText, type Line, type Span } from "../markdown.js";
 import { ellipsize, displayWidth } from "../width.js";
-import { LLMClient } from "../llm/client.js";
+import { LLMClient, describeError } from "../llm/client.js";
 import { executeTool, getToolDefinitions } from "../llm/tools.js";
 
 interface ApiMessage {
@@ -433,7 +433,7 @@ export class ChatScreen extends Screen {
       }
       this.onTurnFinished();
     } catch (e) {
-      const err = e instanceof Error ? e.message : String(e);
+      const err = describeError(e);
       this.messages.push({ role: "assistant", content: (this.streamingContent ?? "") + `\n[Error: ${err}]` });
       this.streamingContent = null;
       this.onTurnFinished();
