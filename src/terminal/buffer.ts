@@ -4,6 +4,13 @@ import { displayWidth, wcwidth } from "../width.js";
 export interface Cell {
   ch: string;
   style: Style;
+  /**
+   * True for UI chrome (scrollbars, borders, …). Chrome is drawn like any
+   * other cell, but is deliberately *not* copied: extracting a selection
+   * skips it, so a copied line never ends up with a scrollbar glued to its
+   * right edge.
+   */
+  chrome?: boolean;
 }
 
 const emptyCell = (): Cell => ({ ch: " ", style: { bg: C.black } });
@@ -141,6 +148,16 @@ export class Buffer {
       this.set(x + w - 1, j, "│", style);
     }
     this.writeText(x, y + h - 1, bottom, style);
+  }
+
+  /**
+   * Flag a cell as non-copyable chrome (e.g. a scrollbar). The flag lives on
+   * the cell and is cleared automatically whenever the cell is written again,
+   * since every frame starts from a fresh buffer.
+   */
+  markChrome(x: number, y: number): void {
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return;
+    this.cells[y][x].chrome = true;
   }
 
   clear(): void {

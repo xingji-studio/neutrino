@@ -23,11 +23,16 @@ export function normalizeSelection(sel: Selection): { start: Point; end: Point }
   return { start: b, end: a };
 }
 
-/** Index of the last non-blank cell on a row, or -1 when the row is empty. */
+/**
+ * Index of the last cell on a row that holds real content, or -1 when the row
+ * has none. UI chrome (a scrollbar) and blank cells are ignored, so a highlight
+ * never spills over the scrollbar column.
+ */
 function lastContentCol(buf: Buffer, y: number): number {
   const row = buf.cells[y];
   for (let x = row.length - 1; x >= 0; x--) {
-    if (row[x].ch !== " ") return x;
+    const cell = row[x];
+    if (!cell.chrome && cell.ch !== " ") return x;
   }
   return -1;
 }
@@ -50,7 +55,7 @@ export function applySelection(buf: Buffer, sel: Selection): void {
     if (x1 < x0) continue;
     for (let x = x0; x <= x1; x++) {
       const cell = buf.cells[y][x];
-      if (!cell) continue;
+      if (!cell || cell.chrome) continue; // never highlight the scrollbar
       cell.style = {
         fg: C.white,
         bg: C.selection,
@@ -62,9 +67,18 @@ export function applySelection(buf: Buffer, sel: Selection): void {
 }
 
 /**
- * Extract the plain text covered by a selection. Trailing whitespace is trimmed
- * per line (shell-style) and wide-character continuation cells are skipped, so
- * the result can be pasted straight back into a terminal.
+ * Extract the plain text covered by a selection.
+ *
+ * Three kinds of cell are skipped so the result is clean, pasteable text:
+ *   - UI chrome (the scrollbar), which is never content;
+ *   - wide-character continuation cells (`""`), which would duplicate a CJK
+ *     glyph;
+ *   - trailing blanks, trimmed per line (shell-style).
+ *
+ * Intermediate lines are copied out to the buffer's full width and only then
+ * trimmed, which keeps indentation intact while dropping the padding on the
+ * right. Skipping the scrollbar *before* trimming is what lets that trim
+ * actually reach the end of the text instead of stopping at the bar.
  */
 export function selectionText(buf: Buffer, sel: Selection): string {
   const { start, end } = normalizeSelection(sel);
@@ -73,11 +87,11 @@ export function selectionText(buf: Buffer, sel: Selection): string {
   const lines: string[] = [];
   for (let y = y0; y <= y1; y++) {
     const x0 = y === start.y ? Math.max(0, start.x) : 0;
-    let x1 = y === end.y ? end.x : buf.width - 1;
+    const x1 = y === end.y ? Math.min(buf.width - 1, end.x) : buf.width - 1;
     let line = "";
-    for (let x = x0; x <= Math.min(buf.width - 1, x1); x++) {
+    for (let x = x0; x <= x1; x++) {
       const cell = buf.cells[y][x];
-      if (!cell || cell.ch === "") continue; // "" is the tail of a wide glyph
+      if (!cell || cell.chrome || cell.ch === "") continue;
       line += cell.ch;
     }
     lines.push(line.replace(/[ \t]+$/, ""));

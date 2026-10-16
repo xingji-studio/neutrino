@@ -283,6 +283,9 @@ export function drawScrollbar(
   for (let i = 0; i < g.trackH; i++) {
     const isThumb = i >= g.thumbTop && i < g.thumbTop + g.thumbH;
     buf.set(x, top + i, isThumb ? "█" : "│", { fg: isThumb ? thumbColor : trackColor });
+    // The bar is chrome, not content: mark it so copying a selection never
+    // drags the scrollbar (or the padding before it) into the clipboard.
+    buf.markChrome(x, top + i);
   }
 }
 

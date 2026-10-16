@@ -76,7 +76,7 @@ Type a message on the start screen and press `Enter` to begin a new chat.
 | Scroll wheel | Scroll the chat/log, or move through lists |
 | Right-click | Go back (like `Esc`) |
 
-The selection highlight is drawn over whatever is on screen, so it works uniformly on the chat log, the input box and every menu. Selected text is copied with trailing whitespace trimmed per line (shell-style), so it can be pasted straight back into a terminal.
+The selection highlight is drawn over whatever is on screen, so it works uniformly on the chat log, the input box and every menu. Selected text is copied with trailing whitespace trimmed per line (shell-style), so it can be pasted straight back into a terminal. UI chrome (such as the scrollbar) is skipped when copying and highlighting, so a copy never picks up the bar or the padding in front of it.
 
 ## Configuration
 
@@ -121,6 +121,7 @@ node scripts/test-paste.mjs      # verify pasted newlines are flattened to space
 node scripts/test-mouse.mjs      # verify mouse escape-sequence parsing
 node scripts/test-cursor.mjs     # verify click-to-position-cursor math
 node scripts/test-selection.mjs  # verify selection highlighting & text extraction
+node scripts/test-copy.mjs       # verify a copy never includes the scrollbar or trailing padding
 node scripts/test-scrollbar.mjs  # verify the conversation scrollbar size/position and drag maths
 node scripts/test-markdown.mjs   # verify markdown/table rendering (incl. ragged rows)
 node scripts/test-wrap.mjs       # verify indentation & spacing are preserved when wrapping
