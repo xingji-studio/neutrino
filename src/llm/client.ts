@@ -27,6 +27,18 @@ const NETWORK_RETRIES = 2;
 const CONNECT_TIMEOUT_MS = 120_000;
 
 /**
+ * System prompt used when compressing a long conversation. The instruction
+ * spells out exactly what must survive compression (goals, decisions, files,
+ * commands) so the summary stays useful for continuing the work.
+ */
+const SUMMARY_SYSTEM_PROMPT =
+  "You compress the conversation history of an AI coding assistant so it fits in a smaller context window. " +
+  "Write a dense, factual summary in the same language as the conversation. Preserve: the user's goals and " +
+  "constraints, decisions that were made, files created or modified (with their paths), commands that were run " +
+  "and their meaningful results, and any unresolved problems or next steps. Drop pleasantries, restated " +
+  "instructions and redundant tool output. Output only the summary, with no preface.";
+
+/**
  * Flatten an error and its `cause` chain into one readable line.
  *
  * `fetch` reports almost every transport problem as a bare
@@ -135,6 +147,24 @@ export class LLMClient {
     const params = INTENSITY_PARAMS[intensity] ?? INTENSITY_PARAMS["High"];
     this.temperature = params.temperature;
     this.top_p = params.top_p;
+  }
+
+  /**
+   * Ask the model to compress a transcript into a short summary. Returns an
+   * empty string on any failure so the caller can fall back to simply dropping
+   * the old messages. Uses a throw-away request (no tools) via the normal
+   * streaming path, so provider differences are handled for free.
+   */
+  async summarize(transcript: string): Promise<string> {
+    const messages: ApiMessage[] = [
+      { role: "system", content: SUMMARY_SYSTEM_PROMPT },
+      { role: "user", content: transcript },
+    ];
+    let out = "";
+    for await (const chunk of this.streamTurn(messages)) out += chunk;
+    const text = out.trim();
+    if (!text || text.startsWith("[Error")) return "";
+    return text;
   }
 
   async *streamTurn(messages: ApiMessage[], tools?: ToolDefinition[]): AsyncGenerator<string> {

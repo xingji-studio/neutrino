@@ -3,6 +3,7 @@ import { Screen, type ScrollbarHandle } from "../terminal/screen.js";
 import type { Key, MouseEvent } from "../terminal/input.js";
 import { C, type Style } from "../colors.js";
 import {
+  loadConfig,
   loadPrompt,
   saveSession,
   type ModelInfo,
@@ -15,6 +16,12 @@ import { drawSpans, renderMarkdownText, type Line, type Span } from "../markdown
 import { ellipsize, displayWidth } from "../width.js";
 import { LLMClient, describeError } from "../llm/client.js";
 import { executeTool, getToolDefinitions } from "../llm/tools.js";
+import {
+  COMPACT_KEEP,
+  COMPACT_MAX_CHARS_PER_MESSAGE,
+  planCompaction,
+  transcriptFor,
+} from "../compact.js";
 
 interface ApiMessage {
   role: string;
@@ -36,6 +43,7 @@ interface ToolMsg {
 
 type Msg =
   | { role: "user" | "assistant" | "system"; content: string }
+  | { role: "summary"; content: string; count: number }
   | ToolMsg;
 
 const TOOLS = getToolDefinitions();
@@ -79,6 +87,22 @@ export class ChatScreen extends Screen {
   private scrollbarGeom: { x: number; top: number; bottom: number; total: number; viewport: number } | null = null;
   private lastEscTime = 0;
   private initialized = false;
+
+  // ---- auto context compression ----
+  /** Prompt tokens of the most recent request — the best proxy for how large
+   *  the current context has grown. Reset once the history is compressed. */
+  private lastPromptTokens = 0;
+  private compressing = false;
+
+  // ---- collapsible tool output ----
+  /** Message indices whose tool output is expanded (everything starts
+   *  collapsed). */
+  private expandedTools = new Set<number>();
+  /** For each line produced by buildLines, the tool message index it belongs
+   *  to, or -1 when it is not part of a tool block. */
+  private toolLineIndex: number[] = [];
+  /** Terminal row -> tool message index, rebuilt each render for hit-testing. */
+  private toolRows = new Map<number, number>();
 
   constructor(initialMessage = "") {
     super();
@@ -218,6 +242,7 @@ export class ChatScreen extends Screen {
     if (key.ctrl && key.name === "l") {
       const sysText = this.messages[0] && this.messages[0].role === "system" ? this.messages[0].content : "";
       this.messages = [{ role: "system", content: sysText }];
+      this.expandedTools.clear();
       this.streamingContent = null;
       this.scrollTop = 0;
       this.followBottom = true;
@@ -264,6 +289,12 @@ export class ChatScreen extends Screen {
         const win = computeInputWindow(this.inputValue, this.cursor, innerW);
         this.cursor = cursorFromColumn(this.inputValue, col, win);
         this.app.render();
+        return;
+      }
+      // A click inside the conversation log toggles a tool block open/closed.
+      const tool = this.toolRows.get(ev.y);
+      if (tool !== undefined) {
+        this.toggleTool(tool);
         return;
       }
       return;
@@ -341,10 +372,16 @@ export class ChatScreen extends Screen {
     this.paused = false;
     this.app.state.isThinking = true;
     const token = ++this.turnToken;
-    const apiMessages = this.buildApiMessages();
     this.streamingContent = "";
     this.app.render();
-    void this.agentLoop(apiMessages, token);
+    void (async () => {
+      // Shrink the history before building the request when it has outgrown the
+      // configured budget.
+      await this.autoCompress(token);
+      if (token !== this.turnToken) return;
+      const apiMessages = this.buildApiMessages();
+      await this.agentLoop(apiMessages, token);
+    })();
   }
 
   private buildApiMessages(): ApiMessage[] {
@@ -352,6 +389,9 @@ export class ChatScreen extends Screen {
     for (const m of this.messages) {
       if (m.role === "user" || m.role === "assistant") {
         api.push({ role: m.role, content: m.content });
+      } else if (m.role === "summary") {
+        // A compressed summary is fed back to the model as its own prior output.
+        api.push({ role: "assistant", content: m.content });
       }
     }
     return api;
@@ -361,6 +401,9 @@ export class ChatScreen extends Screen {
     try {
       while (true) {
         if (token !== this.turnToken) return;
+        // Keep the payload inside budget during a long single turn: once the
+        // context is too large, drop the body of older tool results.
+        apiMessages = this.trimApiMessages(apiMessages);
         const client = new LLMClient(this.model, this.modelProvider, this.intensity);
         let content = "";
         let hasContent = false;
@@ -380,6 +423,7 @@ export class ChatScreen extends Screen {
         if (client.usage) {
           this.tokens.prompt += client.usage.prompt;
           this.tokens.completion += client.usage.completion;
+          this.lastPromptTokens = client.usage.prompt;
         } else {
           this.tokens.completion += Math.max(1, Math.ceil(content.length / 4));
         }
@@ -449,10 +493,121 @@ export class ChatScreen extends Screen {
     this.maybeFlushQueue();
   }
 
+  /** Expand/collapse the tool block belonging to message `index`. */
+  private toggleTool(index: number): void {
+    if (this.expandedTools.has(index)) this.expandedTools.delete(index);
+    else this.expandedTools.add(index);
+    this.app.render();
+  }
+
+  /** Auto-compress threshold in (estimated) prompt tokens; 0 means "off". */
+  private compressThreshold(): number {
+    const raw = loadConfig().context_compress_threshold;
+    const n = typeof raw === "number" ? raw : Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  }
+
+  /**
+   * Once the context has grown past the configured threshold, replace the older
+   * part of the conversation with a model-written summary. Runs at the start of
+   * a turn, before the request is built. If summarising fails the old messages
+   * are simply dropped, so the context always shrinks.
+   */
+  private async autoCompress(token: number): Promise<void> {
+    const threshold = this.compressThreshold();
+    if (threshold <= 0 || this.lastPromptTokens < threshold) return;
+
+    const system = this.messages.find((m) => m.role === "system");
+    const rest = this.messages.filter((m) => m.role !== "system");
+    const items = rest.map((m) => ({
+      role: m.role,
+      content: m.role === "tool" ? m.result : (m as { content?: string }).content ?? "",
+      name: m.role === "tool" ? m.name : undefined,
+      ref: m,
+    }));
+    const plan = planCompaction(items, COMPACT_KEEP);
+    if (!plan) return;
+
+    const transcript = transcriptFor(plan.head, COMPACT_MAX_CHARS_PER_MESSAGE);
+    this.compressing = true;
+    this.app.render();
+
+    const snapshotLen = this.messages.length;
+    let summary = "";
+    try {
+      summary = await this.summarizeTranscript(transcript);
+    } catch {
+      summary = "";
+    }
+
+    this.compressing = false;
+    if (token !== this.turnToken) return;
+    // A new message (queued by the user while we were summarising) would be
+    // dropped by the swap below, so bail out and retry on the next turn.
+    if (this.messages.length !== snapshotLen) {
+      this.app.render();
+      return;
+    }
+
+    const count = plan.head.length;
+    const content = summary
+      ? `[Context compressed]\n${summary}`
+      : `[Context compressed]\n(${count} earlier messages were omitted to free up context.)`;
+    const summaryMsg: Msg = { role: "summary", content, count };
+    const kept = plan.tail.map((i) => i.ref);
+    this.messages = system ? [system, summaryMsg, ...kept] : [summaryMsg, ...kept];
+    // Message indices shifted, so any expanded tool block no longer lines up.
+    this.expandedTools.clear();
+    // The context is small again; its real size is re-learned from the next reply.
+    this.lastPromptTokens = 0;
+    this.save();
+  }
+
+  /**
+   * Summarise a transcript produced by `transcriptFor`. Split out so tests can
+   * stub it without touching the network.
+   */
+  protected async summarizeTranscript(transcript: string): Promise<string> {
+    const client = new LLMClient(this.model, this.modelProvider, this.intensity);
+    const text = await client.summarize(transcript);
+    if (client.usage) {
+      this.tokens.prompt += client.usage.prompt;
+      this.tokens.completion += client.usage.completion;
+    }
+    return text;
+  }
+
+  /**
+   * Keep the outbound payload within budget during a long single turn: once the
+   * context is over the threshold, blank out all but the most recent tool
+   * results. Their full text stays in the visible log, which is collapsible.
+   */
+  private trimApiMessages(apiMessages: ApiMessage[]): ApiMessage[] {
+    const threshold = this.compressThreshold();
+    if (threshold <= 0 || this.lastPromptTokens < threshold) return apiMessages;
+    const toolIdx: number[] = [];
+    for (let i = 0; i < apiMessages.length; i++) {
+      if (apiMessages[i].role === "tool") toolIdx.push(i);
+    }
+    const dropCount = toolIdx.length - COMPACT_KEEP;
+    if (dropCount <= 0) return apiMessages;
+    const copy = apiMessages.slice();
+    for (let k = 0; k < dropCount; k++) {
+      copy[toolIdx[k]] = { ...copy[toolIdx[k]], content: "[tool output omitted to save context]" };
+    }
+    return copy;
+  }
+
   private save(): void {
-    const chatMessages = this.messages.filter(
-      (m): m is SessionMessage => m.role === "user" || m.role === "assistant" || m.role === "tool",
-    );
+    const chatMessages: SessionMessage[] = [];
+    for (const m of this.messages) {
+      if (m.role === "user" || m.role === "assistant" || m.role === "tool") {
+        chatMessages.push(m);
+      } else if (m.role === "summary") {
+        // Persist a compressed summary as a plain assistant message.
+        chatMessages.push({ role: "assistant", content: m.content });
+      }
+    }
     if (chatMessages.length === 0) return;
     try {
       this.sessionId = saveSession(
@@ -471,34 +626,66 @@ export class ChatScreen extends Screen {
 
   private buildLines(width: number): Line[] {
     const lines: Line[] = [];
-    const pushText = (text: string, style: Style): void => {
-      for (const ln of wrapText(text, width)) {
-        lines.push({ spans: [{ text: ln, style }] });
-      }
+    // Parallel map from rendered line -> owning tool message index (-1 = none),
+    // used to turn a click on any line of a tool block into an expand/collapse.
+    const toolLineIndex: number[] = [];
+    const add = (line: Line, tool = -1): void => {
+      lines.push(line);
+      toolLineIndex.push(tool);
     };
-    for (const m of this.messages) {
+    const pushText = (text: string, style: Style, tool = -1): void => {
+      for (const ln of wrapText(text, width)) add({ spans: [{ text: ln, style }] }, tool);
+    };
+    const pushMarkdown = (text: string, style: Style): void => {
+      for (const ln of renderMarkdownText(text, width, style)) add(ln);
+    };
+
+    for (let mi = 0; mi < this.messages.length; mi++) {
+      const m = this.messages[mi];
       if (m.role === "system") {
         pushText(m.content, { fg: C.dim });
       } else if (m.role === "user") {
-        lines.push({ spans: [{ text: "You:", style: { fg: C.accent, bold: true } }] });
-        lines.push(...renderMarkdownText(m.content, width, { fg: C.user }));
-        lines.push({ spans: [] });
+        add({ spans: [{ text: "You:", style: { fg: C.accent, bold: true } }] });
+        pushMarkdown(m.content, { fg: C.user });
+        add({ spans: [] });
       } else if (m.role === "assistant") {
-        lines.push({ spans: [{ text: "Neutrino:", style: { fg: C.accent, bold: true } }] });
-        lines.push(...renderMarkdownText(m.content, width, { fg: C.assistant }));
-        lines.push({ spans: [] });
+        add({ spans: [{ text: "Neutrino:", style: { fg: C.accent, bold: true } }] });
+        pushMarkdown(m.content, { fg: C.assistant });
+        add({ spans: [] });
+      } else if (m.role === "summary") {
+        add({
+          spans: [
+            {
+              text: `✂ Context compressed (${m.count} earlier messages)`,
+              style: { fg: C.amber, bold: true },
+            },
+          ],
+        });
+        pushText(m.content, { fg: C.dim });
+        add({ spans: [] });
       } else if (m.role === "tool") {
-        lines.push({ spans: [{ text: `⚙ ${m.name}`, style: { fg: C.toolHeader, bold: true } }] });
+        // Header + the command/path always show; the (often huge) output body is
+        // collapsed by default and toggled by clicking the block.
+        add({ spans: [{ text: `⚙ ${m.name}`, style: { fg: C.toolHeader, bold: true } }] }, mi);
         const argText = (m.arguments.command as string) ?? (m.arguments.path as string) ?? "";
-        if (argText) lines.push({ spans: [{ text: "  " + argText, style: { fg: C.dim } }] });
-        pushText(m.result || "(no output)", { fg: C.dim });
-        lines.push({ spans: [] });
+        if (argText) add({ spans: [{ text: "  " + argText, style: { fg: C.dim } }] }, mi);
+        if (this.expandedTools.has(mi)) {
+          pushText(m.result || "(no output)", { fg: C.dim }, mi);
+          add({ spans: [{ text: "  ▾ click to collapse", style: { fg: C.toolHeader } }] }, mi);
+        } else {
+          const body = m.result || "";
+          const n = body ? body.split("\n").length : 0;
+          const summary = n > 0 ? `${n} line${n === 1 ? "" : "s"} hidden` : "no output";
+          add({ spans: [{ text: `  ▸ ${summary} — click to expand`, style: { fg: C.dim } }] }, mi);
+        }
+        add({ spans: [] });
       }
     }
     if (this.streamingContent !== null) {
-      lines.push({ spans: [{ text: "Neutrino:", style: { fg: C.accent, bold: true } }] });
-      lines.push(...renderMarkdownText(this.streamingContent, width, { fg: C.assistant }));
+      add({ spans: [{ text: "Neutrino:", style: { fg: C.accent, bold: true } }] });
+      pushMarkdown(this.streamingContent, { fg: C.assistant });
     }
+    this.toolLineIndex = toolLineIndex;
     return lines;
   }
 
@@ -509,7 +696,10 @@ export class ChatScreen extends Screen {
 
     let status = "";
     let statusStyle: Style = { fg: C.dim };
-    if (this.queued) {
+    if (this.compressing) {
+      status = "Compressing context…";
+      statusStyle = { fg: C.amber, bold: true };
+    } else if (this.queued) {
       status = "Will send when paused or idle...";
       statusStyle = { fg: C.amber };
     } else if (this.paused) {
@@ -542,9 +732,14 @@ export class ChatScreen extends Screen {
         ? { x: w - 1, top: logTop, bottom: logBottom, total: lines.length, viewport: viewH }
         : null;
 
+    // Remember which tool block (if any) each visible row belongs to, so a
+    // click can expand/collapse it (see the onMouse handler).
+    this.toolRows.clear();
     for (let y = logTop; y <= logBottom; y++) {
       const li = this.scrollTop + (y - logTop);
       if (li >= lines.length) break;
+      const tool = this.toolLineIndex[li];
+      if (tool !== undefined && tool >= 0) this.toolRows.set(y, tool);
       drawSpans(buf, 2, y, lines[li].spans, Math.max(4, w - 4));
     }
 

@@ -56,6 +56,9 @@ export const DEFAULT_CONFIG: Record<string, unknown> = {
   language: "en",
   theme: "default",
   default_intensity: "High",
+  // Estimated prompt tokens above which the conversation is auto-compressed.
+  // 0 disables auto-compression.
+  context_compress_threshold: 32000,
 };
 
 export const INTENSITY_LEVELS = ["Low", "Medium", "High", "Max", "Ultra"];
@@ -67,6 +70,19 @@ export const INTENSITY_PARAMS: Record<string, { temperature: number; top_p: numb
   Max: { temperature: 1.0, top_p: 1.0 },
   Ultra: { temperature: 1.5, top_p: 1.0 },
 };
+
+/**
+ * Selectable auto-compression thresholds, in estimated prompt tokens.
+ * `0` turns the feature off. Rendered as-is in the settings screen.
+ */
+export const COMPRESS_THRESHOLD_OPTIONS: { value: number; label: string }[] = [
+  { value: 0, label: "Off" },
+  { value: 8000, label: "8K tokens" },
+  { value: 16000, label: "16K tokens" },
+  { value: 32000, label: "32K tokens" },
+  { value: 64000, label: "64K tokens" },
+  { value: 128000, label: "128K tokens" },
+];
 
 export interface SessionMeta {
   id: string;

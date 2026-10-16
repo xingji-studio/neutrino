@@ -92,6 +92,8 @@ screen.messages = [
     result: "src/\n    terminal/\n        input.ts",
   },
 ];
+// Tool output is collapsed by default now; expand it to check the wrapping.
+screen.expandedTools.add(1);
 const buf = new Buffer(80, 24);
 screen.render(buf);
 const rows = buf.cells.map((cells) => cells.map((c) => c.ch).join("").trimEnd());

@@ -2,12 +2,24 @@ import type { Buffer } from "../terminal/buffer.js";
 import { Screen } from "../terminal/screen.js";
 import type { Key, MouseEvent } from "../terminal/input.js";
 import { C } from "../colors.js";
-import { INTENSITY_LEVELS, MODEL_FILE, loadConfig, saveConfig } from "../config.js";
+import {
+  COMPRESS_THRESHOLD_OPTIONS,
+  CONFIG_FILE,
+  INTENSITY_LEVELS,
+  loadConfig,
+  saveConfig,
+} from "../config.js";
 import { drawHeader } from "../header.js";
 import { centerVertically, drawHint } from "../ui.js";
 
+/** The settings that can be changed here, top to bottom. */
+const ROWS = ["intensity", "compress"] as const;
+type RowId = (typeof ROWS)[number];
+
 export class SettingsScreen extends Screen {
   private intensityIdx = 2;
+  private thresholdIdx = 3;
+  private rowIdx = 0;
   private lastHoverX = -1;
   private lastHoverY = -1;
 
@@ -16,17 +28,40 @@ export class SettingsScreen extends Screen {
     const current = String(config.default_intensity ?? "High");
     const i = INTENSITY_LEVELS.indexOf(current);
     this.intensityIdx = i >= 0 ? i : 2;
+
+    const threshold = Number(config.context_compress_threshold ?? 32000);
+    const t = COMPRESS_THRESHOLD_OPTIONS.findIndex((o) => o.value === threshold);
+    this.thresholdIdx = t >= 0 ? t : 3;
+  }
+
+  /** Change the value of a row by `delta` steps and persist it immediately. */
+  private cycle(row: RowId, delta: number): void {
+    if (row === "intensity") {
+      const n = INTENSITY_LEVELS.length;
+      this.intensityIdx = (this.intensityIdx + delta + n) % n;
+    } else {
+      const n = COMPRESS_THRESHOLD_OPTIONS.length;
+      this.thresholdIdx = (this.thresholdIdx + delta + n) % n;
+    }
+    this.save();
   }
 
   onKey(key: Key): void {
     if (key.name === "up") {
-      this.intensityIdx = (this.intensityIdx + INTENSITY_LEVELS.length - 1) % INTENSITY_LEVELS.length;
+      this.rowIdx = (this.rowIdx + ROWS.length - 1) % ROWS.length;
       this.app.render();
     } else if (key.name === "down") {
-      this.intensityIdx = (this.intensityIdx + 1) % INTENSITY_LEVELS.length;
+      this.rowIdx = (this.rowIdx + 1) % ROWS.length;
+      this.app.render();
+    } else if (key.name === "left") {
+      this.cycle(ROWS[this.rowIdx], -1);
+      this.app.render();
+    } else if (key.name === "right") {
+      this.cycle(ROWS[this.rowIdx], 1);
       this.app.render();
     } else if (key.name === "enter" || key.name === "return") {
       this.save();
+      this.app.render();
     } else if (key.name === "escape") {
       this.save();
       this.app.popScreen();
@@ -41,9 +76,9 @@ export class SettingsScreen extends Screen {
       if (ev.x === this.lastHoverX && ev.y === this.lastHoverY) return;
       this.lastHoverX = ev.x;
       this.lastHoverY = ev.y;
-      for (let i = 0; i < layout.optionYs.length; i++) {
-        if (ev.y === layout.optionYs[i] && i !== this.intensityIdx) {
-          this.intensityIdx = i;
+      for (let i = 0; i < layout.rowYs.length; i++) {
+        if (ev.y === layout.rowYs[i] && i !== this.rowIdx) {
+          this.rowIdx = i;
           this.app.render();
           return;
         }
@@ -52,8 +87,7 @@ export class SettingsScreen extends Screen {
     }
 
     if (ev.type === "wheel") {
-      this.intensityIdx =
-        (this.intensityIdx + (ev.dir === -1 ? -1 : 1) + INTENSITY_LEVELS.length) % INTENSITY_LEVELS.length;
+      this.cycle(ROWS[this.rowIdx], ev.dir === -1 ? -1 : 1);
       this.app.render();
       return;
     }
@@ -64,10 +98,14 @@ export class SettingsScreen extends Screen {
         this.app.popScreen();
         return;
       }
-      for (let i = 0; i < layout.optionYs.length; i++) {
-        if (ev.y === layout.optionYs[i]) {
-          this.intensityIdx = i;
-          this.save();
+      for (let i = 0; i < layout.rowYs.length; i++) {
+        if (ev.y === layout.rowYs[i]) {
+          if (this.rowIdx === i) {
+            // Clicking the already-selected row advances its value.
+            this.cycle(ROWS[i], 1);
+          } else {
+            this.rowIdx = i;
+          }
           this.app.render();
           return;
         }
@@ -79,25 +117,30 @@ export class SettingsScreen extends Screen {
     }
   }
 
-  private layout(): { optionYs: number[]; hintY: number } | null {
-    const h = this.app.height;
-    const lines: string[] = [
-      "Settings",
-      "",
-      `Model: ${this.app.state.selectedProvider}/${this.app.state.selectedModelName}`,
-      `Default intensity:`,
+  private rowTexts(): { label: string; value: string }[] {
+    return [
+      { label: "Default intensity", value: INTENSITY_LEVELS[this.intensityIdx] },
+      { label: "Auto-compress context", value: COMPRESS_THRESHOLD_OPTIONS[this.thresholdIdx].label },
     ];
-    const total = lines.length + INTENSITY_LEVELS.length + 2;
+  }
+
+  private layout(): { rowYs: number[]; hintY: number; labelW: number } | null {
+    const h = this.app.height;
+    const rows = this.rowTexts();
+    const labelW = Math.max(...rows.map((r) => r.label.length));
+    // title, blank, model, blank, option rows, blank, hint
+    const total = 6 + rows.length;
     const top = centerVertically(h, total);
-    const optionYs = INTENSITY_LEVELS.map((_, i) => top + 4 + i);
-    const hintY = top + 4 + INTENSITY_LEVELS.length + 2;
+    const rowYs = rows.map((_, i) => top + 4 + i);
+    const hintY = top + 5 + rows.length;
     if (hintY > h - 1) return null;
-    return { optionYs, hintY };
+    return { rowYs, hintY, labelW };
   }
 
   private save(): void {
     const config = loadConfig();
     config.default_intensity = INTENSITY_LEVELS[this.intensityIdx];
+    config.context_compress_threshold = COMPRESS_THRESHOLD_OPTIONS[this.thresholdIdx].value;
     saveConfig(config);
   }
 
@@ -105,40 +148,40 @@ export class SettingsScreen extends Screen {
     drawHeader(buf, this.app.state);
     const h = buf.height;
 
-    const lines: string[] = [
-      "Settings",
-      "",
-      `Model: ${this.app.state.selectedProvider}/${this.app.state.selectedModelName}`,
-      `Default intensity:`,
-    ];
-
-    const content: { text: string; selected: boolean }[] = INTENSITY_LEVELS.map((l, i) => ({
-      text: l,
-      selected: i === this.intensityIdx,
-    }));
-
-    const total = lines.length + content.length + 2;
+    const rows = this.rowTexts();
+    const labelW = Math.max(...rows.map((r) => r.label.length));
+    const total = 6 + rows.length;
     const top = centerVertically(h, total);
+
     let y = top;
-
-    buf.centerText(y, lines[0], { fg: C.accent, bold: true });
+    buf.centerText(y, "Settings", { fg: C.accent, bold: true });
     y += 2;
-    buf.centerText(y, lines[2], { fg: C.assistant });
-    y += 1;
-    buf.centerText(y, lines[3], { fg: C.dim });
-    y += 1;
+    buf.centerText(y, `Model: ${this.app.state.selectedProvider}/${this.app.state.selectedModelName}`, {
+      fg: C.assistant,
+    });
+    y += 2;
 
-    for (const c of content) {
-      const text = (c.selected ? "▸ " : "  ") + c.text;
-      buf.centerText(y, text, c.selected ? { fg: C.accent, bg: C.highlightBg } : { fg: C.assistant });
+    for (let i = 0; i < rows.length; i++) {
+      const selected = i === this.rowIdx;
+      const marker = selected ? "▸ " : "  ";
+      const label = rows[i].label.padEnd(labelW);
+      const value = selected ? `◂ ${rows[i].value} ▸` : rows[i].value;
+      const text = marker + label + "   " + value;
+      if (selected) {
+        buf.centerText(y, " " + text + " ", { fg: C.accent, bg: C.highlightBg, bold: true });
+      } else {
+        buf.centerText(y, text, { fg: C.assistant });
+      }
       y += 1;
     }
 
     y += 1;
-    buf.centerText(y, `model.json: ${MODEL_FILE}`, { fg: C.dim });
-    y += 1;
     if (y < h) {
-      drawHint(buf, y, "↑/↓ change  ·  Enter apply  ·  click to choose  ·  right-click back  ·  Esc back");
+      buf.centerText(y, `config: ${CONFIG_FILE}`, { fg: C.dim });
+      y += 1;
+    }
+    if (y < h) {
+      drawHint(buf, y, "↑/↓ select  ·  ←/→ change  ·  Enter apply  ·  right-click back  ·  Esc back");
     }
   }
 }
