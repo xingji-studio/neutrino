@@ -38,6 +38,22 @@ export abstract class Screen {
   }
 
   /**
+   * Rows this screen draws as persistent "chrome" (an input box, key hints, …)
+   * that must be repainted on *every* frame, even when their contents are
+   * unchanged.
+   *
+   * The renderer normally emits only rows whose cells changed, which is what
+   * keeps redraws cheap. But the terminal can shift its own contents behind our
+   * back — ConPTY reflowing the buffer mid-resize, a size-race repaint, a stray
+   * scroll — and a diffed row would then stay stale forever (the classic
+   * "input box swallowed by the log" artefact). Redrawing this small strip by
+   * absolute position every frame makes it self-healing.
+   */
+  alwaysRepaintRows(): number[] {
+    return [];
+  }
+
+  /**
    * Handle a bracketed (or detected) paste. `text` already has its newlines
    * flattened to spaces, so it can be inserted as a single line. Screens that
    * have no text input can leave this as a no-op.

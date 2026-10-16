@@ -188,6 +188,19 @@ export class StartScreen extends Screen {
     }
   }
 
+  /**
+   * The message box, the tabs below it and the hint row are persistent chrome;
+   * repainting them every frame keeps them self-healing against terminal-side
+   * drift (see Screen.alwaysRepaintRows).
+   */
+  alwaysRepaintRows(): number[] {
+    const { inputY, tabY } = this.layout();
+    const h = this.app.height;
+    const rows: number[] = [];
+    for (let y = inputY; y <= tabY + TAB_H; y++) if (y >= 0 && y < h) rows.push(y);
+    return rows;
+  }
+
   private layout(): Layout {
     const w = this.app.width;
     const h = this.app.height;

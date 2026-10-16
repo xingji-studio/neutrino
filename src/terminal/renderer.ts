@@ -39,6 +39,14 @@ export class Renderer {
   private prevW = 0;
   private prevH = 0;
   private out = process.stdout;
+  /**
+   * The most recent frame and the rows that were force-repainted for it. Kept
+   * so `repaint()` can re-emit the exact same frame — without re-running the
+   * screen's (potentially expensive) render — to heal any drift the terminal
+   * introduced behind our back.
+   */
+  private lastBuf: Buffer | null = null;
+  private lastForce: readonly number[] = [];
 
   init(): void {
     this.write("\x1b[?1049h"); // alternate screen
@@ -55,7 +63,31 @@ export class Renderer {
     this.write("\x1b[0m");
   }
 
-  render(buf: Buffer): void {
+  /**
+   * @param forceRows rows to repaint unconditionally, even when their contents
+   *   are unchanged. Screens use this for persistent chrome (input box, hints)
+   *   so that terminal-side drift can never leave it stale (see
+   *   `Screen.alwaysRepaintRows`).
+   */
+  render(buf: Buffer, forceRows: readonly number[] = []): void {
+    this.lastBuf = buf;
+    this.lastForce = forceRows;
+    this.draw(buf, forceRows);
+  }
+
+  /**
+   * Re-emit the last frame in full. Cheap (no screen re-render) and visually a
+   * no-op when nothing drifted, but it repairs rows the terminal moved on its
+   * own (resize reflow, stray scroll). Called periodically as a safety net.
+   */
+  repaint(): void {
+    if (!this.lastBuf) return;
+    const all: number[] = [];
+    for (let y = 0; y < this.lastBuf.height; y++) all.push(y);
+    this.draw(this.lastBuf, all);
+  }
+
+  private draw(buf: Buffer, forceRows: readonly number[]): void {
     const w = buf.width;
     const h = buf.height;
     if (w !== this.prevW || h !== this.prevH) {
@@ -63,11 +95,12 @@ export class Renderer {
       this.prevW = w;
       this.prevH = h;
     }
+    const force = forceRows.length ? new Set(forceRows) : null;
     let out = "";
     for (let y = 0; y < h; y++) {
       const row = buf.cells[y];
       const sig = rowSignature(row);
-      if (sig !== this.prevSig[y]) {
+      if (sig !== this.prevSig[y] || (force !== null && force.has(y))) {
         out += this.renderRow(y, row);
         this.prevSig[y] = sig;
       }

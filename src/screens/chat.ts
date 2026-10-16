@@ -138,6 +138,19 @@ export class ChatScreen extends Screen {
     }
   }
 
+  /**
+   * The input row is persistent chrome: it is drawn with absolute positioning
+   * and must survive any terminal-side drift (ConPTY reflow, a stray scroll).
+   * Repainting it every frame makes the input area self-healing — the log can
+   * never end up "covering" it.
+   */
+  alwaysRepaintRows(): number[] {
+    const h = this.app.height;
+    const rows: number[] = [];
+    for (let y = h - 5; y <= h - 1; y++) if (y >= 0) rows.push(y);
+    return rows;
+  }
+
   showsCursor(): boolean {
     // The chat input is always focused; a cursor is drawn when it holds text.
     return this.inputValue.length > 0;

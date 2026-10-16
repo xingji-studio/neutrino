@@ -18,6 +18,10 @@ import { StartScreen } from "./screens/start.js";
 
 const CURSOR_BLINK_MS = 530;
 const TOAST_MS = 1600;
+// How often the whole frame is re-emitted as a safety net, so terminal-side
+// drift (ConPTY reflow, stray scroll) can never leave any row stale for long.
+// Re-emitting the cached frame is a no-op when nothing drifted.
+const REPAINT_MS = 2000;
 
 export class App {
   state: AppState = defaultState();
@@ -32,6 +36,7 @@ export class App {
   private blinkTimer: NodeJS.Timeout | null = null;
   private cursorTimer: NodeJS.Timeout | null = null;
   private toastTimer: NodeJS.Timeout | null = null;
+  private repaintTimer: NodeJS.Timeout | null = null;
   private toast = "";
   // Most recently rendered frame. Kept so a selection can be turned back into
   // text without having to re-run the screen's render.
@@ -89,6 +94,7 @@ export class App {
     this.sizeTimer = setInterval(() => {
       if (this.syncSize()) this.render();
     }, 200);
+    this.repaintTimer = setInterval(() => this.renderer.repaint(), REPAINT_MS);
     this.pushScreen(new StartScreen());
   }
 
@@ -147,7 +153,7 @@ export class App {
     if (this.state.selection) applySelection(buf, this.state.selection);
     this.drawToast(buf);
 
-    this.renderer.render(buf);
+    this.renderer.render(buf, this.top?.alwaysRepaintRows() ?? []);
   }
 
   private drawToast(buf: Buffer): void {
@@ -390,6 +396,10 @@ export class App {
     if (this.running) return;
     this.running = true;
     if (this.sizeTimer) clearInterval(this.sizeTimer);
+    if (this.repaintTimer) {
+      clearInterval(this.repaintTimer);
+      this.repaintTimer = null;
+    }
     if (this.blinkTimer) {
       clearInterval(this.blinkTimer);
       this.blinkTimer = null;
