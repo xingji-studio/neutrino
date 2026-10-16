@@ -128,6 +128,10 @@ node scripts/test-wrap.mjs       # verify indentation & spacing are preserved wh
 node scripts/test-render.mjs     # fuzz the diff renderer + render the chat screen,
                                  # asserting no stale/residual cells are left behind
 node scripts/test-sanitize.mjs   # verify ANSI/control codes never reach the screen
+node scripts/test-drift.mjs      # verify the input area self-heals after terminal drift
+node scripts/test-fetch.mjs      # verify streamed requests release aborts and retry drops
+node scripts/test-compact.mjs    # verify context-compression planning
+node scripts/test-tools.mjs      # verify tool-output folding
 ```
 
 ### Rendering model
@@ -143,6 +147,16 @@ A cell's glyph is copied straight into the output stream, so a cell holding a *c
 1. `src/sanitize.ts` — `sanitizeText()` removes whole escape sequences (not just the ESC byte, which would leave `[31m` behind as literal text), expands tabs so measured widths match what the terminal draws, and drops any remaining control code. It is applied where untrusted text enters the display (chat messages, tool results, pasted input).
 2. `Buffer` — writing a control character stores a space instead, preserving the column width the caller measured, so no cell can ever hold one.
 3. `Renderer` — a last-resort check when emitting a row, so the byte stream cannot carry a control code even if a cell were populated another way.
+
+### Network resilience
+
+Model responses arrive over a streamed connection that can drop at any point. A single blip should not end the session, so three cases are handled:
+
+- **The request never goes out** (`fetch` rejects) — retried a couple of times with a short backoff, bounded by a connect timeout.
+- **The stream dies before the first byte** — the server or a proxy closed the connection mid-flight (`TypeError: terminated`, `other side closed`, …). Nothing has reached the user, so the request is simply re-issued.
+- **The stream dies after output has started** — retrying would duplicate text, so the error is surfaced instead, with the real reason expanded out of the `error.cause` chain (`fetch failed` alone says nothing useful).
+
+Any stream the consumer walks away from (pause, or a newer turn taking over) always has its body cancelled, so sockets are not leaked.
 
 ## License
 

@@ -39,6 +39,13 @@ const SUMMARY_SYSTEM_PROMPT =
   "instructions and redundant tool output. Output only the summary, with no preface.";
 
 /**
+ * Terse transport messages that all mean "the connection dropped mid-flight".
+ * The \b keeps "terminated" from matching unrelated text such as
+ * "Unterminated string constant".
+ */
+const DROP_HINT_RE = /\bterminated\b|other side closed|socket hang up|premature close/i;
+
+/**
  * Flatten an error and its `cause` chain into one readable line.
  *
  * `fetch` reports almost every transport problem as a bare
@@ -56,7 +63,14 @@ export function describeError(e: unknown): string {
 
   let cur: unknown = e;
   const seen = new Set<unknown>();
-  while (cur && typeof cur === "object" && !seen.has(cur)) {
+  while (cur != null && !seen.has(cur)) {
+    if (typeof cur === "string") {
+      // fetch/undici sometimes stash the real reason in a plain string
+      // (`cause: "other side closed"`), which an object-only walk would miss.
+      push(cur);
+      break;
+    }
+    if (typeof cur !== "object") break;
     seen.add(cur);
     const err = cur as { message?: unknown; name?: unknown; code?: unknown; cause?: unknown };
     const message = typeof err.message === "string" && err.message ? err.message : String(err.name ?? "Error");
@@ -64,7 +78,10 @@ export function describeError(e: unknown): string {
     push(message, code);
     cur = err.cause;
   }
-  return parts.join(": ") || e.message;
+  const text = parts.join(": ") || e.message;
+  // A dropped mid-stream connection surfaces as a bare `TypeError: terminated`,
+  // which on its own tells the user nothing worth reading.
+  return DROP_HINT_RE.test(text) ? `${text} — the connection was closed before the response finished` : text;
 }
 
 /**
@@ -81,17 +98,26 @@ function isRetriableNetworkError(e: unknown): boolean {
     "ENETUNREACH",
     "ENETDOWN",
     "EAI_AGAIN",
+    "ERR_STREAM_PREMATURE_CLOSE",
     "UND_ERR_SOCKET",
     "UND_ERR_CONNECT_TIMEOUT",
   ]);
   let cur: unknown = e;
   const seen = new Set<unknown>();
-  while (cur && typeof cur === "object" && !seen.has(cur)) {
+  while (cur != null && !seen.has(cur)) {
+    if (typeof cur === "string") {
+      if (DROP_HINT_RE.test(cur)) return true;
+      break;
+    }
+    if (typeof cur !== "object") break;
     seen.add(cur);
-    const err = cur as { name?: unknown; code?: unknown; cause?: unknown };
+    const err = cur as { name?: unknown; code?: unknown; message?: unknown; cause?: unknown };
     if (typeof err.code === "string" && transient.has(err.code)) return true;
-    // Our own connect timeout aborts the request with a plain message.
-    if (err.name === "AbortError") return true;
+    // Our own connect timeout aborts with a plain AbortError; undici wraps a
+    // dropped socket in a SocketError.
+    if (err.name === "AbortError" || err.name === "SocketError") return true;
+    // A stream that dies mid-flight: "terminated", "socket hang up", …
+    if (typeof err.message === "string" && DROP_HINT_RE.test(err.message)) return true;
     cur = err.cause;
   }
   // Undici's generic wrapper: assume the socket dropped and try again.
@@ -181,7 +207,34 @@ export class LLMClient {
     }
   }
 
+  /**
+   * Drive one request, retrying if the stream dies before it produced anything.
+   *
+   * A response can be cut off on the very first read — "terminated" when a
+   * proxy or the server closes the connection mid-flight. Nothing has reached
+   * the user yet, so re-issuing the request is invisible (and cannot duplicate
+   * text). Once a token has been emitted a retry is unsafe, so the error is
+   * surfaced instead.
+   */
   private async *streamOpenAI(messages: ApiMessage[], tools?: ToolDefinition[]): AsyncGenerator<string> {
+    for (let attempt = 0; ; attempt++) {
+      this.toolCalls = [];
+      let produced = false;
+      try {
+        for await (const token of this.openAIAttempt(messages, tools)) {
+          produced = true;
+          yield token;
+        }
+        return;
+      } catch (e) {
+        if (produced || attempt >= NETWORK_RETRIES || !isRetriableNetworkError(e)) throw e;
+        await sleep(400 * (attempt + 1));
+      }
+    }
+  }
+
+  /** A single streaming attempt; see `streamOpenAI` for the retry policy. */
+  private async *openAIAttempt(messages: ApiMessage[], tools?: ToolDefinition[]): AsyncGenerator<string> {
     const url = this.model.url.replace(/\/+$/, "") + "/chat/completions";
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -288,7 +341,26 @@ export class LLMClient {
       .map((k) => toolCallsByIndex[k]);
   }
 
+  /** Anthropic counterpart of `streamOpenAI`, with the same retry policy. */
   private async *streamAnthropic(messages: ApiMessage[]): AsyncGenerator<string> {
+    for (let attempt = 0; ; attempt++) {
+      this.toolCalls = [];
+      let produced = false;
+      try {
+        for await (const token of this.anthropicAttempt(messages)) {
+          produced = true;
+          yield token;
+        }
+        return;
+      } catch (e) {
+        if (produced || attempt >= NETWORK_RETRIES || !isRetriableNetworkError(e)) throw e;
+        await sleep(400 * (attempt + 1));
+      }
+    }
+  }
+
+  /** A single streaming attempt; see `streamAnthropic` for the retry policy. */
+  private async *anthropicAttempt(messages: ApiMessage[]): AsyncGenerator<string> {
     const url = this.model.url.replace(/\/+$/, "") + "/messages";
     const headers: Record<string, string> = {
       "Content-Type": "application/json",

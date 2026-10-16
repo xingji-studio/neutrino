@@ -8,6 +8,8 @@
 //   * `fetch` hides the real failure in `error.cause`, so the log only ever
 //     showed the useless "[Error: fetch failed]".
 //   * A transient reset killed the whole turn because nothing retried.
+//   * A stream cut off mid-flight ("terminated" / "other side closed") ended
+//     the turn before a single byte arrived, even though retrying was free.
 import { LLMClient, describeError } from "../dist/llm/client.js";
 
 let failures = 0;
@@ -187,6 +189,90 @@ const tick = () => new Promise((r) => setImmediate(r));
   const tc = client.toolCalls[0];
   assert(tc?.name === "run_command", `tool name assembled, got ${tc?.name}`);
   assert(tc?.arguments === '{"command":"ls"}', `tool args assembled, got ${JSON.stringify(tc?.arguments)}`);
+}
+
+// ---------------------------------------------------------------------------
+// 7. A stream cut off *before the first byte* ("terminated") is retried.
+//    Nothing reached the user, so retrying is invisible and cannot duplicate.
+// ---------------------------------------------------------------------------
+{
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    if (calls === 1) {
+      // The socket drops before the server sends a single byte — exactly the
+      // "[Error: terminated]" seen in the saved session.
+      const stream = new ReadableStream({
+        start(c) {
+          c.error(new TypeError("terminated"));
+        },
+      });
+      return new Response(stream, { status: 200 });
+    }
+    const stream = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode(sse({ choices: [{ delta: { content: "second try" } }] })));
+        c.enqueue(enc.encode(DONE));
+        c.close();
+      },
+    });
+    return new Response(stream, { status: 200 });
+  };
+
+  const client = makeClient();
+  let text = "";
+  for await (const chunk of client.streamTurn([{ role: "user", content: "hi" }])) text += chunk;
+  assert(calls === 2, `a mid-flight "terminated" before any byte should be retried, calls=${calls}`);
+  assert(text === "second try", `the retried request succeeds, got ${JSON.stringify(text)}`);
+  assert(!text.includes("[Error"), `no error is shown when the retry works, got ${JSON.stringify(text)}`);
+}
+
+// ---------------------------------------------------------------------------
+// 8. A stream that dies *after* emitting text is NOT retried (that would
+//    duplicate content); the error is surfaced and the partial text is kept.
+// ---------------------------------------------------------------------------
+{
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    const stream = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode(sse({ choices: [{ delta: { content: "half" } }] })));
+        // Drop the socket only *after* the first chunk is handed over, so this
+        // really models "some text arrived, then the stream died".
+        setTimeout(() => c.error(new TypeError("terminated")), 0);
+      },
+    });
+    return new Response(stream, { status: 200 });
+  };
+
+  const client = makeClient();
+  let text = "";
+  for await (const chunk of client.streamTurn([{ role: "user", content: "hi" }])) text += chunk;
+  assert(calls === 1, `a stream that already emitted must not be retried, calls=${calls}`);
+  assert(text.startsWith("half"), `the partial text survives, got ${JSON.stringify(text)}`);
+  assert(text.includes("terminated"), `the drop is surfaced, got ${JSON.stringify(text)}`);
+}
+
+// ---------------------------------------------------------------------------
+// 9. describeError turns a bare "terminated" into something readable, and
+//    surfaces a string-valued cause the old object-only walk skipped.
+// ---------------------------------------------------------------------------
+{
+  const d = describeError(new TypeError("terminated"));
+  assert(d.includes("terminated"), `keeps the transport message: ${d}`);
+  assert(/closed before the response finished/i.test(d), `explains what happened: ${d}`);
+
+  const withStringCause = new TypeError("fetch failed", { cause: "other side closed" });
+  const d2 = describeError(withStringCause);
+  assert(d2.includes("other side closed"), `surfaces a string cause: ${d2}`);
+
+  // "terminated" must not fire on unrelated words that merely contain it.
+  const unrelated = describeError(new Error("Unterminated string constant"));
+  assert(
+    !/closed before the response finished/i.test(unrelated),
+    `the drop hint must be word-bounded, got ${unrelated}`,
+  );
 }
 
 await tick();
