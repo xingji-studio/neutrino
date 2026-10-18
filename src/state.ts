@@ -12,6 +12,8 @@ export interface AppState {
   blinkOn: boolean;
   /** Blink phase for the text cursors (true = lit, false = hidden). */
   cursorOn: boolean;
+  /** Pending human approval; while set the top bar turns orange. */
+  approval: { tool: string; level: "high" | "extreme" } | null;
   /** Active mouse text selection, or null when nothing is selected. */
   selection: Selection | null;
 }
@@ -27,6 +29,7 @@ export function defaultState(): AppState {
     isThinking: false,
     blinkOn: false,
     cursorOn: true,
+    approval: null,
     selection: null,
   };
 }

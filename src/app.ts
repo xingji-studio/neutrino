@@ -15,6 +15,7 @@ import { AgentSelectScreen } from "./screens/agentSelect.js";
 import { ModelSelectScreen } from "./screens/modelSelect.js";
 import { SettingsScreen } from "./screens/settings.js";
 import { StartScreen } from "./screens/start.js";
+import { startWebServer, type WebServerHandle } from "./web/server.js";
 
 const CURSOR_BLINK_MS = 530;
 const TOAST_MS = 1600;
@@ -51,6 +52,7 @@ export class App {
   // landed, so the thumb stays under the pointer as it moves.
   private barDrag: { grab: number } | null = null;
   private resizeHandler = () => this.onResize();
+  private webHandle: WebServerHandle | null = null;
 
   constructor() {
     this.width = process.stdout.columns || 80;
@@ -83,6 +85,16 @@ export class App {
     this.state.selectedModelUrl = String(config.selected_model_url ?? this.state.selectedModelUrl);
     this.state.selectedModelApiKey = String(config.selected_model_api_key ?? this.state.selectedModelApiKey);
     this.state.selectedModelStreaming = Boolean(config.selected_model_streaming ?? true);
+  }
+
+  /**
+   * Mount the browser UI on the given port. Safe to call once; subsequent calls
+   * return the already-running server.
+   */
+  async enableWeb(port: number, host?: string): Promise<WebServerHandle> {
+    if (this.webHandle) return this.webHandle;
+    this.webHandle = await startWebServer({ port, host });
+    return this.webHandle;
   }
 
   async start(): Promise<void> {
@@ -371,6 +383,7 @@ export class App {
     const screen = new ChatScreen("");
     screen.sessionId = data.id;
     screen.loadedMessages = data.messages ?? [];
+    screen.loadedCwd = data.cwd ?? null;
     screen.loadedProvider = data.provider || null;
     screen.loadedModel = data.model || null;
     screen.loadedIntensity = data.intensity || null;
@@ -423,6 +436,7 @@ export class App {
     }
     this.input.stop();
     this.renderer.dispose();
+    void this.webHandle?.close();
     process.exit(0);
   }
 }

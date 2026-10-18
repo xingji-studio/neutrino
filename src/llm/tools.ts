@@ -77,21 +77,28 @@ export function getToolDefinitions(): ToolDefinition[] {
   ];
 }
 
-export async function executeTool(name: string, args: Record<string, unknown>): Promise<string> {
+export async function executeTool(
+  name: string,
+  args: Record<string, unknown>,
+  cwd: string = process.cwd(),
+): Promise<string> {
+  // Tools always operate inside the directory the conversation belongs to, which
+  // is not necessarily the directory the current process was started in.
+  const base = cwd || process.cwd();
   let result: string;
   try {
     switch (name) {
       case "run_command":
-        result = await runCommand(String(args.command ?? ""));
+        result = await runCommand(String(args.command ?? ""), base);
         break;
       case "read_file":
-        result = readFile(String(args.path ?? ""));
+        result = readFile(String(args.path ?? ""), base);
         break;
       case "write_file":
-        result = writeFile(String(args.path ?? ""), String(args.content ?? ""));
+        result = writeFile(String(args.path ?? ""), String(args.content ?? ""), base);
         break;
       case "list_files":
-        result = listFiles(String(args.path ?? ""));
+        result = listFiles(String(args.path ?? ""), base);
         break;
       default:
         result = `[Error: unknown tool '${name}']`;
@@ -102,7 +109,7 @@ export async function executeTool(name: string, args: Record<string, unknown>): 
   return result.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
-function runCommand(command: string): Promise<string> {
+function runCommand(command: string, cwd: string): Promise<string> {
   return new Promise((resolve) => {
     if (!command.trim()) {
       resolve("[Error: empty command]");
@@ -110,7 +117,7 @@ function runCommand(command: string): Promise<string> {
     }
     exec(
       command,
-      { cwd: process.cwd(), timeout: 120000, maxBuffer: MAX_OUTPUT * 4 },
+      { cwd, timeout: 120000, maxBuffer: MAX_OUTPUT * 4 },
       (error, stdout, stderr) => {
         const parts: string[] = [];
         if (stdout) parts.push(stdout);
@@ -131,8 +138,8 @@ function runCommand(command: string): Promise<string> {
   });
 }
 
-function readFile(p: string): string {
-  const resolved = path.isAbsolute(p) ? p : path.join(process.cwd(), p);
+function readFile(p: string, cwd: string): string {
+  const resolved = path.isAbsolute(p) ? p : path.join(cwd, p);
   if (!fs.existsSync(resolved)) return `[Error: file not found: ${resolved}]`;
   if (fs.statSync(resolved).isDirectory()) return `[Error: ${resolved} is a directory]`;
   try {
@@ -144,8 +151,8 @@ function readFile(p: string): string {
   }
 }
 
-function writeFile(p: string, content: string): string {
-  const resolved = path.isAbsolute(p) ? p : path.join(process.cwd(), p);
+function writeFile(p: string, content: string, cwd: string): string {
+  const resolved = path.isAbsolute(p) ? p : path.join(cwd, p);
   try {
     fs.mkdirSync(path.dirname(resolved), { recursive: true });
     fs.writeFileSync(resolved, content, "utf-8");
@@ -155,12 +162,8 @@ function writeFile(p: string, content: string): string {
   }
 }
 
-function listFiles(p: string): string {
-  const resolved = p.trim()
-    ? path.isAbsolute(p)
-      ? p
-      : path.join(process.cwd(), p)
-    : process.cwd();
+function listFiles(p: string, cwd: string): string {
+  const resolved = p.trim() ? (path.isAbsolute(p) ? p : path.join(cwd, p)) : cwd;
   if (!fs.existsSync(resolved)) return `[Error: directory not found: ${resolved}]`;
   if (!fs.statSync(resolved).isDirectory()) return `[Error: ${resolved} is not a directory]`;
   try {

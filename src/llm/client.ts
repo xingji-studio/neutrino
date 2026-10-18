@@ -193,6 +193,21 @@ export class LLMClient {
     return text;
   }
 
+  /**
+   * One-shot completion with its own system prompt. The approval reviewers use
+   * this so they never share context with the conversation they are judging.
+   */
+  async complete(system: string, user: string): Promise<string> {
+    let out = "";
+    for await (const chunk of this.streamTurn([
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ])) {
+      out += chunk;
+    }
+    return out.trim();
+  }
+
   async *streamTurn(messages: ApiMessage[], tools?: ToolDefinition[]): AsyncGenerator<string> {
     this.toolCalls = [];
     this.usage = null;

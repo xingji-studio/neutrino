@@ -3,6 +3,7 @@ import { Screen, type ScrollbarHandle } from "../terminal/screen.js";
 import type { Key, MouseEvent } from "../terminal/input.js";
 import { C, type Style } from "../colors.js";
 import {
+  findModel,
   loadConfig,
   loadPrompt,
   saveSession,
@@ -17,12 +18,15 @@ import { ellipsize, displayWidth } from "../width.js";
 import { sanitizeText } from "../sanitize.js";
 import { LLMClient, describeError } from "../llm/client.js";
 import { executeTool, getToolDefinitions } from "../llm/tools.js";
+import { assessToolCall, type RiskAssessment } from "../llm/risk.js";
+import { ApprovalGate, type ApprovalDecision } from "../llm/approval.js";
 import {
   COMPACT_KEEP,
   COMPACT_MAX_CHARS_PER_MESSAGE,
   planCompaction,
   transcriptFor,
 } from "../compact.js";
+import { hub, type LiveAgent, type LiveMeta, type LiveSnapshot, type LiveWireMessage } from "../web/hub.js";
 
 interface ApiMessage {
   role: string;
@@ -59,9 +63,10 @@ function parseArgs(s: string): Record<string, unknown> {
   }
 }
 
-export class ChatScreen extends Screen {
+export class ChatScreen extends Screen implements LiveAgent {
   initialMessage: string;
   loadedMessages: SessionMessage[] | null = null;
+  loadedCwd: string | null = null;
   sessionId: string | null = null;
   loadedProvider: string | null = null;
   loadedModel: string | null = null;
@@ -105,6 +110,27 @@ export class ChatScreen extends Screen {
   /** Terminal row -> tool message index, rebuilt each render for hit-testing. */
   private toolRows = new Map<number, number>();
 
+  // ---- web bridge ----
+  private liveKey: string | null = null;
+  private liveDir = process.cwd();
+
+  // ---- approval gate ---------------------------------------------------
+
+  /** Non-null while a tool call is waiting for a human decision. */
+  private pendingApproval: {
+    tool: string;
+    risk: RiskAssessment;
+    resolve(approved: boolean): void;
+  } | null = null;
+  /** Decisions taken by the gate, keyed by the tool message (survives
+   * context compression, which renumbers the array). */
+  private approvals = new Map<ToolMsg, ApprovalDecision>();
+  /** Hit boxes of the approval card, rebuilt on every render. */
+  private approvalButtons: {
+    approve: { x: number; y: number; w: number };
+    deny: { x: number; y: number; w: number };
+  } | null = null;
+
   constructor(initialMessage = "") {
     super();
     this.initialMessage = initialMessage;
@@ -132,11 +158,110 @@ export class ChatScreen extends Screen {
     for (const m of this.loadedMessages ?? []) {
       this.messages.push(m as Msg);
     }
+    this.liveDir = this.loadedCwd ?? process.cwd();
+    this.liveKey = hub.register(this);
+    this.publishLive();
     if (this.initialMessage) {
       this.send(this.initialMessage);
     } else {
       this.app.render();
     }
+  }
+
+  onDeactivate(): void {
+    // Never leave the agent awaiting a decision nobody can give.
+    if (this.pendingApproval) this.settleApproval(false);
+    hub.unregister(this.liveKey);
+    this.liveKey = null;
+  }
+
+  // ---- web bridge (see src/web/hub.ts) ---------------------------------
+
+  liveCwd(): string {
+    return this.liveDir;
+  }
+
+  liveMeta(): LiveMeta {
+    return {
+      sessionId: this.sessionId,
+      title: this.liveTitle(),
+      provider: this.modelProvider,
+      model: this.model.name,
+      intensity: this.intensity,
+      busy: this.busy,
+      paused: this.paused,
+      queued: this.queued,
+      compressing: this.compressing,
+      tokens: { prompt: this.tokens.prompt, completion: this.tokens.completion },
+      approval: this.pendingApproval
+        ? { tool: this.pendingApproval.tool, level: this.pendingApproval.risk.level }
+        : null,
+    };
+  }
+
+  liveSnapshot(key: string): LiveSnapshot {
+    const messages: LiveWireMessage[] = [];
+    for (const message of this.messages) {
+      if (message.role === "system") continue;
+      if (message.role === "summary") {
+        messages.push({ role: "summary", content: message.content, count: message.count });
+      } else if (message.role === "tool") {
+        messages.push({ role: "tool", name: message.name, arguments: message.arguments, result: message.result });
+      } else {
+        messages.push({ role: message.role, content: message.content });
+      }
+    }
+    return {
+      ...this.liveMeta(),
+      key,
+      cwd: this.liveDir,
+      messages,
+      streamingContent: this.streamingContent,
+    };
+  }
+
+  livePause(): void {
+    if (this.paused || (!this.busy && !this.queued)) return;
+    this.paused = true;
+    this.turnToken++;
+    // A queued decision would otherwise keep the agent awaiting forever.
+    if (this.pendingApproval) this.settleApproval(false);
+    this.busy = false;
+    this.app.state.isThinking = false;
+    this.save();
+    this.app.render();
+    this.publishLive();
+  }
+
+  liveResume(): void {
+    if (this.paused) this.togglePause();
+  }
+
+  /** Answer the pending call from the web UI. */
+  liveApprove(approved: boolean): boolean {
+    if (!this.pendingApproval) return false;
+    this.settleApproval(approved);
+    return true;
+  }
+
+  liveSend(text: string): void {
+    if (!text.trim()) return;
+    this.send(text);
+    this.publishLive();
+  }
+
+  private liveTitle(): string {
+    for (const message of this.messages) {
+      if (message.role === "user") {
+        const title = message.content.replace(/\s+/g, " ").trim();
+        return title.length > 80 ? title.slice(0, 80) : title;
+      }
+    }
+    return "";
+  }
+
+  private publishLive(): void {
+    hub.notify(this.liveKey);
   }
 
   /**
@@ -171,6 +296,14 @@ export class ChatScreen extends Screen {
   }
 
   onKey(key: Key): void {
+    // A pending approval is modal: it owns the keyboard until answered.
+    if (this.pendingApproval) {
+      const name = key.name.toLowerCase();
+      if (name === "y" || name === "return") this.settleApproval(true);
+      else if (name === "n" || name === "escape") this.settleApproval(false);
+      return;
+    }
+
     if (this.showInfo) {
       this.showInfo = false;
       this.app.render();
@@ -264,6 +397,7 @@ export class ChatScreen extends Screen {
       this.streamingContent = null;
       this.scrollTop = 0;
       this.followBottom = true;
+      this.publishLive();
       this.app.render();
       return;
     }
@@ -283,6 +417,21 @@ export class ChatScreen extends Screen {
   onMouse(ev: MouseEvent): void {
     if (ev.type === "click") {
       if (ev.button === 2) return; // right click: no-op in chat
+
+      // The approval card floats over the log: test its buttons first.
+      const buttons = this.approvalButtons;
+      if (this.pendingApproval && buttons) {
+        const hit = (r: { x: number; y: number; w: number }) =>
+          ev.y === r.y && ev.x >= r.x && ev.x < r.x + r.w;
+        if (hit(buttons.approve)) {
+          this.settleApproval(true);
+          return;
+        }
+        if (hit(buttons.deny)) {
+          this.settleApproval(false);
+          return;
+        }
+      }
       // header row: right corner toggles token stats, the rest opens model config
       if (ev.y === 0) {
         if (ev.x >= this.app.width - 3) {
@@ -359,6 +508,7 @@ export class ChatScreen extends Screen {
     }
     this.app.render();
     this.maybeFlushQueue();
+    this.publishLive();
   }
 
   private maybeFlushQueue(): void {
@@ -375,6 +525,7 @@ export class ChatScreen extends Screen {
     this.inputValue = "";
     this.cursor = 0;
     this.followBottom = true;
+    this.publishLive();
 
     if (this.busy && !this.paused) {
       this.queued = trimmed;
@@ -392,6 +543,7 @@ export class ChatScreen extends Screen {
     const token = ++this.turnToken;
     this.streamingContent = "";
     this.app.render();
+    this.publishLive();
     void (async () => {
       // Shrink the history before building the request when it has outgrown the
       // configured budget.
@@ -436,6 +588,7 @@ export class ChatScreen extends Screen {
           hasContent = true;
           this.streamingContent = content;
           this.app.render();
+          this.publishLive();
         }
 
         if (client.usage) {
@@ -449,6 +602,7 @@ export class ChatScreen extends Screen {
         if (token !== this.turnToken) {
           if (content) this.messages.push({ role: "assistant", content });
           this.streamingContent = null;
+          this.publishLive();
           this.app.render();
           return;
         }
@@ -485,11 +639,29 @@ export class ChatScreen extends Screen {
           const args = parseArgs(tc.arguments);
           const toolMsg: ToolMsg = { role: "tool", name: tc.name, arguments: args, result: "" };
           this.messages.push(toolMsg);
+          this.publishLive();
           this.app.render();
-          const result = await executeTool(tc.name, args);
+
+          // Risky calls stop here until a human (or the reviewer agent) clears
+          // them. The loop awaits a promise that the UI resolves.
+          const decision = await this.requestApproval(tc.name, args);
+          if (token !== this.turnToken || this.paused) return;
+          if (decision.source !== "prompt") this.approvals.set(toolMsg, decision);
+          if (!decision.approved) {
+            toolMsg.result =
+              `[Not executed: approval denied (${decision.source}): ${decision.reason}] ` +
+              "Do not retry this call unchanged; ask the user how to proceed.";
+            apiMessages.push({ role: "tool", tool_call_id: tc.id, content: toolMsg.result });
+            this.publishLive();
+            this.app.render();
+            continue;
+          }
+
+          const result = await executeTool(tc.name, args, this.liveDir);
           if (token !== this.turnToken || this.paused) return;
           toolMsg.result = result;
           apiMessages.push({ role: "tool", tool_call_id: tc.id, content: result });
+          this.publishLive();
           this.app.render();
         }
       }
@@ -509,6 +681,121 @@ export class ChatScreen extends Screen {
     this.save();
     this.app.render();
     this.maybeFlushQueue();
+    this.publishLive();
+  }
+
+  // ---- approval gate ---------------------------------------------------
+
+  /** Classify a tool call and, when it is risky, run it past the gate. */
+  private async requestApproval(
+    tool: string,
+    args: Record<string, unknown>,
+  ): Promise<ApprovalDecision> {
+    const risk = assessToolCall(tool, args, this.liveDir);
+    if (!risk) return { approved: true, source: "prompt", reason: "routine call" };
+    const gate = new ApprovalGate({
+      askHuman: () => this.askHuman(tool, risk),
+      reviewer: () => this.reviewerModel(),
+      extremeAutoApprovalEnabled: () => loadConfig().auto_approve_extreme_risk === true,
+      context: () => this.reviewerContext(),
+    });
+    return gate.decide({ tool, args, cwd: this.liveDir, prompt: this.currentPrompt(), risk });
+  }
+
+  /** Park the turn until the user answers; the header turns orange meanwhile. */
+  private askHuman(tool: string, risk: RiskAssessment): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      this.pendingApproval = { tool, risk, resolve };
+      this.app.state.approval = { tool, level: risk.level };
+      this.app.render();
+      this.publishLive();
+    });
+  }
+
+  /** Answer the pending request (keyboard, mouse, or the web UI). */
+  private settleApproval(approved: boolean): void {
+    const pending = this.pendingApproval;
+    if (!pending) return;
+    this.pendingApproval = null;
+    this.app.state.approval = null;
+    this.approvalButtons = null;
+    pending.resolve(approved);
+    this.app.render();
+    this.publishLive();
+  }
+
+  /** The user message that opened this turn. */
+  private currentPrompt(): string {
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      const message = this.messages[i];
+      if (message.role === "user") return message.content;
+    }
+    return "";
+  }
+
+  /** Reviewer model: `approval_model` when set, otherwise the chat model. */
+  private reviewerModel(): { model: ModelInfo; provider: string; intensity: string } {
+    const name = String(loadConfig().approval_model ?? "").trim();
+    const found = name ? findModel(name) : null;
+    if (found) return { model: found.model, provider: found.provider, intensity: this.intensity };
+    return { model: this.model, provider: this.modelProvider, intensity: this.intensity };
+  }
+
+  /** Short conversation tail so the reviewer understands the intent. */
+  private reviewerContext(): string {
+    return this.messages
+      .filter((message) => message.role !== "system")
+      .slice(-6)
+      .map((message) => {
+        if (message.role === "tool") return `tool ${message.name}: ${message.result.slice(0, 500)}`;
+        if (message.role === "summary") return `summary: ${message.content.slice(0, 500)}`;
+        return `${message.role}: ${message.content.slice(0, 1000)}`;
+      })
+      .join("\n");
+  }
+
+  /** Orange card listing the pending call and its buttons. */
+  private drawApprovalCard(buf: Buffer, logTop: number, inputY: number): void {
+    const pending = this.pendingApproval;
+    if (!pending) return;
+    const boxW = Math.max(24, Math.min(buf.width - 2, 78));
+    const boxH = 5;
+    const boxX = 1;
+    const boxY = Math.max(logTop, inputY - boxH - 1);
+
+    buf.fillRect(boxX, boxY, boxW, boxH, { bg: C.orangeBg });
+    buf.drawBox(boxX, boxY, boxW, boxH, { fg: C.orange });
+    // Same treatment as the header: the two read as a single alert.
+    buf.fillRect(boxX + 1, boxY, boxW - 2, 1, { bg: C.orange });
+    buf.writeText(boxX + 2, boxY, "Request Approval", { fg: C.black, bg: C.orange, bold: true });
+
+    const tag = pending.risk.level === "extreme" ? "EXTREME RISK" : "HIGH RISK";
+    const tagX = boxX + boxW - 2 - tag.length;
+    if (tagX > boxX + 22) {
+      buf.writeText(tagX, boxY, tag, { fg: C.black, bg: C.orange, bold: true });
+    }
+
+    const summary = sanitizeText(pending.risk.summary, { singleLine: true });
+    buf.writeText(boxX + 2, boxY + 1, ellipsize(summary, boxW - 4), {
+      fg: C.assistant,
+      bg: C.orangeBg,
+    });
+    const reason = sanitizeText(pending.risk.reasons[0] ?? "", { singleLine: true });
+    buf.writeText(boxX + 2, boxY + 2, ellipsize(reason, boxW - 4), {
+      fg: C.dim,
+      bg: C.orangeBg,
+    });
+
+    const approve = "[ Y ] Approve";
+    const deny = "[ N ] Deny";
+    const by = boxY + 3;
+    const denyX = boxX + 2 + approve.length + 3;
+    buf.writeText(boxX + 2, by, approve, { fg: C.black, bg: C.orange, bold: true });
+    buf.writeText(denyX, by, deny, { fg: C.orange, bg: C.orangeBg, bold: true });
+    this.approvalButtons = {
+      approve: { x: boxX + 2, y: by, w: approve.length },
+      deny: { x: denyX, y: by, w: deny.length },
+    };
   }
 
   /** Expand/collapse the tool block belonging to message `index`. */
@@ -548,6 +835,7 @@ export class ChatScreen extends Screen {
 
     const transcript = transcriptFor(plan.head, COMPACT_MAX_CHARS_PER_MESSAGE);
     this.compressing = true;
+    this.publishLive();
     this.app.render();
 
     const snapshotLen = this.messages.length;
@@ -559,6 +847,7 @@ export class ChatScreen extends Screen {
     }
 
     this.compressing = false;
+    this.publishLive();
     if (token !== this.turnToken) return;
     // A new message (queued by the user while we were summarising) would be
     // dropped by the swap below, so bail out and retry on the next turn.
@@ -633,13 +922,14 @@ export class ChatScreen extends Screen {
         this.model.name,
         this.modelProvider,
         this.intensity,
-        process.cwd(),
+        this.liveDir,
         this.sessionId ?? undefined,
         this.tokens,
       );
     } catch {
       // ignore save errors
     }
+    this.publishLive();
   }
 
   private buildLines(width: number): Line[] {
@@ -690,6 +980,25 @@ export class ChatScreen extends Screen {
           { singleLine: true },
         );
         if (argText) add({ spans: [{ text: "  " + argText, style: { fg: C.dim } }] }, mi);
+
+        const decision = this.approvals.get(m);
+        if (decision) {
+          const verdict = decision.approved ? "approved" : "denied";
+          add(
+            {
+              spans: [
+                {
+                  text: `  ${decision.approved ? "✓" : "✗"} ${verdict} by ${decision.source} — ${ellipsize(
+                    sanitizeText(decision.reason, { singleLine: true }),
+                    Math.max(12, width - 12),
+                  )}`,
+                  style: { fg: decision.approved ? C.green : C.orange },
+                },
+              ],
+            },
+            mi,
+          );
+        }
         // Command output routinely carries ANSI colours and tabs; clean it once
         // so the collapsed line count and the expanded body agree.
         const body = sanitizeText(m.result || "");
@@ -769,6 +1078,9 @@ export class ChatScreen extends Screen {
     // A scrollbar on the right edge of the log, shown only when the
     // conversation overflows the visible area.
     drawScrollbar(buf, w - 1, logTop, logBottom, lines.length, viewH, this.scrollTop);
+
+    if (this.pendingApproval) this.drawApprovalCard(buf, logTop, inputY);
+    else this.approvalButtons = null;
 
     const inW = Math.max(12, w - 2);
     drawInputBox(buf, 1, inputY, inW, this.inputValue, this.cursor, {

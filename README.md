@@ -17,6 +17,8 @@ A CLI coding agent that lives in your terminal. Neutrino gives you an interactiv
 - **Session history** — conversations are saved automatically, and the history screen lists the ones started in the current working directory.
 - **Token usage stats** — click the `ⓘ` in the chat header to see prompt/completion/total token counts for the current session.
 - **Agent history browser** — view past sessions from other CLI agents (Claude Code, Codex, OpenCode) directly from the history screen.
+- **Approval gate** — risky commands and paths outside the working directory need your sign-off. The header turns orange and reads **Request Approval**; press `Y` or `N`. Delete-class commands always ask, unless you explicitly granted full trust, and there is an opt-in reviewer agent for automatic decisions.
+- **Browser UI on any port** — mount a local website that lists every saved conversation grouped by working directory, streams the running one in real time, and lets you pause/resume it or send new messages from the browser.
 
 ## Requirements
 
@@ -60,6 +62,8 @@ Type a message on the start screen and press `Enter` to begin a new chat.
 | `Esc` | Clear an active selection |
 | `PgUp` / `PgDn` | Scroll chat history |
 | `Ctrl+C` | Copy the selection, or quit if nothing is selected |
+| `Y` | Approve the pending request (while the approval card is up) |
+| `N` / `Esc` | Deny the pending request |
 | `Ctrl+Q` | Quit |
 
 ### Mouse
@@ -88,6 +92,43 @@ Settings are stored under `~/.neutrino/`:
 
 Set your API key in the model select screen or directly in `model.json`.
 
+### Approvals
+
+Every tool call is classified before it runs.
+
+| Class | Examples | Default behaviour |
+| --- | --- | --- |
+| Routine | `npm run build`, `git status`, reading or writing inside the project | Runs without asking |
+| High | `sudo`, `chmod`, package installs, `git push`, `curl`, inline `python -c`, any path outside the working directory | Asks the user |
+| Extreme | Delete-class: `rm`, `del`, `shred`, `mkfs`, `git clean -f`, `git reset --hard`, `find -delete`, `DROP TABLE`, … | Always asks the user |
+
+While a call waits for an answer the top bar turns orange and reads
+**Request Approval**, and an orange card floats above the input box with the
+command, why it was flagged, and `[ Y ] Approve` / `[ N ] Deny`. Approving runs
+the call; denying returns a note to the model so it can pick another route
+instead of retrying.
+
+Two phrases in your message change the policy for that conversation:
+
+| Phrase in the prompt | Effect |
+| --- | --- |
+| `无需审批` | High-risk calls run without asking. Delete-class calls still ask. |
+| `我已知悉风险，同意给予完整权限，无需任何审批` | Nothing asks, including delete-class calls. |
+| `自动审批` | Approvals go to a reviewer agent instead of you. |
+
+With `自动审批`, a separate reviewer agent (its own system prompt, no tools, no
+shared context) judges each pending call and answers with a JSON verdict. For
+delete-class commands it spawns **three** independent reviewers, each looking at
+the proposal from a different angle (data loss, blast radius, intent), and the
+call only goes through when all three agree. A reviewer that fails, times out or
+answers in the wrong shape counts as a denial.
+
+Automatic approval of delete-class commands is behind a switch in **Settings →
+Extreme-risk auto-approval**, which is **off by default**: while it is off,
+delete-class calls always go to a human even if you wrote `自动审批`. The reviewer
+model defaults to the chat model and can be changed in **Settings → Approval
+reviewer model**.
+
 ### Browsing other agents' history
 
 From the history screen, select **Open other Agent's history** to view past sessions recorded by other CLI agents installed on your machine:
@@ -97,6 +138,31 @@ From the history screen, select **Open other Agent's history** to view past sess
 - **OpenCode** — reads the local SQLite database (`opencode.db`) via `node:sqlite` (requires Node.js **22.13+**; silently unavailable on older versions).
 
 Only sessions that were started in the current working directory are listed, so the history stays focused on the project you are in. These sessions are read-only; you can open them for review but not edit or delete.
+
+## Web UI
+
+Neutrino can mount a small website on a port of your choice. It groups every
+saved conversation by working directory (showing the five newest per path with
+the rest collapsed), streams a running conversation live, and lets you pause or
+resume it and send new messages from the browser.
+
+A saved transcript opens read-only, because nothing is running for it. Press
+**Continue here** (or simply type in the composer) and the server resumes it
+in-process — same model, working directory and token counters — so you can keep
+chatting from the browser with no terminal attached. Turns are written back to
+the same session file.
+
+```sh
+# Mount the web UI while the terminal UI runs
+neutrino --web-port 8765
+
+# Or serve only the saved history, with no terminal
+neutrino web --port 8765
+```
+
+Then open <http://127.0.0.1:8765>. The server binds to loopback unless you pass
+`--host 0.0.0.0`. The site itself lives in [`web/`](./web) and needs no build
+step; see [`web/README.md`](./web/README.md) for the API.
 
 ## Built-in tools
 
@@ -132,6 +198,7 @@ node scripts/test-drift.mjs      # verify the input area self-heals after termin
 node scripts/test-fetch.mjs      # verify streamed requests release aborts and retry drops
 node scripts/test-compact.mjs    # verify context-compression planning
 node scripts/test-tools.mjs      # verify tool-output folding
+node scripts/test-web.mjs        # verify the web server, API, SSE stream and path-traversal guards
 ```
 
 ### Rendering model

@@ -84,6 +84,7 @@ function stubApp(w, h) {
       isThinking: false,
       blinkOn: false,
       cursorOn: true,
+      approval: null,
       selection: null,
     },
     render() {},
@@ -136,6 +137,33 @@ function chatRender(w, h) {
   step("header+info");
   screen.showInfo = false;
   step("info-closed");
+
+  // A pending approval: orange header plus the floating card. Both must fit and
+  // must not leave residue once the decision is in.
+  screen.pendingApproval = {
+    tool: "run_command",
+    risk: {
+      level: "extreme",
+      tool: "run_command",
+      summary: "rm -rf build dist",
+      reasons: ["deletes files or directories (rm)"],
+    },
+    resolve: () => {},
+  };
+  app.state.approval = { tool: "run_command", level: "extreme" };
+  screen.render(buf);
+  renderer.render(buf);
+  checkFrame(term, buf, "approval", w, h);
+  const flat = buf.cells.map((row) => rowText(row)).join("\n");
+  if (!flat.includes("Request Approval")) fail(`approval: header text missing at ${w}x${h}`);
+  if (!flat.includes("rm -rf build dist")) fail(`approval: card text missing at ${w}x${h}`);
+  if (!flat.includes("Approve")) fail(`approval: buttons missing at ${w}x${h}`);
+
+  screen.pendingApproval = null;
+  app.state.approval = null;
+  screen.render(buf);
+  renderer.render(buf);
+  checkFrame(term, buf, "approval-cleared", w, h);
 
   console.log(`ok   chat ${w}x${h}`);
 }

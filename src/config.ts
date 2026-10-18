@@ -57,6 +57,11 @@ export const DEFAULT_CONFIG: Record<string, unknown> = {
   language: "en",
   theme: "default",
   default_intensity: "High",
+  // Delete-class commands still need a human unless this is on AND the prompt
+  // says 自动审批. Off by default.
+  auto_approve_extreme_risk: false,
+  // Model that reviews approval requests. Empty = same model as the chat.
+  approval_model: "",
   // Estimated prompt tokens above which the conversation is auto-compressed.
   // 0 disables auto-compression.
   context_compress_threshold: 32000,
@@ -168,6 +173,17 @@ export function loadConfig(): Record<string, unknown> {
 export function saveConfig(data: Record<string, unknown>): void {
   ensureDirs();
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(data, null, 2), "utf-8");
+}
+
+/** Look a model up by name across every configured provider. */
+export function findModel(name: string): { provider: string; model: ModelInfo } | null {
+  const wanted = name.trim();
+  if (!wanted) return null;
+  for (const [provider, models] of Object.entries(getModelsByProvider())) {
+    const model = models.find((m) => m.name === wanted);
+    if (model) return { provider, model };
+  }
+  return null;
 }
 
 export function getModelsByProvider(): Record<string, ModelInfo[]> {

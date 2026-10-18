@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Neutrino</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <aside id="sidebar">
+        <header class="brand">
+          <div class="logo" aria-hidden="true">◈</div>
+          <div class="brand-text">
+            <strong>Neutrino</strong>
+            <span id="status" class="status">connecting…</span>
+          </div>
+          <button id="refresh" class="icon-btn" title="Refresh conversations" aria-label="Refresh">⟳</button>
+        </header>
+        <div id="sessions" class="sessions"></div>
+      </aside>
+
+      <main id="main">
+        <header id="main-header" class="main-header">
+          <div class="main-title">
+            <h1 id="session-title">Select a conversation</h1>
+            <div id="session-sub" class="sub"></div>
+          </div>
+          <div id="controls" class="controls"></div>
+        </header>
+
+        <section id="messages" class="messages">
+          <div class="empty">Choose a conversation from the sidebar to view it.</div>
+        </section>
+
+        <div id="approval" class="approval hidden" role="alert" aria-live="assertive"></div>
+        <footer id="composer" class="composer hidden">
+          <textarea id="input" rows="2" placeholder="Send a message…  (Enter to send, Shift+Enter for newline)"></textarea>
+          <button id="send" class="primary">Send</button>
+        </footer>
+      </main>
+    </div>
+
+    <script src="app.js" type="module"></script>
+  </body>
+</html>

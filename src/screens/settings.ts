@@ -6,6 +6,7 @@ import {
   COMPRESS_THRESHOLD_OPTIONS,
   CONFIG_FILE,
   INTENSITY_LEVELS,
+  getModelsByProvider,
   loadConfig,
   saveConfig,
 } from "../config.js";
@@ -13,12 +14,17 @@ import { drawHeader } from "../header.js";
 import { centerVertically, drawHint } from "../ui.js";
 
 /** The settings that can be changed here, top to bottom. */
-const ROWS = ["intensity", "compress"] as const;
+const ROWS = ["intensity", "compress", "approval_model", "extreme_approval"] as const;
 type RowId = (typeof ROWS)[number];
 
 export class SettingsScreen extends Screen {
   private intensityIdx = 2;
   private thresholdIdx = 3;
+  /** 0 = same model as the chat, otherwise index + 1 into `models`. */
+  private approvalModelIdx = 0;
+  /** 0 = off (human only), 1 = on (three reviewers). */
+  private extremeIdx = 0;
+  private models: string[] = [];
   private rowIdx = 0;
   private lastHoverX = -1;
   private lastHoverY = -1;
@@ -32,6 +38,12 @@ export class SettingsScreen extends Screen {
     const threshold = Number(config.context_compress_threshold ?? 32000);
     const t = COMPRESS_THRESHOLD_OPTIONS.findIndex((o) => o.value === threshold);
     this.thresholdIdx = t >= 0 ? t : 3;
+
+    this.models = Object.values(getModelsByProvider()).flatMap((list) => list.map((m) => m.name));
+    const currentApproval = String(config.approval_model ?? "");
+    const approvalAt = currentApproval ? this.models.indexOf(currentApproval) : -1;
+    this.approvalModelIdx = approvalAt >= 0 ? approvalAt + 1 : 0;
+    this.extremeIdx = config.auto_approve_extreme_risk === true ? 1 : 0;
   }
 
   /** Change the value of a row by `delta` steps and persist it immediately. */
@@ -39,6 +51,12 @@ export class SettingsScreen extends Screen {
     if (row === "intensity") {
       const n = INTENSITY_LEVELS.length;
       this.intensityIdx = (this.intensityIdx + delta + n) % n;
+    } else if (row === "approval_model") {
+      const n = this.models.length + 1;
+      this.approvalModelIdx = (this.approvalModelIdx + delta + n) % n;
+    } else if (row === "extreme_approval") {
+      // A switch, not a list: any nudge flips it.
+      this.extremeIdx = this.extremeIdx === 1 ? 0 : 1;
     } else {
       const n = COMPRESS_THRESHOLD_OPTIONS.length;
       this.thresholdIdx = (this.thresholdIdx + delta + n) % n;
@@ -121,6 +139,14 @@ export class SettingsScreen extends Screen {
     return [
       { label: "Default intensity", value: INTENSITY_LEVELS[this.intensityIdx] },
       { label: "Auto-compress context", value: COMPRESS_THRESHOLD_OPTIONS[this.thresholdIdx].label },
+      {
+        label: "Approval reviewer model",
+        value: this.approvalModelIdx === 0 ? "Same as chat" : this.models[this.approvalModelIdx - 1] ?? "Same as chat",
+      },
+      {
+        label: "Extreme-risk auto-approval",
+        value: this.extremeIdx === 1 ? "On (3 reviewers)" : "Off (human only)",
+      },
     ];
   }
 
@@ -141,6 +167,8 @@ export class SettingsScreen extends Screen {
     const config = loadConfig();
     config.default_intensity = INTENSITY_LEVELS[this.intensityIdx];
     config.context_compress_threshold = COMPRESS_THRESHOLD_OPTIONS[this.thresholdIdx].value;
+    config.approval_model = this.approvalModelIdx === 0 ? "" : this.models[this.approvalModelIdx - 1] ?? "";
+    config.auto_approve_extreme_risk = this.extremeIdx === 1;
     saveConfig(config);
   }
 

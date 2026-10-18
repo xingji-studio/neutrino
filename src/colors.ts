@@ -10,6 +10,8 @@ export const C = {
   toolHeader: [153, 217, 234] as RGB, // cyan
   amber: [224, 175, 104] as RGB, // #E0AF68
   white: [226, 232, 240] as RGB,
+  orange: [255, 158, 61] as RGB, // #FF9E3D approval highlight
+  orangeBg: [61, 36, 14] as RGB, // #3D240E dim orange behind approval cards
   green: [115, 218, 202] as RGB,
   red: [247, 118, 142] as RGB,
   codeBg: [27, 35, 49] as RGB, // dark blue-grey used behind code blocks
