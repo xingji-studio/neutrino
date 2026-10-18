@@ -92,6 +92,14 @@ Settings are stored under `~/.neutrino/`:
 
 Set your API key in the model select screen or directly in `model.json`.
 
+A few environment variables override flags:
+
+| Variable | Effect |
+| --- | --- |
+| `NEUTRINO_WEB_PORT` | Web UI port: like `--web-port` in TUI mode, and the port in `neutrino web`. |
+| `NEUTRINO_WEB_HOST` | Interface to bind, like `--host`. |
+| `NEUTRINO_WEB_TOKEN` | Access token for `/api/*`, like `--token`. Set it to keep remote links stable across restarts. |
+
 ### Approvals
 
 Every tool call is classified before it runs.
@@ -160,9 +168,55 @@ neutrino --web-port 8765
 neutrino web --port 8765
 ```
 
-Then open <http://127.0.0.1:8765>. The server binds to loopback unless you pass
-`--host 0.0.0.0`. The site itself lives in [`web/`](./web) and needs no build
-step; see [`web/README.md`](./web/README.md) for the API.
+Then open <http://127.0.0.1:8765>. The site itself lives in [`web/`](./web) and
+needs no build step; see [`web/README.md`](./web/README.md) for the API.
+
+### Reaching it from another device
+
+The server binds to loopback, so only this machine can open it. To use it from a
+phone, a tablet or another box on your LAN or VPN, bind an interface others can
+see:
+
+```sh
+neutrino web --port 8765 --lan          # every interface (0.0.0.0)
+neutrino --web-port 8765 --lan          # same, while the TUI runs
+neutrino web --port 8765 --host 100.64.0.7   # one specific address
+```
+
+Startup prints every address that works, so you can copy the one matching the
+device you are on:
+
+```
+Neutrino web UI listening on 0.0.0.0:8765
+Open the address that matches your device:
+  http://100.105.130.25:8765/?t=b2yzzvZyypcbmoDFdpT470qowAOE9Ca4
+  http://192.168.1.211:8765/?t=b2yzzvZyypcbmoDFdpT470qowAOE9Ca4
+  http://127.0.0.1:8765/?t=b2yzzvZyypcbmoDFdpT470qowAOE9Ca4
+```
+
+**The `?t=…` is an access token, and it is not optional.** This API can read
+every saved conversation and drive an agent that runs shell commands, so exposing
+it unauthenticated would hand anyone on the network a remote shell as your user.
+Binding beyond loopback therefore generates a random token and requires it on
+every `/api/*` request. The browser picks it up from the URL once, stores it, and
+strips it from the address bar; if you open the bare address without it, the page
+asks for the token instead of failing silently.
+
+Some notes that matter in practice:
+
+- **Treat the printed link as a password.** Whoever holds it has your agent.
+- **The token changes on restart** unless you pin it, so the phone forgets it
+  every time. Fix one with `NEUTRINO_WEB_TOKEN=<secret>` (or `--token <secret>`)
+  to keep the link stable across restarts.
+- **`--no-auth` disables the token** for a network you fully trust, such as a
+  WireGuard/Tailscale range only your own devices can join.
+- **Only static files are public** (`/`, `/app.js`, `/style.css`) — that is what
+  makes the token prompt loadable. Everything under `/api/` is guarded.
+- **Firewall:** the first bind to `0.0.0.0` triggers an allow prompt on Windows
+  and macOS. Allow it for private networks, and check that your WLAN is not
+  marked "public", where incoming connections are blocked anyway.
+- **`127.0.0.1` remains the default** because the zero-config case should not be
+  a network service.
 
 ## Built-in tools
 

@@ -2,9 +2,11 @@
 import process from "node:process";
 import { App } from "./app.js";
 import { installCrashGuard } from "./terminal/restore.js";
-import { startWebServer } from "./web/server.js";
+import { startWebServer, type WebServerHandle } from "./web/server.js";
 
 const DEFAULT_WEB_PORT = 8765;
+/** Binding here makes the UI reachable from every interface. */
+const WILDCARD_HOST = "0.0.0.0";
 
 function parsePort(raw: string | undefined): number {
   if (!raw) throw new Error("missing port number");
@@ -36,26 +38,45 @@ Usage:
 Options:
   -p, --port <port>   Web server port (web mode). Default: ${DEFAULT_WEB_PORT}
       --host <host>   Interface to bind. Default: 127.0.0.1
+      --lan           Short for --host ${WILDCARD_HOST}: reachable from other
+                      devices on your LAN or VPN.
+      --token <text>  Access token for /api/*. Generated when exposed.
+      --no-auth       Serve without a token. Only on a network you trust.
       --web-port <n>  Also mount the web UI while the TUI runs.
   -h, --help          Show this help.
 
 Environment:
   NEUTRINO_WEB_PORT   Same as --web-port for the TUI, or the port in web mode.
+  NEUTRINO_WEB_HOST   Same as --host.
+  NEUTRINO_WEB_TOKEN  Same as --token, and keeps the link stable across restarts.
 
-The web UI can read every saved conversation and control the running one, so it
-binds to loopback unless you explicitly pass --host.
+The web UI can read every saved conversation and drive an agent with shell
+access, so it binds to loopback by default. Binding anywhere else requires a
+token unless you pass --no-auth; the addresses to open are printed at startup.
 `,
   );
+}
+
+/** Read the value that follows a flag, so `--host` alone is an error. */
+function requireValue(argv: string[], index: number, flag: string): string {
+  const value = argv[index];
+  if (value === undefined || value.trim() === "") {
+    throw new Error(`missing value for ${flag}`);
+  }
+  return value;
 }
 
 interface Options {
   mode: "tui" | "web";
   port: number | null;
   host?: string;
+  lan: boolean;
+  token?: string;
+  noAuth: boolean;
 }
 
 function parseArgs(argv: string[]): Options {
-  const options: Options = { mode: "tui", port: null };
+  const options: Options = { mode: "tui", port: null, lan: false, noAuth: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "web") {
@@ -69,9 +90,17 @@ function parseArgs(argv: string[]): Options {
     } else if (arg.startsWith("--web-port=")) {
       options.port = parsePort(arg.slice("--web-port=".length));
     } else if (arg === "--host") {
-      options.host = argv[++i];
+      options.host = requireValue(argv, ++i, "--host");
     } else if (arg.startsWith("--host=")) {
       options.host = arg.slice("--host=".length);
+    } else if (arg === "--lan") {
+      options.lan = true;
+    } else if (arg === "--token") {
+      options.token = requireValue(argv, ++i, "--token");
+    } else if (arg.startsWith("--token=")) {
+      options.token = arg.slice("--token=".length);
+    } else if (arg === "--no-auth") {
+      options.noAuth = true;
     } else if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
@@ -79,7 +108,50 @@ function parseArgs(argv: string[]): Options {
       throw new Error(`unknown argument "${arg}"`);
     }
   }
+  if (options.lan && options.host) {
+    throw new Error("use either --lan or --host, not both");
+  }
+  if (options.noAuth && options.token) {
+    throw new Error("use either --token or --no-auth, not both");
+  }
   return options;
+}
+
+/**
+ * Turn the flags into the server's `token` option: a string to enforce one,
+ * `null` to disable authentication, `undefined` to let the server decide.
+ */
+function resolveTokenOption(options: Options): string | null | undefined {
+  if (options.noAuth) return null;
+  const raw = options.token ?? process.env.NEUTRINO_WEB_TOKEN;
+  const trimmed = raw?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+/** Print every address a client can open, plus what it takes to open one. */
+function reportAccess(handle: WebServerHandle): void {
+  process.stdout.write(`Neutrino web UI listening on ${handle.host}:${handle.port}\n`);
+  const multiple = handle.urls.length > 1;
+  process.stdout.write(multiple ? "Open the address that matches your device:\n" : "Open:\n");
+  for (const url of handle.urls) process.stdout.write(`  ${url}\n`);
+  const wildcard = handle.host === "0.0.0.0" || handle.host === "::";
+  if (wildcard && !handle.urls.some((url) => !url.includes("//127.0.0.1:"))) {
+    // Bound to every interface, yet nothing outside this machine is reachable:
+    // usually Wi-Fi is off, the VPN is down, or the only adapters left are
+    // virtual ones we deliberately hide.
+    process.stdout.write(
+      "note: no reachable network address found, so only this machine can connect.\n",
+    );
+  }
+  if (handle.token) {
+    // The token is in the URL because browsers cannot send headers on the SSE
+    // stream, and because typing a 32-character secret on a phone is awful.
+    process.stdout.write(
+      "These links carry the access token — anyone who has one can drive the agent.\n",
+    );
+  } else if (wildcard) {
+    process.stdout.write("WARNING: no access token; anyone who can reach this port can drive the agent.\n");
+  }
 }
 
 let options: Options;
@@ -95,15 +167,16 @@ try {
 // (TUI) and a log line (both), never a shell flooded with mouse reports.
 installCrashGuard();
 
-const host = options.host || process.env.NEUTRINO_WEB_HOST || undefined;
+const host = options.lan ? WILDCARD_HOST : options.host || process.env.NEUTRINO_WEB_HOST || undefined;
+const token = resolveTokenOption(options);
 
 if (options.mode === "web") {
   // Headless: serve the saved history (and any live sessions in this process,
   // which for a standalone server is none).
   const port = options.port ?? envPort() ?? DEFAULT_WEB_PORT;
   try {
-    const handle = await startWebServer({ port, host });
-    process.stdout.write(`Neutrino web UI: ${handle.url}\n`);
+    const handle = await startWebServer({ port, host, token });
+    reportAccess(handle);
     process.stdout.write("Serving saved conversations. Press Ctrl+C to stop.\n");
     const shutdown = () => {
       handle.close().finally(() => process.exit(0));
@@ -125,8 +198,8 @@ if (options.mode === "web") {
   const webPort = options.port ?? envPort();
   if (webPort !== null) {
     try {
-      const handle = await app.enableWeb(webPort, host);
-      process.stdout.write(`Neutrino web UI: ${handle.url}\n`);
+      const handle = await app.enableWeb(webPort, host, token);
+      reportAccess(handle);
     } catch (err) {
       process.stderr.write(`neutrino: failed to start web server: ${err instanceof Error ? err.message : String(err)}\n`);
       process.exit(1);

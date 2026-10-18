@@ -95,9 +95,9 @@ export class App {
    * Mount the browser UI on the given port. Safe to call once; subsequent calls
    * return the already-running server.
    */
-  async enableWeb(port: number, host?: string): Promise<WebServerHandle> {
+  async enableWeb(port: number, host?: string, token?: string | null): Promise<WebServerHandle> {
     if (this.webHandle) return this.webHandle;
-    this.webHandle = await startWebServer({ port, host });
+    this.webHandle = await startWebServer({ port, host, token });
     return this.webHandle;
   }
 

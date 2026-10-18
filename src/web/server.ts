@@ -8,10 +8,13 @@
  *      time, and drive it (pause / resume / send).
  *
  * The server binds to loopback by default: it can read your whole conversation
- * history, so exposing it on a public interface is an explicit opt-in.
+ * history and drive an agent with shell access, so exposing it on a public
+ * interface is an explicit opt-in, and doing so requires an access token.
  */
+import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SESSION_DIR, listSessions, type SessionData, type SessionMeta } from "../config.js";
@@ -44,13 +47,142 @@ export interface WebServerOptions {
   port: number;
   /** Interface to bind. Defaults to loopback. */
   host?: string;
+  /**
+   * Shared secret every `/api/*` request must present.
+   *
+   * `undefined` means "decide for me": a loopback bind needs no secret, while a
+   * bind that other machines can reach gets a random one — this API can drive an
+   * agent with shell access, so it must never be open by accident. `null`
+   * disables authentication outright, for a network you fully trust.
+   */
+  token?: string | null;
 }
 
 export interface WebServerHandle {
+  /** Loopback URL. Always usable from this machine. */
   url: string;
+  /** Every URL a client can open, with the token attached when one is needed. */
+  urls: string[];
   port: number;
   host: string;
+  /** Secret required on `/api/*`, or `null` when the API is open. */
+  token: string | null;
   close(): Promise<void>;
+}
+
+/** Bind addresses that mean "every interface" rather than one host. */
+const WILDCARD_HOSTS = new Set(["0.0.0.0", "::", "[::]", ""]);
+
+/** True when `host` only accepts connections from this machine. */
+export function isLoopbackHost(host: string): boolean {
+  const h = host.trim().toLowerCase().replace(/^\[|\]$/g, "");
+  if (WILDCARD_HOSTS.has(h)) return false;
+  return h === "localhost" || h === "::1" || h.startsWith("127.");
+}
+
+/**
+ * Adapters that only ever talk to this machine: hypervisor host-only switches,
+ * container bridges and loopback variants. Listing them would bury the address
+ * the phone actually needs under three that cannot work.
+ */
+const VIRTUAL_ADAPTER = /vEthernet|VMware|VirtualBox|Hyper-V|Loopback|Npcap|Bluetooth|Docker/i;
+
+/** The IPv4 addresses other devices can reach this machine on. */
+export function lanAddresses(): string[] {
+  const found: string[] = [];
+  for (const [name, entries] of Object.entries(os.networkInterfaces())) {
+    if (VIRTUAL_ADAPTER.test(name)) continue;
+    for (const entry of entries ?? []) {
+      if (entry.internal) continue;
+      // `family` is "IPv4" in current Node and 4 in older typings.
+      const family = String(entry.family);
+      if (family !== "IPv4" && family !== "4") continue;
+      // 169.254/16 is link-local: it only routes on the local segment, so it is
+      // never the address worth telling another device to open.
+      if (entry.address.startsWith("169.254.")) continue;
+      if (!found.includes(entry.address)) found.push(entry.address);
+    }
+  }
+  return found;
+}
+
+/**
+ * Decide whether this server needs a token.
+ *
+ * An explicit string is honoured, `null` turns authentication off, and
+ * `undefined` generates a random secret for anything reachable from elsewhere.
+ */
+export function resolveWebToken(host: string, requested?: string | null): string | null {
+  if (requested === null) return null;
+  if (typeof requested === "string" && requested.trim()) return requested.trim();
+  if (isLoopbackHost(host)) return null;
+  return crypto.randomBytes(24).toString("base64url");
+}
+
+/** Build the list of addresses worth showing to the operator. */
+export function webUrls(host: string, port: number, token: string | null): { url: string; urls: string[] } {
+  const normalized = host.trim() || "127.0.0.1";
+  const wildcard = WILDCARD_HOSTS.has(normalized.toLowerCase());
+  const suffix = token ? `/?t=${encodeURIComponent(token)}` : "/";
+
+  const hosts: string[] = [];
+  if (isLoopbackHost(normalized)) {
+    hosts.push("127.0.0.1");
+  } else if (wildcard) {
+    hosts.push(...lanAddresses());
+    hosts.push("127.0.0.1");
+  } else {
+    hosts.push(normalized);
+  }
+
+  return {
+    url: `http://${wildcard ? "127.0.0.1" : normalized}:${port}`,
+    urls: hosts.map((h) => `http://${h}:${port}${suffix}`),
+  };
+}
+
+/**
+ * Everything about who can reach the server and what they must present.
+ * Exported so the policy can be tested without binding a socket.
+ */
+export function describeWebAccess(options: WebServerOptions): {
+  token: string | null;
+  url: string;
+  urls: string[];
+} {
+  const host = options.host?.trim() || "127.0.0.1";
+  const token = resolveWebToken(host, options.token);
+  return { token, ...webUrls(host, options.port, token) };
+}
+
+/**
+ * Pull the caller's token out of a request.
+ *
+ * `EventSource` cannot set headers, so the SSE stream carries it in the query
+ * string; everything else uses a header.
+ */
+function tokenFromRequest(req: http.IncomingMessage, url: URL): string | null {
+  const header = req.headers["x-neutrino-token"];
+  if (typeof header === "string" && header.trim()) return header.trim();
+
+  const authorization = req.headers.authorization;
+  if (typeof authorization === "string") {
+    const match = /^Bearer\s+(.+)$/i.exec(authorization.trim());
+    if (match) return match[1].trim();
+  }
+
+  const query = url.searchParams.get("t") ?? url.searchParams.get("token");
+  return query && query.trim() ? query.trim() : null;
+}
+
+/** Constant-time token comparison. */
+function tokenMatches(expected: string, provided: string | null): boolean {
+  if (!provided) return false;
+  // Hash first: timingSafeEqual requires equal lengths, and a wrong-length guess
+  // should not be distinguishable from a wrong guess of the right length.
+  const a = crypto.createHash("sha256").update(provided).digest();
+  const b = crypto.createHash("sha256").update(expected).digest();
+  return crypto.timingSafeEqual(a, b);
 }
 
 interface OverviewSession extends SessionMeta {
@@ -324,14 +456,32 @@ function streamLive(key: string, req: http.IncomingMessage, res: http.ServerResp
   res.on("error", cleanup);
 }
 
-async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<boolean> {
+async function handleApi(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  url: URL,
+  token: string | null,
+): Promise<boolean> {
   const { pathname } = url;
   if (!pathname.startsWith("/api/")) return false;
 
   if (req.method === "OPTIONS") {
     // Same-origin only: no CORS headers, so cross-site preflights are rejected.
+    // Answered before the token check because it reveals nothing.
     res.writeHead(204, { Allow: "GET, POST, OPTIONS" });
     res.end();
+    return true;
+  }
+
+  // Everything below reads every saved conversation and can drive an agent that
+  // runs shell commands, so a server another machine can reach demands proof
+  // that the caller was handed the token.
+  if (token && !tokenMatches(token, tokenFromRequest(req, url))) {
+    res.setHeader("WWW-Authenticate", 'Bearer realm="neutrino"');
+    sendJson(res, 401, {
+      error: "unauthorized",
+      hint: "open the URL printed by the terminal (it carries ?t=<token>), or send an X-Neutrino-Token header",
+    });
     return true;
   }
 
@@ -493,7 +643,11 @@ async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, ur
   return true;
 }
 
-async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+async function handleRequest(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  token: string | null,
+): Promise<void> {
   let url: URL;
   try {
     url = new URL(req.url ?? "/", "http://localhost");
@@ -502,7 +656,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     return;
   }
 
-  if (await handleApi(req, res, url)) return;
+  if (await handleApi(req, res, url, token)) return;
 
   if (req.method !== "GET" && req.method !== "HEAD") {
     sendText(res, 405, "Method not allowed");
@@ -514,8 +668,12 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
 /** Start the web UI. Resolves once the socket is actually listening. */
 export async function startWebServer(options: WebServerOptions): Promise<WebServerHandle> {
   const host = options.host ?? "127.0.0.1";
+  // Resolved before the socket is up so the request handler can capture it; the
+  // random token must not be regenerated once the real port is known.
+  const token = resolveWebToken(host, options.token);
+
   const server = http.createServer((req, res) => {
-    handleRequest(req, res).catch((err) => {
+    handleRequest(req, res, token).catch((err) => {
       if (!res.headersSent) {
         sendJson(res, 500, { error: err instanceof Error ? err.message : "internal error" });
       } else {
@@ -554,7 +712,8 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
   return {
     host,
     port,
-    url: `http://${host}:${port}`,
+    token,
+    ...webUrls(host, port, token),
     close: () =>
       new Promise<void>((resolve) => {
         for (const key of [...webSessions.keys()]) closeWebSession(key);

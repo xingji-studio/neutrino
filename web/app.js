@@ -12,6 +12,99 @@
 const MAX_VISIBLE = 5;
 const REFRESH_MS = 4000;
 
+// -------------------------------------------------------------------- access
+//
+// The server may require a token. It arrives once in the URL printed by the
+// terminal (`?t=…`) and is then kept in localStorage, because typing a
+// 32-character secret on a phone is not something anyone should have to do.
+// It is stripped from the address bar so that reloading, bookmarking or
+// sharing a screenshot cannot leak it.
+const TOKEN_KEY = "neutrino.token";
+
+const token = (() => {
+  const params = new URLSearchParams(location.search);
+  const fromUrl = params.get("t") || params.get("token");
+  if (fromUrl) {
+    params.delete("t");
+    params.delete("token");
+    const query = params.toString();
+    try {
+      history.replaceState(null, "", location.pathname + (query ? `?${query}` : "") + location.hash);
+    } catch {
+      // Cosmetic only — a browser that refuses this still works.
+    }
+    try {
+      localStorage.setItem(TOKEN_KEY, fromUrl);
+    } catch {
+      // Storage may be blocked; the token is still in memory for this page.
+    }
+    return fromUrl;
+  }
+  try {
+    return localStorage.getItem(TOKEN_KEY) || null;
+  } catch {
+    return null;
+  }
+})();
+
+/** Append the token to a URL, for the cases where a header is impossible. */
+function withToken(path) {
+  if (!token) return path;
+  return `${path}${path.includes("?") ? "&" : "?"}t=${encodeURIComponent(token)}`;
+}
+
+/**
+ * fetch() that authenticates.
+ *
+ * EventSource cannot set headers, so the SSE stream gets the token in its query
+ * string; everything else uses a header so it stays out of logs.
+ */
+async function apiFetch(path, init = {}) {
+  const headers = new Headers(init.headers || undefined);
+  if (token) headers.set("X-Neutrino-Token", token);
+  const response = await fetch(path, { ...init, headers });
+  if (response.status === 401) {
+    showGate();
+    throw new Error("HTTP 401 (access token required)");
+  }
+  return response;
+}
+
+let gateShown = false;
+
+/** Ask for the token instead of leaving a blank page behind a 401. */
+function showGate() {
+  if (gateShown) return;
+  gateShown = true;
+  closeStream();
+  setStatus("locked", "offline");
+
+  const gate = document.createElement("div");
+  gate.className = "gate";
+  gate.innerHTML =
+    '<form class="gate-card">' +
+    "<h2>Access token required</h2>" +
+    "<p>Open the URL printed by the terminal — it ends in <code>?t=…</code> — or paste the token below.</p>" +
+    '<input type="password" autocomplete="off" spellcheck="false" placeholder="access token">' +
+    '<button class="primary" type="submit">Unlock</button>' +
+    "</form>";
+
+  gate.querySelector("form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const value = gate.querySelector("input").value.trim();
+    if (!value) return;
+    try {
+      localStorage.setItem(TOKEN_KEY, value);
+    } catch {
+      // Nothing we can do; the reload will simply ask again.
+    }
+    location.reload();
+  });
+
+  document.body.appendChild(gate);
+  gate.querySelector("input").focus();
+}
+
 const el = {
   sessions: document.getElementById("sessions"),
   status: document.getElementById("status"),
@@ -111,8 +204,10 @@ function renderMarkdown(value) {
 // ------------------------------------------------------------------- status
 
 async function loadOverview(options = {}) {
+  // Once the gate is up every poll would only produce another 401.
+  if (gateShown) return;
   try {
-    const response = await fetch("/api/overview", { cache: "no-store" });
+    const response = await apiFetch("/api/overview", { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     state.overview = await response.json();
     setStatus(state.selection?.kind === "live" ? "live" : "online", state.selection?.kind === "live" ? "live" : "online");
@@ -264,7 +359,7 @@ async function selectLive(key) {
 
 function openStream(key) {
   closeStream();
-  const source = new EventSource(`/api/live/${encodeURIComponent(key)}/stream`);
+  const source = new EventSource(withToken(`/api/live/${encodeURIComponent(key)}/stream`));
   state.eventSource = source;
 
   source.addEventListener("snapshot", (event) => {
@@ -312,7 +407,7 @@ async function selectFile(id) {
   resetMessagePane("Loading…");
 
   try {
-    const response = await fetch(`/api/session/${encodeURIComponent(id)}`, { cache: "no-store" });
+    const response = await apiFetch(`/api/session/${encodeURIComponent(id)}`, { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     renderFile(data);
@@ -365,7 +460,7 @@ function renderFileControls(data) {
 
 /** Attach to a resumed conversation, creating it server-side when needed. */
 async function continueSession(id) {
-  const response = await fetch(`/api/session/${encodeURIComponent(id)}/continue`, {
+  const response = await apiFetch(`/api/session/${encodeURIComponent(id)}/continue`, {
     method: "POST",
   });
   const body = await response.json().catch(() => ({}));
@@ -590,7 +685,7 @@ function scrollToBottom() {
 
 async function postAction(key, action, body) {
   try {
-    await fetch(`/api/live/${encodeURIComponent(key)}/${action}`, {
+    await apiFetch(`/api/live/${encodeURIComponent(key)}/${action}`, {
       method: "POST",
       headers: body ? { "Content-Type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,

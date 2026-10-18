@@ -31,8 +31,66 @@ npm run web
 
 Then open <http://127.0.0.1:8765>.
 
-The server binds to loopback by default. Pass `--host 0.0.0.0` only if you
-really mean to expose your entire conversation history on the network.
+## Using it from another device
+
+The server binds to loopback by default. To open it from your phone or another
+machine, bind an interface others can reach:
+
+```sh
+neutrino web --port 8765 --lan               # every interface (0.0.0.0)
+neutrino web --port 8765 --host 100.64.0.7   # one specific address
+```
+
+Startup prints each address that works, token included:
+
+```
+Neutrino web UI listening on 0.0.0.0:8765
+Open the address that matches your device:
+  http://192.168.1.211:8765/?t=b2yzzvZyypcbmoDFdpT470qowAOE9Ca4
+  http://127.0.0.1:8765/?t=b2yzzvZyypcbmoDFdpT470qowAOE9Ca4
+```
+
+Hypervisor and container host-only adapters (`vEthernet`, VMware, VirtualBox,
+Docker), link-local `169.254/16` and loopback addresses other than `127.0.0.1`
+are left out of that list on purpose: they cannot be reached from another
+device. CGNAT ranges such as Tailscale's `100.64/10` are kept, since a VPN is a
+common way to reach a machine.
+
+## Authentication
+
+`/api/*` can read every saved conversation and drive an agent with shell access,
+so a server that other machines can reach requires a token on every request.
+Nothing needs configuring: binding beyond loopback generates a random one and
+prints it inside the advertised URLs. Pin it to keep your links stable across
+restarts:
+
+```sh
+export NEUTRINO_WEB_TOKEN="$(openssl rand -base64 24)"
+neutrino web --port 8765 --lan        # or --token "$secret"
+```
+
+A client proves it holds the token in any of these ways:
+
+| Where | Value |
+| --- | --- |
+| `X-Neutrino-Token` header | the token |
+| `Authorization` header | `Bearer <token>` |
+| Query string | `?t=<token>` or `?token=<token>` |
+
+The query form exists because `EventSource` — used for the SSE stream — cannot
+set headers. Prefer a header everywhere else so the secret stays out of access
+logs.
+
+The browser reads the token from the URL once, saves it in `localStorage`, and
+strips it from the address bar. If a page is opened without one it shows an
+unlock prompt instead of a blank screen. A wrong or missing token answers
+`401` with a `WWW-Authenticate: Bearer` header.
+
+Static files (`/`, `/app.js`, `/style.css`) stay public — the token prompt has to
+load before any token exists. They contain no conversation data.
+
+`--no-auth` turns the check off completely. Only do that on a network where
+every device is yours, because the API is a remote shell as your user.
 
 ## History vs. live sessions
 
@@ -84,6 +142,10 @@ to know whether a conversation is driven by the terminal or by the server.
 | POST | `/api/live/:key/message` | Send `{ "text": "…" }` |
 | POST | `/api/live/:key/close` | Dispose a browser-owned session |
 | GET | `/api/health` | Liveness probe |
+
+Every `/api/*` route needs the access token when one is configured; see
+[Authentication](#authentication). `OPTIONS` is answered unauthenticated so
+preflights are not blocked, and it returns no data.
 
 ### Approval requests
 

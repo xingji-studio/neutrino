@@ -18,7 +18,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node scripts/test-paste.mjs && node scripts/test-mouse.mjs && node scripts/test-cursor.mjs && node scripts/test-selection.mjs && node scripts/test-copy.mjs && node scripts/test-scrollbar.mjs && node scripts/test-render.mjs && node scripts/test-drift.mjs && node scripts/test-sanitize.mjs && node scripts/test-markdown.mjs && node scripts/test-wrap.mjs && node scripts/test-fetch.mjs && node scripts/test-compact.mjs && node scripts/test-tools.mjs && node scripts/test-approval.mjs && node scripts/test-approval-ui.mjs && node scripts/test-settings-render.mjs && node scripts/test-approval-flow.mjs && node scripts/test-web.mjs && node scripts/test-resilience.mjs && node scripts/test-approval-timeout.mjs",
+    "test": "npm run build && node scripts/test-paste.mjs && node scripts/test-mouse.mjs && node scripts/test-cursor.mjs && node scripts/test-selection.mjs && node scripts/test-copy.mjs && node scripts/test-scrollbar.mjs && node scripts/test-render.mjs && node scripts/test-drift.mjs && node scripts/test-sanitize.mjs && node scripts/test-markdown.mjs && node scripts/test-wrap.mjs && node scripts/test-fetch.mjs && node scripts/test-compact.mjs && node scripts/test-tools.mjs && node scripts/test-approval.mjs && node scripts/test-approval-ui.mjs && node scripts/test-settings-render.mjs && node scripts/test-approval-flow.mjs && node scripts/test-web.mjs && node scripts/test-web-auth.mjs && node scripts/test-resilience.mjs && node scripts/test-approval-timeout.mjs",
     "prepare": "npm run build",
     "web": "node dist/bin.js web"
   },

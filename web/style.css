@@ -742,3 +742,63 @@ button {
 .approval-actions button:hover {
   filter: brightness(1.1);
 }
+
+/* -------------------------------------------------------------------- gate */
+/* Shown when the server requires an access token and this browser has none. */
+
+.gate {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(6, 9, 14, 0.82);
+  backdrop-filter: blur(3px);
+}
+
+.gate-card {
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 22px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+}
+
+.gate-card h2 {
+  margin: 0;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+}
+
+.gate-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.gate-card code {
+  color: var(--accent);
+}
+
+.gate-card input {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+.gate-card input:focus {
+  outline: none;
+  border-color: rgba(92, 200, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(92, 200, 255, 0.08);
+}
