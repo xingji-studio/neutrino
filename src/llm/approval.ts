@@ -106,6 +106,33 @@ export interface ApprovalDecision {
   votes?: ApprovalVote[];
 }
 
+/**
+ * How long a single reviewer may take before it is treated as a denial.
+ *
+ * The reviewer sits on the critical path of a tool call, so an unreachable or
+ * wedged provider must not be able to freeze the conversation: a slow verdict
+ * is a "no", not a hang.
+ */
+export const REVIEW_TIMEOUT_MS = 45_000;
+
+/** Resolves to null if `promise` does not settle within `ms`. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise<T | null>((resolve, reject) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    timer.unref?.();
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 export interface ApprovalGateOptions {
   /** Show the human approval prompt. Resolves true when approved. */
   askHuman(request: ApprovalRequest): Promise<boolean>;
@@ -115,6 +142,13 @@ export interface ApprovalGateOptions {
   extremeAutoApprovalEnabled(): boolean;
   /** Recent conversation, for the reviewer's context. */
   context?(): string;
+  /**
+   * Called with the reviewer count when an automated review starts and with
+   * null when it finishes, so the UI can explain the wait.
+   */
+  onReview?(info: { total: number } | null): void;
+  /** Overridable only so tests do not have to wait 45 s. */
+  reviewTimeoutMs?(): number;
 }
 
 const REVIEW_SYSTEM_PROMPT = `You are the independent approval reviewer for Neutrino, an autonomous coding agent.
@@ -244,8 +278,15 @@ export class ApprovalGate {
   /** Run `count` reviewers in parallel; every one of them must agree. */
   private async reviewAll(request: ApprovalRequest, count: number): Promise<ApprovalVote[]> {
     const seats = Array.from({ length: count }, (_, i) => i + 1);
-    const votes = await Promise.all(seats.map((seat) => this.review(request, seat, count)));
-    return votes.map((vote, i) => ({ ...vote, reviewer: i + 1 }));
+    // Reviews are invisible unless the UI is told, and an unexplained pause on
+    // a tool call looks exactly like a frozen app.
+    this.options.onReview?.({ total: count });
+    try {
+      const votes = await Promise.all(seats.map((seat) => this.review(request, seat, count)));
+      return votes.map((vote, i) => ({ ...vote, reviewer: i + 1 }));
+    } finally {
+      this.options.onReview?.(null);
+    }
   }
 
   /** One reviewer = one fresh agent with its own client and prompt. */
@@ -268,7 +309,16 @@ export class ApprovalGate {
 
     try {
       const client = new LLMClient(model, provider, intensity);
-      const raw = await client.complete(REVIEW_SYSTEM_PROMPT, prompt);
+      const timeout = this.options.reviewTimeoutMs?.() ?? REVIEW_TIMEOUT_MS;
+      const raw = await withTimeout(client.complete(REVIEW_SYSTEM_PROMPT, prompt), timeout);
+      if (raw === null) {
+        // Fail closed: a reviewer that never answers must not stall the turn.
+        return {
+          approved: false,
+          reason: `reviewer did not answer within ${Math.round(timeout / 1000)}s`,
+          reviewer: seat,
+        };
+      }
       const verdict = parseVerdict(raw);
       if (verdict) return verdict;
       // A reviewer that cannot answer in the expected shape is not an approval.

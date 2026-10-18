@@ -34,6 +34,8 @@ export interface LiveMeta {
   tokens: { prompt: number; completion: number };
   /** Tool call waiting for a human decision, or null. */
   approval?: { tool: string; level: "high" | "extreme" } | null;
+  /** Reviewer count while an automated approval review is running. */
+  reviewing?: number | null;
 }
 
 /** Everything a browser needs to render a live conversation. */

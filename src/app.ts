@@ -2,6 +2,7 @@ import process from "node:process";
 import { Buffer } from "./terminal/buffer.js";
 import { InputReader, type InputEvent, type MouseEvent } from "./terminal/input.js";
 import { Renderer } from "./terminal/renderer.js";
+import { installCrashGuard, writeCrashLog } from "./terminal/restore.js";
 import { Screen } from "./terminal/screen.js";
 import { defaultState, type AppState } from "./state.js";
 import { loadConfig, saveConfig, type ModelInfo, type SessionData } from "./config.js";
@@ -39,6 +40,9 @@ export class App {
   private toastTimer: NodeJS.Timeout | null = null;
   private repaintTimer: NodeJS.Timeout | null = null;
   private toast = "";
+  // Consecutive failed renders. A screen that cannot draw itself is fatal;
+  // a single bad frame is not.
+  private renderFailures = 0;
   // Most recently rendered frame. Kept so a selection can be turned back into
   // text without having to re-run the screen's render.
   private lastBuffer: Buffer | null = null;
@@ -98,6 +102,10 @@ export class App {
   }
 
   async start(): Promise<void> {
+    // Installed before anything touches the terminal: from here on, a crash
+    // restores mouse tracking, raw mode and the alternate screen instead of
+    // handing the shell a terminal that types mouse reports.
+    installCrashGuard();
     this.renderer.init();
     this.input.start((ev) => this.handleEvent(ev));
     process.stdout.on("resize", this.resizeHandler);
@@ -136,6 +144,28 @@ export class App {
   }
 
   render(): void {
+    try {
+      this.renderFrame();
+      this.renderFailures = 0;
+    } catch (err) {
+      // Rendering runs from timers and stream callbacks too, so an escaping
+      // throw here is equally fatal.
+      this.renderFailures++;
+      if (this.renderFailures === 1) this.noteInternalError("render", err);
+      // A screen that cannot be drawn at all means there is no UI left; stop
+      // instead of spinning on a broken frame every 60 ms.
+      if (this.renderFailures > 30) this.quit();
+    }
+  }
+
+  private noteInternalError(kind: string, err: unknown): void {
+    const file = writeCrashLog(kind, err);
+    const detail = err instanceof Error ? err.message : String(err);
+    const where = file ? ` - details in ${file}` : "";
+    this.showToast(`internal error (${kind}): ${detail}${where}`);
+  }
+
+  private renderFrame(): void {
     // Start/stop the "thinking" blink animation. While the agent is thinking,
     // a timer toggles the blink phase and re-renders so the top status bar
     // flashes to draw the user's attention.
@@ -195,6 +225,16 @@ export class App {
   }
 
   private handleEvent(ev: InputEvent): void {
+    try {
+      this.dispatchEvent(ev);
+    } catch (err) {
+      // This runs inside a stdin 'data' callback, where a throw is an uncaught
+      // exception that would kill the app mid-keystroke.
+      this.noteInternalError("input handler", err);
+    }
+  }
+
+  private dispatchEvent(ev: InputEvent): void {
     if (ev.type === "paste") {
       // Pasted text arrives with its newlines already flattened to spaces, so
       // it is inserted into the input instead of being submitted.
@@ -346,7 +386,8 @@ export class App {
     this.showToast(`Copied ${text.length} char${text.length === 1 ? "" : "s"}`);
   }
 
-  private showToast(text: string): void {
+  // Public so screens can surface transient status (e.g. "reviewing 3/3").
+  showToast(text: string): void {
     this.toast = text;
     if (this.toastTimer) clearTimeout(this.toastTimer);
     this.toastTimer = setTimeout(() => {
@@ -434,7 +475,13 @@ export class App {
       clearTimeout(this.toastTimer);
       this.toastTimer = null;
     }
-    this.input.stop();
+    // Each step is guarded so a failure in one cannot skip the terminal
+    // restore in the next one.
+    try {
+      this.input.stop();
+    } catch {
+      // stdin is already unusable; the restore below still matters.
+    }
     this.renderer.dispose();
     void this.webHandle?.close();
     process.exit(0);

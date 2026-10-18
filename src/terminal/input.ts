@@ -77,8 +77,17 @@ export class InputReader {
     const stdin = process.stdin;
     stdin.removeListener("data", this.dataHandler);
     if (this.escTimer) clearTimeout(this.escTimer);
-    if (stdin.isTTY) stdin.setRawMode(false);
-    stdin.pause();
+    try {
+      if (stdin.isTTY) stdin.setRawMode(false);
+    } catch {
+      // The console already went away; leaving raw mode is best-effort here and
+      // failing must not abort the rest of the shutdown.
+    }
+    try {
+      stdin.pause();
+    } catch {
+      // Same as above.
+    }
   }
 
   private onData(chunk: Buffer): void {

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import process from "node:process";
 import { App } from "./app.js";
+import { installCrashGuard } from "./terminal/restore.js";
 import { startWebServer } from "./web/server.js";
 
 const DEFAULT_WEB_PORT = 8765;
@@ -89,6 +90,10 @@ try {
   process.stderr.write("Run 'neutrino --help' for usage.\n");
   process.exit(2);
 }
+
+// Installed before either mode starts: a crash must leave a usable terminal
+// (TUI) and a log line (both), never a shell flooded with mouse reports.
+installCrashGuard();
 
 const host = options.host || process.env.NEUTRINO_WEB_HOST || undefined;
 

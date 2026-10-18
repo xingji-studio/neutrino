@@ -390,6 +390,22 @@ function hideComposer() {
 function renderApproval(snapshot) {
   const pending = snapshot && snapshot.approval;
   if (!pending) {
+    // An automated review runs before a card exists, so without this the tab
+    // just looks stuck for however long the reviewers take.
+    const reviewers = snapshot && snapshot.reviewing;
+    if (reviewers) {
+      el.approval.className = "approval high";
+      const head = document.createElement("div");
+      head.className = "approval-head";
+      const title = document.createElement("strong");
+      title.textContent = "Independent review";
+      const note = document.createElement("span");
+      note.className = "approval-risk";
+      note.textContent = `${reviewers} reviewer${reviewers > 1 ? "s" : ""}`;
+      head.append(title, note);
+      el.approval.replaceChildren(head);
+      return;
+    }
     el.approval.classList.add("hidden");
     el.approval.replaceChildren();
     return;

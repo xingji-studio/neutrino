@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { SESSION_DIR, listSessions, type SessionData, type SessionMeta } from "../config.js";
 import { normalizeCwd } from "../cwd.js";
 import { hub, type LiveEntrySummary, type LiveSnapshot } from "./hub.js";
+import { writeCrashLog } from "../terminal/restore.js";
 import { resumeSession, type WebSession } from "./session.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -280,28 +281,47 @@ function streamLive(key: string, req: http.IncomingMessage, res: http.ServerResp
     // Disable proxy buffering so tokens arrive as they are produced.
     "X-Accel-Buffering": "no",
   });
-  res.write("retry: 2000\n\n");
+  // A browser tab that is closed, reloaded or suspended leaves a socket that
+  // writes fail on. Every write goes through here so a dead connection can
+  // never emit an 'error' event nobody listens for.
+  const write = (chunk: string): boolean => {
+    if (res.destroyed || res.writableEnded) return false;
+    try {
+      res.write(chunk);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  write("retry: 2000\n\n");
 
   const send = (snapshot: LiveSnapshot) => {
-    res.write(`event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`);
+    write(`event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`);
   };
 
   const unsubscribe = hub.subscribe(key, send);
   if (!unsubscribe) {
-    res.write("event: gone\ndata: {}\n\n");
+    write("event: gone\ndata: {}\n\n");
     res.end();
     return;
   }
+  // Rebound so the hoisted cleanup() below keeps the narrowed (non-null) type.
+  const detach = unsubscribe;
 
-  const keepAlive = setInterval(() => res.write(": ping\n\n"), 25_000);
+  const keepAlive = setInterval(() => {
+    if (!write(": ping\n\n")) cleanup();
+  }, 25_000);
   keepAlive.unref?.();
 
-  const cleanup = () => {
+  function cleanup(): void {
     clearInterval(keepAlive);
-    unsubscribe();
-  };
+    detach();
+  }
   req.on("close", cleanup);
   req.on("error", cleanup);
+  // Without this, a client reset during a write is an uncaught 'error' event.
+  res.on("error", cleanup);
 }
 
 async function handleApi(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<boolean> {
@@ -511,6 +531,16 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
     };
     const onListening = () => {
       server.removeListener("error", onError);
+      // Once listening, the server must tolerate connection-level failures
+      // (resets, EMFILE, half-open sockets) without the process dying. An
+      // 'error' event with no listener is fatal in Node.
+      server.on("error", (err: Error) => {
+        writeCrashLog("web server", err);
+      });
+      server.on("clientError", (_err, socket) => {
+        if (socket.writable) socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
+        socket.destroy();
+      });
       resolve();
     };
     server.once("error", onError);

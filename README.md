@@ -225,6 +225,28 @@ Model responses arrive over a streamed connection that can drop at any point. A 
 
 Any stream the consumer walks away from (pause, or a newer turn taking over) always has its body cancelled, so sockets are not leaked.
 
+### Crash safety
+
+The TUI takes over the terminal: raw mode, the alternate screen and mouse
+reporting. If the process ever dies without undoing those, the shell inherits a
+terminal that types `[<b>;<x>;<y>M` mouse reports at every cursor move.
+
+So the teardown sequence is registered three ways — normal quit, a
+`process.on("exit")` hook that writes synchronously to fd 1, and
+`uncaughtException` / `unhandledRejection` handlers. From any of them the
+terminal is restored, the stack trace is appended to `~/.neutrino/crash.log`
+and the process exits with status 1 instead of leaving a broken console behind.
+
+Key handlers and the render loop are also wrapped: they run inside `stdin`
+callbacks and timers, where a throw is an uncaught exception that used to end
+the session. A failed frame is now retried, and only a screen that cannot be
+drawn at all stops the app.
+
+The one case no program can survive is a hard kill (closing the terminal
+window, or `Ctrl+Break`). If a shell is still stuck like that, `reset` restores
+it; on Windows, `[Console]::Write([char]27 + "[?1003l[?1000l[?25h[?1049l")`
+does the same.
+
 ## License
 
 Apache-2.0. See [LICENSE](./LICENSE).

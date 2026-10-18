@@ -551,7 +551,33 @@ export class ChatScreen extends Screen implements LiveAgent {
       if (token !== this.turnToken) return;
       const apiMessages = this.buildApiMessages();
       await this.agentLoop(apiMessages, token);
-    })();
+    })().catch((err) => this.failTurn(err));
+  }
+
+  /**
+   * Ends a turn that failed before or around the agent loop.
+   *
+   * The turn body is a floating promise, so anything thrown outside the loop's
+   * own try/catch would otherwise surface as an unhandled rejection, which Node
+   * turns into a fatal error. Ending the turn here keeps the app alive and the
+   * failure visible in the transcript.
+   */
+  private failTurn(err: unknown): void {
+    this.messages.push({ role: "assistant", content: `[Error: ${describeError(err)}]` });
+    this.streamingContent = null;
+    try {
+      this.onTurnFinished();
+    } catch {
+      // If even the cleanup fails, force the idle state so the UI stays usable.
+      this.busy = false;
+      this.paused = false;
+      this.app.state.isThinking = false;
+      try {
+        this.app.render();
+      } catch {
+        // The app-level render guard reports this one.
+      }
+    }
   }
 
   private buildApiMessages(): ApiMessage[] {
@@ -698,6 +724,13 @@ export class ChatScreen extends Screen implements LiveAgent {
       reviewer: () => this.reviewerModel(),
       extremeAutoApprovalEnabled: () => loadConfig().auto_approve_extreme_risk === true,
       context: () => this.reviewerContext(),
+      // Reviews happen before any card is shown, so without this the app looks
+      // frozen while up to three model calls run.
+      onReview: (info) => {
+        this.app.showToast(
+          info ? `independent review running (${info.total} reviewer${info.total > 1 ? "s" : ""})...` : "",
+        );
+      },
     });
     return gate.decide({ tool, args, cwd: this.liveDir, prompt: this.currentPrompt(), risk });
   }

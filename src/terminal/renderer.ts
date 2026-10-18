@@ -1,5 +1,6 @@
 import process from "node:process";
 import type { Buffer } from "./buffer.js";
+import { TUI_TEARDOWN, markTerminalRestored, markTuiActive } from "./restore.js";
 import { type Style } from "../colors.js";
 import { isControlChar } from "../sanitize.js";
 
@@ -37,6 +38,7 @@ function rowSignature(row: import("./buffer.js").Cell[]): string {
 
 export class Renderer {
   private prevSig: string[] = [];
+  private disposed = false;
   private prevW = 0;
   private prevH = 0;
   private out = process.stdout;
@@ -50,6 +52,9 @@ export class Renderer {
   private lastForce: readonly number[] = [];
 
   init(): void {
+    // Tell the crash guard the terminal is ours *before* touching it, so a
+    // crash that skips dispose() can still undo every switch below.
+    markTuiActive();
     this.write("\x1b[?1049h"); // alternate screen
     this.write("\x1b[?25l"); // hide cursor
     this.write("\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?1015h"); // mouse tracking (incl. any-event for hover)
@@ -57,11 +62,11 @@ export class Renderer {
   }
 
   dispose(): void {
-    this.write("\x1b[?2004l");
-    this.write("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l");
-    this.write("\x1b[?25h");
-    this.write("\x1b[?1049l");
-    this.write("\x1b[0m");
+    if (this.disposed) return;
+    this.disposed = true;
+    this.write(TUI_TEARDOWN);
+    // The terminal is back to normal, so the exit guard must not write again.
+    markTerminalRestored();
   }
 
   /**
@@ -136,6 +141,12 @@ export class Renderer {
   }
 
   private write(chunk: string): void {
-    this.out.write(chunk);
+    if (this.out.destroyed || this.out.writableEnded) return;
+    try {
+      this.out.write(chunk);
+    } catch {
+      // A terminal that vanished (closed window, dying conhost) must not take
+      // the whole session down with it.
+    }
   }
 }

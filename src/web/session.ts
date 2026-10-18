@@ -29,7 +29,7 @@ import {
   transcriptFor,
   type CompactMessage,
 } from "../compact.js";
-import { LLMClient } from "../llm/client.js";
+import { LLMClient, describeError } from "../llm/client.js";
 import { executeTool, getToolDefinitions } from "../llm/tools.js";
 import { assessToolCall, type RiskAssessment } from "../llm/risk.js";
 import { ApprovalGate, type ApprovalDecision } from "../llm/approval.js";
@@ -138,6 +138,9 @@ export class WebSession implements LiveAgent {
     resolve(approved: boolean): void;
   } | null = null;
 
+  /** Reviewer count while an automated review runs, null otherwise. */
+  private reviewing: number | null = null;
+
   constructor(source: SessionData, model: ModelInfo) {
     this.model = model;
     this.provider = source.provider;
@@ -190,6 +193,7 @@ export class WebSession implements LiveAgent {
       approval: this.pendingApproval
         ? { tool: this.pendingApproval.tool, level: this.pendingApproval.risk.level }
         : null,
+      reviewing: this.reviewing,
     };
   }
 
@@ -287,7 +291,19 @@ export class WebSession implements LiveAgent {
       await this.autoCompress(token);
       if (token !== this.turnToken || this.paused) return;
       await this.agentLoop(this.buildApiMessages(), token);
-    })();
+    })().catch((err) => this.failTurn(err));
+  }
+
+  /** Ends a turn whose floating promise rejected, instead of crashing the app. */
+  private failTurn(err: unknown): void {
+    this.messages.push({ role: "assistant", content: `[Error: ${describeError(err)}]` });
+    this.streamingContent = null;
+    try {
+      this.onTurnFinished();
+    } catch {
+      this.busy = false;
+      this.paused = false;
+    }
   }
 
   private buildApiMessages(): ApiMessage[] {
@@ -414,6 +430,10 @@ export class WebSession implements LiveAgent {
       reviewer: () => this.reviewerModel(),
       extremeAutoApprovalEnabled: () => loadConfig().auto_approve_extreme_risk === true,
       context: () => this.reviewerContext(),
+      onReview: (info) => {
+        this.reviewing = info ? info.total : null;
+        this.publishLive();
+      },
     });
     return gate.decide({ tool, args, cwd: this.dir, prompt: this.currentPrompt(), risk });
   }
