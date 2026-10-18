@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
+import { claudeProjectKey, sameCwd } from "./cwd.js";
 
 export type AgentId = "claude" | "codex" | "opencode";
 
@@ -39,6 +40,35 @@ function parseJsonlLines(filePath: string): Record<string, unknown>[] {
     }
   }
   return out;
+}
+
+const HEAD_BYTES = 64 * 1024;
+
+/**
+ * Read at most `maxBytes` from the start of a file.
+ *
+ * Session transcripts can be several megabytes, but the working directory is
+ * always recorded up front, so scanning just the head keeps the history list
+ * fast when a project holds many sessions.
+ */
+function readHead(filePath: string, maxBytes = HEAD_BYTES): string {
+  let fd: number | null = null;
+  try {
+    fd = fs.openSync(filePath, "r");
+    const len = Math.min(fs.fstatSync(fd).size, maxBytes);
+    if (len <= 0) return "";
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, 0);
+    return buf.toString("utf-8");
+  } catch {
+    return "";
+  } finally {
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd);
+      } catch {}
+    }
+  }
 }
 
 function contentText(content: unknown): string {
@@ -93,9 +123,27 @@ function claudeTitle(lines: Record<string, unknown>[]): string {
   return "";
 }
 
-function listClaude(): AgentSessionMeta[] {
+const CWD_FIELD_RE = /"cwd"\s*:\s*("(?:[^"\\]|\\.)*")/;
+
+/** Working directory recorded in a Claude Code transcript ("" when unknown). */
+function claudeSessionCwd(filePath: string): string {
+  const m = CWD_FIELD_RE.exec(readHead(filePath));
+  if (!m) return "";
+  try {
+    const v = JSON.parse(m[1]) as unknown;
+    return typeof v === "string" ? v : "";
+  } catch {
+    return "";
+  }
+}
+
+function listClaude(cwd: string): AgentSessionMeta[] {
   const metas: AgentSessionMeta[] = [];
+  const wantKey = claudeProjectKey(cwd);
   for (const dir of claudeProjectDirs()) {
+    // Claude names each project dir after its cwd, so the dir name still tells
+    // us the directory when a transcript predates the `cwd` field.
+    const dirKey = path.basename(dir).toLowerCase();
     let files: string[];
     try {
       files = fs.readdirSync(dir);
@@ -111,6 +159,9 @@ function listClaude(): AgentSessionMeta[] {
       } catch {
         continue;
       }
+      // History is scoped to the current project: skip other directories.
+      const sessionCwd = claudeSessionCwd(fp);
+      if (sessionCwd ? !sameCwd(sessionCwd, cwd) : dirKey !== wantKey) continue;
       const id = f.slice(0, -".jsonl".length);
       const title = cleanTitle(claudeTitle(parseJsonlLines(fp)) || id.slice(0, 8));
       metas.push({
@@ -222,11 +273,36 @@ function codexMessageText(payload: Record<string, unknown>): string {
     .trim();
 }
 
-function listCodex(): AgentSessionMeta[] {
+/** Working directory recorded in a Codex rollout file ("" when unknown). */
+function codexSessionCwd(filePath: string): string {
+  let fallback = "";
+  for (const line of readHead(filePath).split("\n")) {
+    const t = line.trim();
+    if (!t) continue;
+    let o: Record<string, unknown>;
+    try {
+      o = JSON.parse(t) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const payload = o.payload as Record<string, unknown> | undefined;
+    const c = typeof payload?.cwd === "string" ? payload.cwd : typeof o.cwd === "string" ? o.cwd : "";
+    if (!c) continue;
+    // session_meta is authoritative; other records (turn_context) only serve
+    // as a fallback for older rollouts.
+    if (o.type === "session_meta") return c;
+    if (!fallback) fallback = c;
+  }
+  return fallback;
+}
+
+function listCodex(cwd: string): AgentSessionMeta[] {
   const index = codexIndex();
   const files = codexRolloutFiles();
   const metas: AgentSessionMeta[] = [];
   for (const [id, fp] of files) {
+    // History is scoped to the current project: skip other directories.
+    if (!sameCwd(codexSessionCwd(fp), cwd)) continue;
     const info = index.get(id);
     let title = info?.title ?? "";
     let updated = info?.updated_at ?? "";
@@ -320,23 +396,34 @@ function opencodeModelName(modelJson: unknown): string {
   }
 }
 
-function listOpencode(): AgentSessionMeta[] {
+function listOpencode(cwd: string): AgentSessionMeta[] {
   const db = opencodeDbHandle();
   if (!db) return [];
-  try {
-    const rows = db
-      .prepare("SELECT id, title, agent, model, time_created, time_updated FROM session ORDER BY time_updated DESC")
-      .all();
-    return (rows as Array<Record<string, unknown>>).map((r) => ({
-      id: String(r.id ?? ""),
-      title: cleanTitle(typeof r.title === "string" ? r.title : "").slice(0, 80),
-      created_at: iso(r.time_created),
-      updated_at: iso(r.time_updated),
-      model: opencodeModelName(r.model) || (typeof r.agent === "string" ? r.agent : ""),
-    }));
-  } catch {
-    return [];
+  // Current schemas store the project directory on the session row; older ones
+  // keep it on the related project row. Try both, newest schema first.
+  const queries = [
+    "SELECT id, title, agent, model, time_created, time_updated, directory AS dir FROM session ORDER BY time_updated DESC",
+    "SELECT s.id AS id, s.title AS title, s.agent AS agent, s.model AS model, s.time_created AS time_created, s.time_updated AS time_updated, p.worktree AS dir FROM session s LEFT JOIN project p ON p.id = s.project_id ORDER BY s.time_updated DESC",
+  ];
+  for (const sql of queries) {
+    let rows: Array<Record<string, unknown>>;
+    try {
+      rows = db.prepare(sql).all() as Array<Record<string, unknown>>;
+    } catch {
+      continue; // this schema has no project path column, try the next query
+    }
+    // History is scoped to the current project: skip other directories.
+    return rows
+      .filter((r) => sameCwd(typeof r.dir === "string" ? r.dir : "", cwd))
+      .map((r) => ({
+        id: String(r.id ?? ""),
+        title: cleanTitle(typeof r.title === "string" ? r.title : "").slice(0, 80),
+        created_at: iso(r.time_created),
+        updated_at: iso(r.time_updated),
+        model: opencodeModelName(r.model) || (typeof r.agent === "string" ? r.agent : ""),
+      }));
   }
+  return [];
 }
 
 function loadOpencode(id: string): AgentMessage[] {
@@ -374,10 +461,14 @@ function loadOpencode(id: string): AgentMessage[] {
 
 // ---------------- Public API ----------------
 
-export function listAgentSessions(agent: AgentId): AgentSessionMeta[] {
-  if (agent === "claude") return listClaude();
-  if (agent === "codex") return listCodex();
-  return listOpencode();
+/**
+ * Sessions of `agent` that were started in `cwd` (the directory neutrino runs
+ * in), newest first. Sessions from other directories are not shown.
+ */
+export function listAgentSessions(agent: AgentId, cwd: string = process.cwd()): AgentSessionMeta[] {
+  if (agent === "claude") return listClaude(cwd);
+  if (agent === "codex") return listCodex(cwd);
+  return listOpencode(cwd);
 }
 
 export function loadAgentMessages(agent: AgentId, id: string): AgentMessage[] {

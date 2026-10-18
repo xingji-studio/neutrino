@@ -2,7 +2,8 @@ import type { Buffer } from "../terminal/buffer.js";
 import { Screen } from "../terminal/screen.js";
 import type { Key, MouseEvent } from "../terminal/input.js";
 import { C } from "../colors.js";
-import { deleteSession, listSessions, loadSession, type SessionMeta } from "../config.js";
+import { deleteSession, listSessionsForCwd, loadSession, type SessionMeta } from "../config.js";
+import { ellipsizeStart } from "../width.js";
 import { drawHeader } from "../header.js";
 import { drawHint } from "../ui.js";
 
@@ -16,9 +17,12 @@ export class HistoryScreen extends Screen {
   private lastHoverY = -1;
   private rows: string[] = [];
   private itemBounds: { start: number; end: number }[] = [];
+  private cwd = process.cwd();
 
   onActivate(): void {
-    this.sessions = listSessions();
+    // Only sessions started in the current working directory are listed.
+    this.cwd = process.cwd();
+    this.sessions = listSessionsForCwd(this.cwd);
     this.selectedIdx = this.sessions.length > 0 ? 1 : 0;
     this.scrollTop = 0;
     this.rows = [];
@@ -101,7 +105,7 @@ export class HistoryScreen extends Screen {
     const session = this.sessions[this.selectedIdx - 1];
     if (!session) return;
     deleteSession(session.id);
-    this.sessions = listSessions();
+    this.sessions = listSessionsForCwd(this.cwd);
     this.selectedIdx = Math.min(this.selectedIdx, this.sessions.length);
     this.app.render();
   }
@@ -119,7 +123,6 @@ export class HistoryScreen extends Screen {
       const created = (s.created_at || "").slice(0, 19);
       rows.push(`${created} | ${s.provider}/${s.model} (${s.intensity}) | ${s.message_count} msgs`);
       if (s.title) rows.push(`    ${s.title}`);
-      if (s.cwd) rows.push(`    ${s.cwd}`);
       itemBounds.push({ start, end: rows.length });
     }
 
@@ -133,7 +136,7 @@ export class HistoryScreen extends Screen {
     const h = buf.height;
 
     buf.centerText(2, "History", { fg: C.accent, bold: true });
-    buf.centerText(3, "Select a session to load", { fg: C.dim });
+    buf.centerText(3, `Sessions in ${ellipsizeStart(this.cwd, Math.max(8, w - 14))}`, { fg: C.dim });
 
     const listBottom = h - 2;
     const viewH = Math.max(1, listBottom - LIST_TOP);
@@ -162,7 +165,7 @@ export class HistoryScreen extends Screen {
     }
 
     if (this.sessions.length === 0) {
-      buf.centerText(LIST_TOP + 1, "No sessions yet", { fg: C.dim });
+      buf.centerText(LIST_TOP + 1, "No sessions in this directory", { fg: C.dim });
     }
 
     drawHint(buf, listBottom, "↑/↓ select  ·  Enter load  ·  click to load  ·  Delete delete  ·  right-click back  ·  Esc back");

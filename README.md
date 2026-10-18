@@ -14,7 +14,7 @@ A CLI coding agent that lives in your terminal. Neutrino gives you an interactiv
 - **Tool calling** — the agent can run shell commands, read files, write files, and list directories in your working directory.
 - **Streaming responses** — token-by-token output with pause/resume (`ESC ESC`).
 - **Intensity control** — tune `temperature`/`top_p` from `Low` to `Ultra`.
-- **Session history** — conversations are saved automatically and can be resumed or deleted.
+- **Session history** — conversations are saved automatically, and the history screen lists the ones started in the current working directory.
 - **Token usage stats** — click the `ⓘ` in the chat header to see prompt/completion/total token counts for the current session.
 - **Agent history browser** — view past sessions from other CLI agents (Claude Code, Codex, OpenCode) directly from the history screen.
 
@@ -96,7 +96,7 @@ From the history screen, select **Open other Agent's history** to view past sess
 - **Codex** — reads `~/.codex/sessions` and `~/.codex/archived_sessions`.
 - **OpenCode** — reads the local SQLite database (`opencode.db`) via `node:sqlite` (requires Node.js **22.13+**; silently unavailable on older versions).
 
-These sessions are read-only; you can open them for review but not edit or delete.
+Only sessions that were started in the current working directory are listed, so the history stays focused on the project you are in. These sessions are read-only; you can open them for review but not edit or delete.
 
 ## Built-in tools
 

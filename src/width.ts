@@ -428,3 +428,20 @@ export function ellipsize(text: string, width: number): string {
   if (width === 1) return "…";
   return truncateByWidth(text, width - 1) + "…";
 }
+
+/** Trim the beginning of `text`, keeping the end (useful for long paths). */
+export function ellipsizeStart(text: string, width: number): string {
+  if (width <= 0) return "";
+  if (displayWidth(text) <= width) return text;
+  if (width === 1) return "…";
+  const chars = Array.from(text);
+  let out = "";
+  let used = 0;
+  for (let i = chars.length - 1; i >= 0; i--) {
+    const cw = wcwidth(chars[i].codePointAt(0) ?? 0);
+    if (used + cw > width - 1) break;
+    out = chars[i] + out;
+    used += cw;
+  }
+  return "…" + out;
+}

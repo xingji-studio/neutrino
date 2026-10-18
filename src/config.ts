@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { sameCwd } from "./cwd.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(__dirname, "..");
@@ -267,6 +268,15 @@ export function listSessions(): SessionMeta[] {
   }
   sessions.sort((a, b) => (b.updated_at || b.created_at).localeCompare(a.updated_at || a.created_at));
   return sessions;
+}
+
+/**
+ * Sessions that were started in `cwd` (the directory neutrino runs in).
+ * The history menu is scoped to the current project so sessions started in
+ * other directories do not clutter it.
+ */
+export function listSessionsForCwd(cwd: string = process.cwd()): SessionMeta[] {
+  return listSessions().filter((s) => sameCwd(s.cwd, cwd));
 }
 
 function readAsset(...candidates: string[]): string | null {

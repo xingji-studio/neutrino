@@ -3,7 +3,7 @@ import { Screen } from "../terminal/screen.js";
 import type { Key, MouseEvent } from "../terminal/input.js";
 import { C } from "../colors.js";
 import { drawHeader } from "../header.js";
-import { truncateByWidth } from "../width.js";
+import { ellipsizeStart, truncateByWidth } from "../width.js";
 import { drawHint } from "../ui.js";
 import {
   listAgentSessions,
@@ -25,6 +25,7 @@ export class AgentHistoryScreen extends Screen {
   private lastHoverY = -1;
   private rows: string[] = [];
   private itemBounds: { start: number; end: number }[] = [];
+  private cwd = process.cwd();
 
   constructor(agent: AgentId, label: string) {
     super();
@@ -33,7 +34,9 @@ export class AgentHistoryScreen extends Screen {
   }
 
   onActivate(): void {
-    this.sessions = listAgentSessions(this.agent);
+    // Only sessions started in the current working directory are listed.
+    this.cwd = process.cwd();
+    this.sessions = listAgentSessions(this.agent, this.cwd);
     this.selectedIdx = 0;
     this.scrollTop = 0;
     this.rows = [];
@@ -122,13 +125,13 @@ export class AgentHistoryScreen extends Screen {
     const h = buf.height;
 
     buf.centerText(2, this.label, { fg: C.accent, bold: true });
-    buf.centerText(3, "Select a session to view", { fg: C.dim });
+    buf.centerText(3, `Sessions in ${ellipsizeStart(this.cwd, Math.max(8, w - 14))}`, { fg: C.dim });
 
     const listBottom = h - 2;
     const viewH = Math.max(1, listBottom - LIST_TOP);
 
     if (this.sessions.length === 0) {
-      buf.centerText(LIST_TOP + 1, "No sessions yet", { fg: C.dim });
+      buf.centerText(LIST_TOP + 1, "No sessions in this directory", { fg: C.dim });
       drawHint(buf, listBottom, "Esc back");
       return;
     }
