@@ -429,6 +429,7 @@ export class App {
     screen.loadedModel = data.model || null;
     screen.loadedIntensity = data.intensity || null;
     screen.loadedTokens = data.tokens ?? null;
+    screen.loadedContext = data.context ?? null;
     if (data.provider) this.state.selectedProvider = data.provider;
     if (data.model) this.state.selectedModelName = data.model;
     if (data.intensity) this.state.selectedIntensity = data.intensity;

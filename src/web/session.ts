@@ -28,6 +28,9 @@ import {
   planCompaction,
   transcriptFor,
   type CompactMessage,
+  modelHistory,
+  normalizeContext,
+  type ConversationContext,
 } from "../compact.js";
 import { LLMClient, describeError } from "../llm/client.js";
 import { executeTool, getToolDefinitions } from "../llm/tools.js";
@@ -64,7 +67,7 @@ const MAX_TOOL_ROUNDS = 24;
 /** Placeholder shown while a tool is still running. */
 const TOOL_PENDING = "…";
 
-/** Marker stored on the collapsed part of a compressed transcript. */
+/** Marker for the model-only summary, separate from the original transcript. */
 const SUMMARY_PREFIX = "Context was compressed. Summary of the earlier part:";
 
 export type ResumeOutcome =
@@ -128,6 +131,7 @@ export class WebSession implements LiveAgent {
   private paused = false;
   private queued: string | null = null;
   private compressing = false;
+  private context: ConversationContext | null = null;
   private streamingContent: string | null = null;
   private saveError: string | null = null;
   private checkpoint = new SessionCheckpoint(() => {
@@ -156,6 +160,7 @@ export class WebSession implements LiveAgent {
     this.dir = source.cwd;
     this.sessionId = source.id;
     this.messages = (source.messages as Msg[]).slice();
+    this.context = normalizeContext(source.context, this.messages.filter((m) => m.role !== "system").length);
     this.tokens = {
       prompt: source.tokens?.prompt ?? 0,
       completion: source.tokens?.completion ?? 0,
@@ -235,6 +240,7 @@ export class WebSession implements LiveAgent {
       cwd: this.dir,
       messages,
       streamingContent: this.streamingContent,
+      context: this.context,
     };
   }
 
@@ -328,7 +334,7 @@ export class WebSession implements LiveAgent {
 
   private buildApiMessages(): ApiMessage[] {
     const api: ApiMessage[] = [{ role: "system", content: loadPrompt() }];
-    for (const m of this.messages) {
+    for (const m of modelHistory(this.messages, this.context)) {
       if (m.role === "user" || m.role === "assistant") {
         api.push({ role: m.role, content: m.content });
       } else if (m.role === "summary") {
@@ -510,7 +516,7 @@ export class WebSession implements LiveAgent {
     if (threshold <= 0 || this.lastPromptTokens < threshold) return;
 
     const visible = this.messages.filter((m) => m.role !== "system");
-    const flat: CompactMessage[] = visible.map((m) =>
+    const flat: CompactMessage[] = modelHistory(this.messages, this.context).map((m) =>
       m.role === "tool"
         ? { role: "tool", name: m.name, content: m.result }
         : { role: m.role, content: m.content },
@@ -518,7 +524,9 @@ export class WebSession implements LiveAgent {
     const plan = planCompaction(flat, COMPACT_KEEP);
     if (!plan) return;
 
-    const kept = visible.slice(plan.head.length);
+    const end = visible.length - plan.tail.length;
+    if (end <= (this.context?.end ?? 0)) return;
+    const snapshotLen = this.messages.length;
     const transcript = transcriptFor(plan.head);
 
     this.compressing = true;
@@ -534,13 +542,13 @@ export class WebSession implements LiveAgent {
     this.compressing = false;
     this.publishLive();
     if (token !== this.turnToken || this.paused) return;
+    if (this.messages.length !== snapshotLen) return;
 
-    const dropped = plan.head.length;
     const content = summary.trim()
       ? `${SUMMARY_PREFIX}\n\n${summary.trim()}`
-      : `(${dropped} earlier messages were dropped to free up context.)`;
+      : "Earlier messages are preserved in history, but could not be summarized for this request.";
 
-    this.messages = [{ role: "summary", content, count: dropped }, ...kept];
+    this.context = { end, summary: content };
     this.lastPromptTokens = 0;
     this.save();
     this.publishLive();
@@ -586,6 +594,7 @@ export class WebSession implements LiveAgent {
         this.dir,
         this.sessionId,
         this.tokens,
+        this.context,
       );
       this.saveError = null;
       return true;

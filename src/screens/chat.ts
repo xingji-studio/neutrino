@@ -25,6 +25,9 @@ import {
   COMPACT_MAX_CHARS_PER_MESSAGE,
   planCompaction,
   transcriptFor,
+  modelHistory,
+  normalizeContext,
+  type ConversationContext,
 } from "../compact.js";
 import { hub, type LiveAgent, type LiveMeta, type LiveSnapshot, type LiveWireMessage } from "../web/hub.js";
 import { SessionCheckpoint } from "../persistence.js";
@@ -74,6 +77,7 @@ export class ChatScreen extends Screen implements LiveAgent {
   loadedModel: string | null = null;
   loadedIntensity: string | null = null;
   loadedTokens: TokenUsage | null = null;
+  loadedContext: ConversationContext | null = null;
 
   modelProvider = "DeepSeek";
   model: ModelInfo = { name: "deepseek-chat", url: "https://api.deepseek.com/v1", api_key: "", supports_streaming: true };
@@ -107,6 +111,10 @@ export class ChatScreen extends Screen implements LiveAgent {
    *  the current context has grown. Reset once the history is compressed. */
   private lastPromptTokens = 0;
   private compressing = false;
+  private context: ConversationContext | null = null;
+  private expandedContext = false;
+  private contextLines = new Set<number>();
+  private contextRows = new Set<number>();
 
   // ---- collapsible tool output ----
   /** Message indices whose tool output is expanded (everything starts
@@ -166,6 +174,7 @@ export class ChatScreen extends Screen implements LiveAgent {
     for (const m of this.loadedMessages ?? []) {
       this.messages.push(m as Msg);
     }
+    this.context = normalizeContext(this.loadedContext, this.messages.filter((m) => m.role !== "system").length);
     this.liveDir = this.loadedCwd ?? process.cwd();
     this.checkpoint.register();
     this.liveKey = hub.register(this);
@@ -231,6 +240,7 @@ export class ChatScreen extends Screen implements LiveAgent {
       cwd: this.liveDir,
       messages,
       streamingContent: this.streamingContent,
+      context: this.context,
     };
   }
 
@@ -406,6 +416,22 @@ export class ChatScreen extends Screen implements LiveAgent {
       return;
     }
     if (key.ctrl && key.name === "l") {
+      // Clearing starts a fresh conversation; do not overwrite the old history.
+      this.save();
+      if (this.saveError) {
+        this.app.render();
+        return;
+      }
+      this.turnToken++;
+      this.busy = false;
+      this.paused = false;
+      this.queued = null;
+      this.compressing = false;
+      this.app.state.isThinking = false;
+      this.lastPromptTokens = 0;
+      this.sessionId = null;
+      this.context = null;
+      this.expandedContext = false;
       const sysText = this.messages[0] && this.messages[0].role === "system" ? this.messages[0].content : "";
       this.messages = [{ role: "system", content: sysText }];
       this.expandedTools.clear();
@@ -474,6 +500,13 @@ export class ChatScreen extends Screen implements LiveAgent {
         return;
       }
       // A click inside the conversation log toggles a tool block open/closed.
+      if (this.contextRows.has(ev.y)) {
+        this.expandedContext = !this.expandedContext;
+        this.followBottom = false;
+        this.scrollTop = Math.min(this.scrollTop, Math.min(...this.contextLines));
+        this.app.render();
+        return;
+      }
       const tool = this.toolRows.get(ev.y);
       if (tool !== undefined) {
         this.toggleTool(tool);
@@ -603,7 +636,7 @@ export class ChatScreen extends Screen implements LiveAgent {
 
   private buildApiMessages(): ApiMessage[] {
     const api: ApiMessage[] = [{ role: "system", content: loadPrompt() }];
-    for (const m of this.messages) {
+    for (const m of modelHistory(this.messages, this.context)) {
       if (m.role === "user" || m.role === "assistant") {
         api.push({ role: m.role, content: m.content });
       } else if (m.role === "summary") {
@@ -708,6 +741,8 @@ export class ChatScreen extends Screen implements LiveAgent {
           }
 
           const result = await executeTool(tc.name, args, this.liveDir);
+          // A clear starts a different transcript while an old tool may finish.
+          if (!this.messages.includes(toolMsg)) return;
           toolMsg.result = result;
           this.save();
           if (token !== this.turnToken || this.paused) return;
@@ -873,25 +908,23 @@ export class ChatScreen extends Screen implements LiveAgent {
   }
 
   /**
-   * Once the context has grown past the configured threshold, replace the older
-   * part of the conversation with a model-written summary. Runs at the start of
-   * a turn, before the request is built. If summarising fails the old messages
-   * are simply dropped, so the context always shrinks.
+   * Summarise only the model's history. Original messages stay in the transcript
+   * and on disk; the UI folds the summarised prefix until the reader expands it.
    */
   private async autoCompress(token: number): Promise<void> {
     const threshold = this.compressThreshold();
     if (threshold <= 0 || this.lastPromptTokens < threshold) return;
 
-    const system = this.messages.find((m) => m.role === "system");
     const rest = this.messages.filter((m) => m.role !== "system");
-    const items = rest.map((m) => ({
+    const items = modelHistory(this.messages, this.context).map((m) => ({
       role: m.role,
       content: m.role === "tool" ? m.result : (m as { content?: string }).content ?? "",
       name: m.role === "tool" ? m.name : undefined,
-      ref: m,
     }));
     const plan = planCompaction(items, COMPACT_KEEP);
     if (!plan) return;
+    const end = rest.length - plan.tail.length;
+    if (end <= (this.context?.end ?? 0)) return;
 
     const transcript = transcriptFor(plan.head, COMPACT_MAX_CHARS_PER_MESSAGE);
     this.compressing = true;
@@ -909,22 +942,18 @@ export class ChatScreen extends Screen implements LiveAgent {
     this.compressing = false;
     this.publishLive();
     if (token !== this.turnToken) return;
-    // A new message (queued by the user while we were summarising) would be
-    // dropped by the swap below, so bail out and retry on the next turn.
+    // Keep the summary boundary tied to this snapshot if a user queued another
+    // message while summarising; retry against the new snapshot next turn.
     if (this.messages.length !== snapshotLen) {
       this.app.render();
       return;
     }
 
-    const count = plan.head.length;
     const content = summary
-      ? `[Context compressed]\n${summary}`
-      : `[Context compressed]\n(${count} earlier messages were omitted to free up context.)`;
-    const summaryMsg: Msg = { role: "summary", content, count };
-    const kept = plan.tail.map((i) => i.ref);
-    this.messages = system ? [system, summaryMsg, ...kept] : [summaryMsg, ...kept];
-    // Message indices shifted, so any expanded tool block no longer lines up.
-    this.expandedTools.clear();
+      ? `[Context summary]\n${summary}`
+      : "Earlier messages are preserved in history, but could not be summarized for this request.";
+    this.context = { end, summary: content };
+    this.expandedContext = false;
     // The context is small again; its real size is re-learned from the next reply.
     this.lastPromptTokens = 0;
     this.save();
@@ -1001,6 +1030,7 @@ export class ChatScreen extends Screen implements LiveAgent {
         this.liveDir,
         this.sessionId ?? undefined,
         this.tokens,
+        this.context,
       );
       this.saveError = null;
       return true;
@@ -1028,8 +1058,21 @@ export class ChatScreen extends Screen implements LiveAgent {
       for (const ln of renderMarkdownText(text, width, style)) add(ln);
     };
 
+    const context = normalizeContext(this.context, this.messages.filter((m) => m.role !== "system").length);
+    this.contextLines.clear();
+    let recordIndex = 0;
     for (let mi = 0; mi < this.messages.length; mi++) {
       const m = this.messages[mi];
+      let archived = false;
+      if (m.role !== "system") {
+        if (recordIndex === 0 && context) {
+          this.contextLines.add(lines.length);
+          add({ spans: [{ text: `${this.expandedContext ? "▾" : "▸"} Earlier conversation (${context.end} messages) — click to ${this.expandedContext ? "collapse" : "expand"}`, style: { fg: C.amber, bold: true } }] });
+        }
+        archived = context !== null && recordIndex < context.end;
+        recordIndex++;
+        if (archived && !this.expandedContext) continue;
+      }
       if (m.role === "system") {
         pushText(sanitizeText(m.content), { fg: C.dim });
       } else if (m.role === "user") {
@@ -1092,6 +1135,11 @@ export class ChatScreen extends Screen implements LiveAgent {
         }
         add({ spans: [] });
       }
+      if (context && archived && recordIndex === context.end) {
+        this.contextLines.add(lines.length);
+        add({ spans: [{ text: "▾ Collapse earlier conversation", style: { fg: C.amber } }] });
+        add({ spans: [] });
+      }
     }
     if (this.streamingContent !== null) {
       add({ spans: [{ text: "Neutrino:", style: { fg: C.accent, bold: true } }] });
@@ -1150,11 +1198,13 @@ export class ChatScreen extends Screen implements LiveAgent {
     // Remember which tool block (if any) each visible row belongs to, so a
     // click can expand/collapse it (see the onMouse handler).
     this.toolRows.clear();
+    this.contextRows.clear();
     for (let y = logTop; y <= logBottom; y++) {
       const li = this.scrollTop + (y - logTop);
       if (li >= lines.length) break;
       const tool = this.toolLineIndex[li];
       if (tool !== undefined && tool >= 0) this.toolRows.set(y, tool);
+      if (this.contextLines.has(li)) this.contextRows.add(y);
       drawSpans(buf, 2, y, lines[li].spans, Math.max(4, w - 4));
     }
 

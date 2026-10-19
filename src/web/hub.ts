@@ -13,6 +13,8 @@
  * token) and pushes a snapshot to any connected browser.
  */
 
+import type { ConversationContext } from "../compact.js";
+
 /** A message as understood by the web UI. */
 export type LiveWireMessage =
   | { role: "user" | "assistant"; content: string }
@@ -45,6 +47,7 @@ export interface LiveSnapshot extends LiveMeta {
   key: string;
   cwd: string;
   messages: LiveWireMessage[];
+  context?: ConversationContext | null;
   streamingContent: string | null;
 }
 

@@ -564,6 +564,28 @@ button {
   margin-bottom: 6px;
 }
 
+.conversation-history {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+.conversation-history > summary {
+  cursor: pointer;
+  color: var(--yellow);
+  font-size: 12px;
+}
+
+.history-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.conversation-history[open] > summary {
+  margin-bottom: 18px;
+}
+
 /* --------------------------------------------------------------- composer */
 
 .composer {

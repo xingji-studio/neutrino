@@ -14,6 +14,35 @@ export interface CompactMessage {
   name?: string;
 }
 
+/** A model-only summary of a prefix of the complete, non-system transcript. */
+export interface ConversationContext {
+  /** Number of original messages covered by the summary (exclusive boundary). */
+  end: number;
+  summary: string;
+}
+
+/** Ignore stale/corrupt metadata rather than hiding any original messages. */
+export function normalizeContext(value: unknown, messageCount: number): ConversationContext | null {
+  if (!value || typeof value !== "object") return null;
+  const context = value as Partial<ConversationContext>;
+  if (typeof context.end !== "number" || !Number.isInteger(context.end) ||
+      context.end <= 0 || context.end > messageCount ||
+      typeof context.summary !== "string" || !context.summary.trim()) return null;
+  return { end: context.end, summary: context.summary };
+}
+
+/** Derive a bounded model history while leaving the complete transcript intact. */
+export function modelHistory<T extends CompactMessage>(
+  messages: T[],
+  context: ConversationContext | null,
+): Array<T | { role: "summary"; content: string }> {
+  const original = messages.filter((message) => message.role !== "system");
+  const valid = normalizeContext(context, original.length);
+  return valid
+    ? [{ role: "summary", content: valid.summary }, ...original.slice(valid.end)]
+    : original;
+}
+
 export interface CompactionPlan<T> {
   /** Older messages that should be summarised away. */
   head: T[];

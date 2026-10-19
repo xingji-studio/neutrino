@@ -129,6 +129,7 @@ const state = {
   collapsed: new Set(),
   expanded: new Set(),
   openTools: new Set(),
+  openContext: null,
 };
 
 // ------------------------------------------------------------------ helpers
@@ -348,6 +349,7 @@ async function selectLive(key) {
   state.snapshot = null;
   state.lastSessionId = null;
   state.openTools.clear();
+  state.openContext = null;
   renderSidebar();
   el.controls.innerHTML = "";
   el.title.textContent = "Connecting…";
@@ -399,6 +401,7 @@ async function selectFile(id) {
   state.selection = { kind: "file", id };
   state.snapshot = null;
   state.openTools.clear();
+  state.openContext = null;
   renderSidebar();
   el.controls.innerHTML = "";
   setComposerMode("resume");
@@ -423,7 +426,7 @@ function renderFile(data) {
   const messages = Array.isArray(data.messages) ? data.messages : [];
   el.title.textContent = firstUserMessage(messages) || "Conversation";
   el.sub.textContent = [data.cwd, data.model, data.provider].filter(Boolean).join(" · ");
-  renderMessageList(messages, null, { readOnly: true });
+  renderMessageList(messages, null, { readOnly: true, context: data.context });
   renderFileControls(data);
 }
 
@@ -549,7 +552,7 @@ function renderLive() {
   el.sub.textContent = [snapshot.cwd, snapshot.model, snapshot.provider].filter(Boolean).join(" · ");
   renderControls(snapshot);
   renderApproval(snapshot);
-  renderMessageList(snapshot.messages ?? [], snapshot.streamingContent, { readOnly: false });
+  renderMessageList(snapshot.messages ?? [], snapshot.streamingContent, { readOnly: false, context: snapshot.context });
 }
 
 function renderControls(snapshot) {
@@ -615,8 +618,37 @@ function renderMessageList(messages, streaming, options) {
     return;
   }
 
-  messages.forEach((message, index) => {
-    el.messages.appendChild(renderMessage(message, index));
+  const original = messages.filter(message => message.role !== "system");
+  const context = options?.context;
+  const end = context && Number.isInteger(context.end) && context.end > 0 &&
+    context.end <= original.length && typeof context.summary === "string" && context.summary.trim()
+    ? context.end : 0;
+  if (end) {
+    const details = document.createElement("details");
+    details.className = "conversation-history";
+    const summary = document.createElement("summary");
+    summary.textContent = `Earlier conversation · ${end} messages`;
+    details.appendChild(summary);
+    const body = document.createElement("div");
+    body.className = "history-messages";
+    details.appendChild(body);
+    const populate = () => {
+      if (body.childNodes.length) return;
+      original.slice(0, end).forEach((message, index) => body.appendChild(renderMessage(message, index)));
+    };
+    details.open = state.openContext === end;
+    if (details.open) populate();
+    details.addEventListener("toggle", () => {
+      // Detached disclosures can emit a delayed toggle during a stream repaint.
+      if (!details.isConnected) return;
+      state.openContext = details.open ? end : null;
+      if (details.open) populate();
+      else body.replaceChildren();
+    });
+    el.messages.appendChild(details);
+  }
+  original.forEach((message, index) => {
+    if (index >= end) el.messages.appendChild(renderMessage(message, index));
   });
 
   if (streaming !== null && streaming !== undefined && streaming !== "") {

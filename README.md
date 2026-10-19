@@ -15,6 +15,7 @@ A CLI coding agent that lives in your terminal. Neutrino gives you an interactiv
 - **Streaming responses** — token-by-token output with pause/resume (`ESC ESC`).
 - **Intensity control** — tune `temperature`/`top_p` from `Low` to `Ultra`.
 - **Session history** — messages are saved before a turn starts, streamed replies are checkpointed every second, and tool calls/results are saved immediately. The history screen lists conversations started in the current working directory. Failed saves are shown in the terminal and browser UI.
+- **Complete conversation history** — context compression keeps every original message and tool result on disk. The earlier portion starts collapsed in the terminal and browser; click **Earlier conversation** to expand it, including in reopened history. Model requests use a separate summary plus recent messages.
 - **Token usage stats** — click the `ⓘ` in the chat header to see prompt/completion/total token counts for the current session.
 - **Agent history browser** — view past sessions from other CLI agents (Claude Code, Codex, OpenCode) directly from the history screen.
 - **Approval gate** — risky commands and paths outside the working directory need your sign-off. The header turns orange and reads **Request Approval**; press `Y` or `N`. Delete-class commands always ask, unless you explicitly granted full trust, and there is an opt-in reviewer agent for automatic decisions.
@@ -251,6 +252,8 @@ node scripts/test-sanitize.mjs   # verify ANSI/control codes never reach the scr
 node scripts/test-drift.mjs      # verify the input area self-heals after terminal drift
 node scripts/test-fetch.mjs      # verify streamed requests release aborts and retry drops
 node scripts/test-compact.mjs    # verify context-compression planning
+node scripts/test-history-fold.mjs # verify full-history retention, folding and resume
+node scripts/test-web-history.mjs  # verify browser history disclosures and streaming state
 node scripts/test-tools.mjs      # verify tool-output folding
 node scripts/test-web.mjs        # verify the web server, API, SSE stream and path-traversal guards
 ```

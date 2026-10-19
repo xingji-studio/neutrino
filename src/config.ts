@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { sameCwd } from "./cwd.js";
+import { normalizeContext, type ConversationContext } from "./compact.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(__dirname, "..");
@@ -133,6 +134,8 @@ export interface SessionData {
   title: string;
   messages: SessionMessage[];
   tokens?: TokenUsage;
+  /** Model context is separate from messages, which always retain the originals. */
+  context?: ConversationContext;
 }
 
 export function ensureDirs(): void {
@@ -204,6 +207,7 @@ export function saveSession(
   cwd?: string,
   sessionId?: string,
   tokens?: TokenUsage,
+  context?: ConversationContext | null,
 ): string {
   ensureDirs();
   const now = new Date();
@@ -231,6 +235,8 @@ export function saveSession(
     messages,
     tokens,
   };
+  const validContext = normalizeContext(context, messages.filter((m) => m.role !== "system").length);
+  if (validContext) session.context = validContext;
 
   const filePath = path.join(SESSION_DIR, `${id}.json`);
   // Keep the last complete transcript intact if writing or replacing fails.

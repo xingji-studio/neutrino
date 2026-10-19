@@ -2,7 +2,7 @@
 //   * the pure compaction helpers (split / transcript),
 //   * the configurable threshold (defaults + options),
 //   * the settings screen editing & persisting it, and
-//   * ChatScreen.autoCompress actually shrinking the history.
+//   * compression shrinking model input while retaining the original history.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -151,7 +151,7 @@ function stubApp(w = 80, h = 24) {
 }
 
 // ---------------------------------------------------------------------------
-// 5. ChatScreen.autoCompress shrinks the history
+// 5. ChatScreen.autoCompress preserves history and bounds model input
 // ---------------------------------------------------------------------------
 function longHistory() {
   const msgs = [{ role: "system", content: "Model: DeepSeek/deepseek-chat | Intensity: High" }];
@@ -178,7 +178,7 @@ function longHistory() {
 }
 
 {
-  // Above the threshold: older messages are replaced by a summary.
+  // Above the threshold: only model input uses a summary of older messages.
   const screen = new ChatScreen("");
   screen.app = stubApp();
   screen.messages = longHistory();
@@ -191,12 +191,16 @@ function longHistory() {
   await screen.autoCompress(0);
 
   assert(usedTranscript.includes("message 0"), "the summariser receives the older messages");
-  const summary = screen.messages.find((m) => m.role === "summary");
-  assert(summary, "a summary message is inserted");
-  assert(summary.content.includes("SUMMARY TEXT"), "the model summary is kept");
-  eq(summary.count, 4, "summary records how many messages it replaced");
+  const summary = screen.context;
+  assert(summary, "a model context summary is created separately");
+  assert(summary.summary.includes("SUMMARY TEXT"), "the model summary is kept");
+  eq(summary.end, 4, "summary records the boundary in the original transcript");
   assert(screen.messages[0].role === "system", "the system message is preserved first");
-  assert(screen.messages.length < 9, "the history shrank");
+  eq(screen.messages, longHistory(), "the complete history is unchanged");
+  const api = screen.buildApiMessages();
+  assert(api.length < screen.messages.length, "only the model input shrank");
+  assert(api.some(m => m.content.includes("SUMMARY TEXT")), "the summary is sent to the model");
+  assert(!api.some(m => m.content === "message 0"), "the older raw input is represented by the summary");
   eq(screen.lastPromptTokens, 0, "the token counter is reset after compression");
   // The most recent messages survive verbatim.
   assert(
@@ -206,16 +210,16 @@ function longHistory() {
 }
 
 {
-  // Summarisation failure still shrinks the context (drop-only fallback).
+  // A failed summary can bound model input without deleting the original log.
   const screen = new ChatScreen("");
   screen.app = stubApp();
   screen.messages = longHistory();
   screen.lastPromptTokens = 1_000_000;
   screen.summarizeTranscript = async () => "";
   await screen.autoCompress(0);
-  const summary = screen.messages.find((m) => m.role === "summary");
-  assert(summary, "a fallback summary is inserted when the model returns nothing");
-  assert(summary.content.includes("omitted"), "the fallback says old messages were omitted");
+  assert(screen.context, "fallback context is created when the model returns nothing");
+  assert(screen.context.summary.includes("preserved in history"), "the fallback explains that history is retained");
+  eq(screen.messages, longHistory(), "summary failure preserves all original messages");
 }
 
 console.log(failures === 0 ? "\nCOMPACT TESTS PASSED" : `\n${failures} FAILURE(S)`);
