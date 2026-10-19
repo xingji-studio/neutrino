@@ -14,7 +14,7 @@ A CLI coding agent that lives in your terminal. Neutrino gives you an interactiv
 - **Tool calling** — the agent can run shell commands, read files, write files, and list directories in your working directory.
 - **Streaming responses** — token-by-token output with pause/resume (`ESC ESC`).
 - **Intensity control** — tune `temperature`/`top_p` from `Low` to `Ultra`.
-- **Session history** — conversations are saved automatically, and the history screen lists the ones started in the current working directory.
+- **Session history** — messages are saved before a turn starts, streamed replies are checkpointed every second, and tool calls/results are saved immediately. The history screen lists conversations started in the current working directory. Failed saves are shown in the terminal and browser UI.
 - **Token usage stats** — click the `ⓘ` in the chat header to see prompt/completion/total token counts for the current session.
 - **Agent history browser** — view past sessions from other CLI agents (Claude Code, Codex, OpenCode) directly from the history screen.
 - **Approval gate** — risky commands and paths outside the working directory need your sign-off. The header turns orange and reads **Request Approval**; press `Y` or `N`. Delete-class commands always ask, unless you explicitly granted full trust, and there is an opt-in reviewer agent for automatic decisions.
@@ -287,19 +287,39 @@ terminal that types `[<b>;<x>;<y>M` mouse reports at every cursor move.
 
 So the teardown sequence is registered three ways — normal quit, a
 `process.on("exit")` hook that writes synchronously to fd 1, and
-`uncaughtException` / `unhandledRejection` handlers. From any of them the
-terminal is restored, the stack trace is appended to `~/.neutrino/crash.log`
-and the process exits with status 1 instead of leaving a broken console behind.
+`uncaughtException` / `unhandledRejection` handlers. Normal quit uses the same
+synchronous teardown, so pending frame output cannot swallow the cleanup.
+Catchable exits also flush the latest conversation snapshot, including a partial
+reply. Uncaught errors are appended to `~/.neutrino/crash.log` and exit with
+status 1. SIGHUP and Windows Ctrl+Break also restore and checkpoint before exit.
+
+Session snapshots are written to a temporary file in the session directory,
+synced, then atomically renamed over the previous snapshot. A failed write
+preserves the previous history, reports an error in the UI and crash log, and
+is retried at the next checkpoint. Partial replies are replaced by the completed
+reply in the saved snapshot, so reopening history does not duplicate them.
 
 Key handlers and the render loop are also wrapped: they run inside `stdin`
 callbacks and timers, where a throw is an uncaught exception that used to end
 the session. A failed frame is now retried, and only a screen that cannot be
 drawn at all stops the app.
 
-The one case no program can survive is a hard kill (closing the terminal
-window, or `Ctrl+Break`). If a shell is still stuck like that, `reset` restores
-it; on Windows, `[Console]::Write([char]27 + "[?1003l[?1000l[?25h[?1049l")`
-does the same.
+An uncatchable kill (SIGKILL, TerminateProcess or a runtime/OS failure) cannot
+run cleanup. Already-written snapshots survive; with a writable disk, streamed
+output since the last one-second checkpoint may be lost. If a shell is stuck
+in mouse mode, run this in Bash:
+
+```sh
+printf '\033[?2004l\033[?1000l\033[?1002l\033[?1003l\033[?1006l\033[?1015l\033[?25h\033[0m\033[?1049l'
+stty sane
+```
+
+In PowerShell:
+
+```powershell
+$esc = [char]27
+[Console]::Write("${esc}[?2004l${esc}[?1000l${esc}[?1002l${esc}[?1003l${esc}[?1006l${esc}[?1015l${esc}[?25h${esc}[0m${esc}[?1049l")
+```
 
 ## License
 

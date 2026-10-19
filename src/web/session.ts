@@ -33,6 +33,8 @@ import { LLMClient, describeError } from "../llm/client.js";
 import { executeTool, getToolDefinitions } from "../llm/tools.js";
 import { assessToolCall, type RiskAssessment } from "../llm/risk.js";
 import { ApprovalGate, type ApprovalDecision } from "../llm/approval.js";
+import { SessionCheckpoint } from "../persistence.js";
+import { writeCrashLog } from "../terminal/restore.js";
 import {
   hub,
   type LiveAgent,
@@ -127,6 +129,12 @@ export class WebSession implements LiveAgent {
   private queued: string | null = null;
   private compressing = false;
   private streamingContent: string | null = null;
+  private saveError: string | null = null;
+  private checkpoint = new SessionCheckpoint(() => {
+    const saved = this.writeSession();
+    this.publishLive();
+    return saved;
+  });
   private turnToken = 0;
   private lastPromptTokens = 0;
   private disposed = false;
@@ -156,6 +164,7 @@ export class WebSession implements LiveAgent {
 
   /** Register with the live hub so the browser can watch this conversation. */
   start(): string {
+    this.checkpoint.register();
     this.key = hub.register(this);
     this.touch();
     this.publishLive();
@@ -166,8 +175,14 @@ export class WebSession implements LiveAgent {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.turnToken++;
+    this.busy = false;
+    if (this.pendingApproval) {
+      this.pendingApproval.resolve(false);
+      this.pendingApproval = null;
+    }
     this.clearIdleTimer();
-    this.save();
+    this.checkpoint.dispose();
     hub.unregister(this.key);
     this.key = null;
   }
@@ -189,6 +204,7 @@ export class WebSession implements LiveAgent {
       paused: this.paused,
       queued: this.queued,
       compressing: this.compressing,
+      saveError: this.saveError,
       tokens: { prompt: this.tokens.prompt, completion: this.tokens.completion },
       approval: this.pendingApproval
         ? { tool: this.pendingApproval.tool, level: this.pendingApproval.risk.level }
@@ -233,7 +249,7 @@ export class WebSession implements LiveAgent {
       pending.resolve(false);
     }
     this.busy = false;
-    this.streamingContent = null;
+    this.retainStreamingContent();
     this.save();
     this.publishLive();
   }
@@ -265,6 +281,7 @@ export class WebSession implements LiveAgent {
     if (!trimmed || this.disposed) return;
     this.touch();
     this.messages.push({ role: "user", content: trimmed });
+    this.save();
 
     if (this.busy || this.paused) {
       this.queued = trimmed;
@@ -291,11 +308,14 @@ export class WebSession implements LiveAgent {
       await this.autoCompress(token);
       if (token !== this.turnToken || this.paused) return;
       await this.agentLoop(this.buildApiMessages(), token);
-    })().catch((err) => this.failTurn(err));
+    })().catch((err) => {
+      if (token === this.turnToken) this.failTurn(err);
+    });
   }
 
   /** Ends a turn whose floating promise rejected, instead of crashing the app. */
   private failTurn(err: unknown): void {
+    this.retainStreamingContent();
     this.messages.push({ role: "assistant", content: `[Error: ${describeError(err)}]` });
     this.streamingContent = null;
     try {
@@ -331,6 +351,7 @@ export class WebSession implements LiveAgent {
           if (token !== this.turnToken || this.paused) return;
           text += chunk;
           this.streamingContent = text;
+          this.checkpoint.schedule();
           this.publishLive();
         }
         if (token !== this.turnToken || this.paused) return;
@@ -360,6 +381,7 @@ export class WebSession implements LiveAgent {
             result: TOOL_PENDING,
           };
           this.messages.push(toolMsg);
+          this.save();
           this.publishLive();
 
           const decision = await this.requestApproval(call.name, args);
@@ -381,8 +403,10 @@ export class WebSession implements LiveAgent {
           } catch (err) {
             result = `Error: ${err instanceof Error ? err.message : String(err)}`;
           }
-          if (token !== this.turnToken || this.paused) return;
+          if (this.disposed) return;
           toolMsg.result = result;
+          this.save();
+          if (token !== this.turnToken || this.paused) return;
           apiMessages.push({ role: "tool", content: result, tool_call_id: call.id });
           this.publishLive();
         }
@@ -390,6 +414,7 @@ export class WebSession implements LiveAgent {
       }
       this.onTurnFinished();
     } catch (err) {
+      if (token !== this.turnToken) return;
       if (this.streamingContent) {
         this.messages.push({ role: "assistant", content: this.streamingContent });
       }
@@ -533,13 +558,25 @@ export class WebSession implements LiveAgent {
     return "Resumed chat";
   }
 
+  private retainStreamingContent(): void {
+    if (this.streamingContent) {
+      this.messages.push({ role: "assistant", content: this.streamingContent });
+    }
+    this.streamingContent = null;
+  }
+
   private save(): void {
+    this.checkpoint.flush();
+  }
+
+  private writeSession(): boolean {
     const chat: SessionMessage[] = [];
     for (const m of this.messages) {
       if (m.role === "user" || m.role === "assistant" || m.role === "tool") chat.push(m);
       else if (m.role === "summary") chat.push({ role: "assistant", content: m.content });
     }
-    if (chat.length === 0) return;
+    if (this.streamingContent) chat.push({ role: "assistant", content: this.streamingContent });
+    if (chat.length === 0) return true;
     try {
       this.sessionId = saveSession(
         chat,
@@ -550,8 +587,13 @@ export class WebSession implements LiveAgent {
         this.sessionId,
         this.tokens,
       );
-    } catch {
-      // A failed write must never break a live turn.
+      this.saveError = null;
+      return true;
+    } catch (err) {
+      const detail = describeError(err);
+      if (this.saveError === null) writeCrashLog("save session", err);
+      this.saveError = detail;
+      return false;
     }
   }
 

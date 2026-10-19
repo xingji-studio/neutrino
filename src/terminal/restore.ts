@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { flushSessionCheckpoints } from "../persistence.js";
 
 const NEUTRINO_DIR = path.join(os.homedir(), ".neutrino");
 
@@ -34,14 +35,6 @@ export function markTuiActive(): void {
 }
 
 /**
- * Tells the guard the terminal is already back to normal, so the `exit`
- * handler does not write a second teardown sequence over the shell.
- */
-export function markTerminalRestored(): void {
-  restored = true;
-}
-
-/**
  * Puts the terminal back into a usable state, synchronously and at most once.
  *
  * Everything here has to work while the process is dying: no promises, no
@@ -51,25 +44,35 @@ export function markTerminalRestored(): void {
  */
 export function restoreTerminalSync(): boolean {
   if (!active || restored) return false;
-  restored = true;
-  const seq = TUI_TEARDOWN;
+  let outputRestored = false;
+  let inputRestored = false;
   try {
     // fd 1 write is the only one guaranteed to be flushed by a dying process;
     // `process.stdout.write` may queue the bytes and lose them at exit.
-    fs.writeSync(1, seq);
+    const bytes = Buffer.from(TUI_TEARDOWN);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const written = fs.writeSync(1, bytes, offset, bytes.length - offset);
+      if (written === 0) throw new Error("terminal write made no progress");
+      offset += written;
+    }
+    outputRestored = true;
   } catch {
     try {
-      process.stdout.write(seq);
+      process.stdout.write(TUI_TEARDOWN);
     } catch {
       // The terminal is gone; there is nothing left to restore.
     }
   }
   try {
     if (process.stdin.isTTY && process.stdin.isRaw) process.stdin.setRawMode(false);
+    inputRestored = true;
   } catch {
     // stdin already closed, or not a TTY we can reconfigure.
   }
-  return true;
+  // A queued or failed write must not disarm the synchronous exit retry.
+  restored = outputRestored && inputRestored;
+  return restored;
 }
 
 /** Appends a crash entry to `~/.neutrino/crash.log` and returns the path. */
@@ -101,19 +104,42 @@ export function installCrashGuard(): void {
   if (installed) return;
   installed = true;
 
-  process.on("exit", () => restoreTerminalSync());
+  let flushed = false;
+  const finalize = (): boolean => {
+    restoreTerminalSync();
+    if (flushed) return true;
+    flushed = true;
+    return flushSessionCheckpoints();
+  };
+  process.on("exit", () => {
+    if (!finalize()) {
+      try {
+        fs.writeSync(2, "\nneutrino: some conversation changes could not be saved; check disk access and crash.log.\n");
+      } catch {
+        // The crash log is the remaining record if stderr is unavailable.
+      }
+    }
+  });
+
+  // These signals otherwise bypass Node's exit hook, including Ctrl+Break on
+  // Windows. SIGINT/SIGTERM are handled by App.quit (or the web server).
+  process.on("SIGHUP", () => process.exit(129));
+  process.on("SIGBREAK", () => process.exit(149));
 
   const fatal = (kind: string, err: unknown): void => {
     // Restore first: the terminal must be usable even if logging itself fails.
-    restoreTerminalSync();
+    const saved = finalize();
     const file = writeCrashLog(kind, err);
     const detail =
       err instanceof Error ? (err.stack ?? `${err.name}: ${err.message}`) : String(err);
     try {
       const tail = file ? `\nFull log: ${file}` : "";
-      process.stderr.write(
+      fs.writeSync(2,
         `\nneutrino stopped: ${kind}\n\n${detail}\n\n` +
-          `The terminal was restored and your conversation is saved.${tail}\n`,
+          (saved
+            ? "Check history for the latest saved conversation snapshots."
+            : "Some conversation changes could not be saved; check disk access and crash.log.") +
+          `${tail}\n`,
       );
     } catch {
       // stderr is gone too; the crash log is the only record.

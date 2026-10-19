@@ -154,7 +154,7 @@ export class App {
       if (this.renderFailures === 1) this.noteInternalError("render", err);
       // A screen that cannot be drawn at all means there is no UI left; stop
       // instead of spinning on a broken frame every 60 ms.
-      if (this.renderFailures > 30) this.quit();
+      if (this.renderFailures > 30) this.quit(1);
     }
   }
 
@@ -455,7 +455,7 @@ export class App {
     this.pushScreen(new SettingsScreen());
   }
 
-  quit(): void {
+  quit(exitCode = 0): void {
     if (this.running) return;
     this.running = true;
     if (this.sizeTimer) clearInterval(this.sizeTimer);
@@ -475,15 +475,14 @@ export class App {
       clearTimeout(this.toastTimer);
       this.toastTimer = null;
     }
-    // Each step is guarded so a failure in one cannot skip the terminal
-    // restore in the next one.
+    // Disable mouse reporting before input returns to cooked/echo mode.
+    this.renderer.dispose();
     try {
       this.input.stop();
     } catch {
-      // stdin is already unusable; the restore below still matters.
+      // Terminal restoration has already run, even if stdin is unusable.
     }
-    this.renderer.dispose();
     void this.webHandle?.close();
-    process.exit(0);
+    process.exit(exitCode);
   }
 }

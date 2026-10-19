@@ -27,6 +27,8 @@ import {
   transcriptFor,
 } from "../compact.js";
 import { hub, type LiveAgent, type LiveMeta, type LiveSnapshot, type LiveWireMessage } from "../web/hub.js";
+import { SessionCheckpoint } from "../persistence.js";
+import { writeCrashLog } from "../terminal/restore.js";
 
 interface ApiMessage {
   role: string;
@@ -82,6 +84,12 @@ export class ChatScreen extends Screen implements LiveAgent {
 
   private messages: Msg[] = [];
   private streamingContent: string | null = null;
+  private saveError: string | null = null;
+  private checkpoint = new SessionCheckpoint(() => {
+    const saved = this.writeSession();
+    this.publishLive();
+    return saved;
+  });
   private busy = false;
   private paused = false;
   private queued: string | null = null;
@@ -159,6 +167,7 @@ export class ChatScreen extends Screen implements LiveAgent {
       this.messages.push(m as Msg);
     }
     this.liveDir = this.loadedCwd ?? process.cwd();
+    this.checkpoint.register();
     this.liveKey = hub.register(this);
     this.publishLive();
     if (this.initialMessage) {
@@ -171,6 +180,10 @@ export class ChatScreen extends Screen implements LiveAgent {
   onDeactivate(): void {
     // Never leave the agent awaiting a decision nobody can give.
     if (this.pendingApproval) this.settleApproval(false);
+    // A turn can continue after returning to the menu. Keep its exit checkpoint
+    // registered until it finishes, including while a tool is still running.
+    if (this.busy) this.save();
+    else this.checkpoint.dispose();
     hub.unregister(this.liveKey);
     this.liveKey = null;
   }
@@ -192,6 +205,7 @@ export class ChatScreen extends Screen implements LiveAgent {
       paused: this.paused,
       queued: this.queued,
       compressing: this.compressing,
+      saveError: this.saveError,
       tokens: { prompt: this.tokens.prompt, completion: this.tokens.completion },
       approval: this.pendingApproval
         ? { tool: this.pendingApproval.tool, level: this.pendingApproval.risk.level }
@@ -228,6 +242,7 @@ export class ChatScreen extends Screen implements LiveAgent {
     if (this.pendingApproval) this.settleApproval(false);
     this.busy = false;
     this.app.state.isThinking = false;
+    this.retainStreamingContent();
     this.save();
     this.app.render();
     this.publishLive();
@@ -504,6 +519,7 @@ export class ChatScreen extends Screen implements LiveAgent {
       this.turnToken++;
       this.busy = false;
       this.app.state.isThinking = false;
+      this.retainStreamingContent();
       this.save();
     }
     this.app.render();
@@ -522,6 +538,8 @@ export class ChatScreen extends Screen implements LiveAgent {
     const trimmed = text.trim();
     if (!trimmed) return;
     this.messages.push({ role: "user", content: trimmed });
+    // Create the history entry before requesting a model or executing tools.
+    this.save();
     this.inputValue = "";
     this.cursor = 0;
     this.followBottom = true;
@@ -551,7 +569,9 @@ export class ChatScreen extends Screen implements LiveAgent {
       if (token !== this.turnToken) return;
       const apiMessages = this.buildApiMessages();
       await this.agentLoop(apiMessages, token);
-    })().catch((err) => this.failTurn(err));
+    })().catch((err) => {
+      if (token === this.turnToken) this.failTurn(err);
+    });
   }
 
   /**
@@ -563,6 +583,7 @@ export class ChatScreen extends Screen implements LiveAgent {
    * failure visible in the transcript.
    */
   private failTurn(err: unknown): void {
+    this.retainStreamingContent();
     this.messages.push({ role: "assistant", content: `[Error: ${describeError(err)}]` });
     this.streamingContent = null;
     try {
@@ -613,8 +634,15 @@ export class ChatScreen extends Screen implements LiveAgent {
           content += chunk;
           hasContent = true;
           this.streamingContent = content;
+          this.checkpoint.schedule();
           this.app.render();
           this.publishLive();
+        }
+
+        if (token !== this.turnToken) {
+          // Pause already retained the partial reply. A stale stream must not
+          // overwrite the buffer belonging to a newer turn.
+          return;
         }
 
         if (client.usage) {
@@ -625,13 +653,6 @@ export class ChatScreen extends Screen implements LiveAgent {
           this.tokens.completion += Math.max(1, Math.ceil(content.length / 4));
         }
 
-        if (token !== this.turnToken) {
-          if (content) this.messages.push({ role: "assistant", content });
-          this.streamingContent = null;
-          this.publishLive();
-          this.app.render();
-          return;
-        }
         if (aborted || this.paused) {
           if (content) this.messages.push({ role: "assistant", content });
           this.streamingContent = null;
@@ -649,6 +670,7 @@ export class ChatScreen extends Screen implements LiveAgent {
 
         if (hasContent) this.messages.push({ role: "assistant", content });
         this.streamingContent = null;
+        this.save();
 
         apiMessages.push({
           role: "assistant",
@@ -665,6 +687,7 @@ export class ChatScreen extends Screen implements LiveAgent {
           const args = parseArgs(tc.arguments);
           const toolMsg: ToolMsg = { role: "tool", name: tc.name, arguments: args, result: "" };
           this.messages.push(toolMsg);
+          this.save();
           this.publishLive();
           this.app.render();
 
@@ -678,14 +701,16 @@ export class ChatScreen extends Screen implements LiveAgent {
               `[Not executed: approval denied (${decision.source}): ${decision.reason}] ` +
               "Do not retry this call unchanged; ask the user how to proceed.";
             apiMessages.push({ role: "tool", tool_call_id: tc.id, content: toolMsg.result });
+            this.save();
             this.publishLive();
             this.app.render();
             continue;
           }
 
           const result = await executeTool(tc.name, args, this.liveDir);
-          if (token !== this.turnToken || this.paused) return;
           toolMsg.result = result;
+          this.save();
+          if (token !== this.turnToken || this.paused) return;
           apiMessages.push({ role: "tool", tool_call_id: tc.id, content: result });
           this.publishLive();
           this.app.render();
@@ -693,6 +718,7 @@ export class ChatScreen extends Screen implements LiveAgent {
       }
       this.onTurnFinished();
     } catch (e) {
+      if (token !== this.turnToken) return;
       const err = describeError(e);
       this.messages.push({ role: "assistant", content: (this.streamingContent ?? "") + `\n[Error: ${err}]` });
       this.streamingContent = null;
@@ -708,6 +734,7 @@ export class ChatScreen extends Screen implements LiveAgent {
     this.app.render();
     this.maybeFlushQueue();
     this.publishLive();
+    if (!this.busy && !this.liveKey) this.checkpoint.dispose();
   }
 
   // ---- approval gate ---------------------------------------------------
@@ -938,7 +965,18 @@ export class ChatScreen extends Screen implements LiveAgent {
     return copy;
   }
 
+  private retainStreamingContent(): void {
+    if (this.streamingContent) {
+      this.messages.push({ role: "assistant", content: this.streamingContent });
+    }
+    this.streamingContent = null;
+  }
+
   private save(): void {
+    this.checkpoint.flush();
+  }
+
+  private writeSession(): boolean {
     const chatMessages: SessionMessage[] = [];
     for (const m of this.messages) {
       if (m.role === "user" || m.role === "assistant" || m.role === "tool") {
@@ -948,7 +986,12 @@ export class ChatScreen extends Screen implements LiveAgent {
         chatMessages.push({ role: "assistant", content: m.content });
       }
     }
-    if (chatMessages.length === 0) return;
+    // Snapshot the partial reply without adding it to the in-memory transcript:
+    // the final reply will replace this snapshot, rather than duplicate it.
+    if (this.streamingContent) {
+      chatMessages.push({ role: "assistant", content: this.streamingContent });
+    }
+    if (chatMessages.length === 0) return true;
     try {
       this.sessionId = saveSession(
         chatMessages,
@@ -959,10 +1002,14 @@ export class ChatScreen extends Screen implements LiveAgent {
         this.sessionId ?? undefined,
         this.tokens,
       );
-    } catch {
-      // ignore save errors
+      this.saveError = null;
+      return true;
+    } catch (err) {
+      const detail = describeError(err);
+      if (this.saveError === null) writeCrashLog("save session", err);
+      this.saveError = detail;
+      return false;
     }
-    this.publishLive();
   }
 
   private buildLines(width: number): Line[] {
@@ -1061,7 +1108,10 @@ export class ChatScreen extends Screen implements LiveAgent {
 
     let status = "";
     let statusStyle: Style = { fg: C.dim };
-    if (this.compressing) {
+    if (this.saveError) {
+      status = `History save failed: ${sanitizeText(this.saveError, { singleLine: true })}`;
+      statusStyle = { fg: C.orange, bold: true };
+    } else if (this.compressing) {
       status = "Compressing context…";
       statusStyle = { fg: C.amber, bold: true };
     } else if (this.queued) {

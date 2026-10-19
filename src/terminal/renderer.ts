@@ -1,6 +1,6 @@
 import process from "node:process";
 import type { Buffer } from "./buffer.js";
-import { TUI_TEARDOWN, markTerminalRestored, markTuiActive } from "./restore.js";
+import { restoreTerminalSync, markTuiActive } from "./restore.js";
 import { type Style } from "../colors.js";
 import { isControlChar } from "../sanitize.js";
 
@@ -64,9 +64,9 @@ export class Renderer {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.write(TUI_TEARDOWN);
-    // The terminal is back to normal, so the exit guard must not write again.
-    markTerminalRestored();
+    // stdout.write may still be queued when App.quit calls process.exit.
+    // Use the same synchronous teardown as the crash/exit guard.
+    restoreTerminalSync();
   }
 
   /**
@@ -141,7 +141,7 @@ export class Renderer {
   }
 
   private write(chunk: string): void {
-    if (this.out.destroyed || this.out.writableEnded) return;
+    if (this.disposed || this.out.destroyed || this.out.writableEnded) return;
     try {
       this.out.write(chunk);
     } catch {

@@ -19,6 +19,8 @@ import { startWebServer } from "../dist/web/server.js";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
 const restoreModule = pathToFileURL(path.join(root, "dist", "terminal", "restore.js")).href;
+const rendererModule = pathToFileURL(path.join(root, "dist", "terminal", "renderer.js")).href;
+const chatModule = pathToFileURL(path.join(root, "dist", "screens", "chat.js")).href;
 
 let failures = 0;
 function check(name, ok, detail = "") {
@@ -37,7 +39,10 @@ const count = (haystack, needle) => haystack.split(needle).length - 1;
 function runChild(body, { env = {}, timeout = 8000 } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "neutrino-resilience-"));
   const file = path.join(dir, "child.mjs");
-  fs.writeFileSync(file, body.replaceAll("__RESTORE__", JSON.stringify(restoreModule)), "utf8");
+  fs.writeFileSync(file, body
+    .replaceAll("__RESTORE__", JSON.stringify(restoreModule))
+    .replaceAll("__RENDERER__", JSON.stringify(rendererModule))
+    .replaceAll("__CHAT__", JSON.stringify(chatModule)), "utf8");
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [file], {
       env: { ...process.env, ...env },
@@ -54,6 +59,43 @@ function runChild(body, { env = {}, timeout = 8000 } = {}) {
       resolve({ code, stdout, stderr });
     });
   });
+}
+
+{
+  // Normal quit must bypass queued frame writes too. Neither those writes nor
+  // the renderer may declare cleanup complete before the bytes reach fd 1.
+  const { code, stdout } = await runChild(`
+    import { Renderer } from __RENDERER__;
+    import { installCrashGuard } from __RESTORE__;
+    installCrashGuard();
+    const renderer = new Renderer();
+    renderer.out = { write() { return false; } };
+    renderer.init();
+    renderer.dispose();
+    renderer.dispose();
+    process.exit(0);
+  `);
+  check("normal dispose flushes mouse teardown synchronously", code === 0 && count(stdout, MOUSE_OFF) === 1);
+  check("dispose and exit restore the alternate screen exactly once", count(stdout, ALT_SCREEN_OFF) === 1);
+}
+
+{
+  const { stdout } = await runChild(`
+    import fs from 'node:fs';
+    import { markTuiActive, restoreTerminalSync } from __RESTORE__;
+    const write = fs.writeSync;
+    let fail = true;
+    fs.writeSync = (...args) => {
+      if (fail) { fail = false; throw new Error('temporary output failure'); }
+      return write(...args);
+    };
+    process.stdout.write = () => false;
+    markTuiActive();
+    const first = restoreTerminalSync();
+    const retry = restoreTerminalSync();
+    write(1, 'RESULT ' + first + ' ' + retry);
+  `);
+  check("a failed terminal write leaves the guard armed", stdout.includes("RESULT false true"));
 }
 
 // ---------------------------------------------------------------------------
@@ -109,6 +151,43 @@ console.log("TERMINAL RESTORE");
 
 // ---------------------------------------------------------------------------
 console.log("CRASH CONTAINMENT");
+{
+  // No provider, timers or async saves: crash immediately after a partial reply
+  // appears, before the periodic checkpoint, and verify the exit hook saves it.
+  for (const stop of ["throw", "exit", "SIGHUP", "SIGBREAK"]) {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "neutrino-crash-history-"));
+    try {
+      const { code, stdout } = await runChild(`
+        import { ChatScreen } from __CHAT__;
+        import { installCrashGuard, markTuiActive } from __RESTORE__;
+        installCrashGuard();
+        markTuiActive();
+        const screen = new ChatScreen();
+        screen.app = { state: {
+          selectedProvider: 'test', selectedModelName: 'test',
+          selectedModelUrl: '', selectedModelApiKey: '',
+          selectedModelStreaming: true, selectedIntensity: 'High',
+        }, render() {} };
+        screen.onActivate();
+        screen.messages.push({role:'user', content:'unsaved prompt'});
+        screen.streamingContent = 'unsaved partial reply';
+        const stop = ${JSON.stringify(stop)};
+        if (stop === 'throw') throw new Error('injected crash before checkpoint');
+        if (stop === 'exit') process.exit(0);
+        process.emit(stop);
+      `, { env: { HOME: home, USERPROFILE: home } });
+      const dir = path.join(home, ".neutrino", "session");
+      const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => f.endsWith(".json")) : [];
+      const saved = files.length === 1 ? JSON.parse(fs.readFileSync(path.join(dir, files[0]), "utf8")) : null;
+      check(`${stop} saves the first unfinished conversation`, saved?.messages[0]?.content === "unsaved prompt" && saved?.messages[1]?.content === "unsaved partial reply");
+      check(`${stop} restores mouse and alternate screen`, count(stdout, MOUSE_OFF) === 1 && count(stdout, ALT_SCREEN_OFF) === 1);
+      check(`${stop} exits with the expected status`, code === ({throw:1, exit:0, SIGHUP:129, SIGBREAK:149})[stop]);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  }
+}
+
 {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "neutrino-home-"));
   const { code, stdout, stderr } = await runChild(

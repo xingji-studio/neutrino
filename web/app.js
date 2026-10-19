@@ -567,6 +567,13 @@ function renderControls(snapshot) {
       : "idle";
   el.controls.appendChild(badge);
 
+  if (snapshot.saveError) {
+    const warning = document.createElement("span");
+    warning.className = "badge paused";
+    warning.textContent = `History save failed: ${snapshot.saveError}`;
+    el.controls.appendChild(warning);
+  }
+
   if (snapshot.busy || snapshot.paused) {
     const button = document.createElement("button");
     button.className = "control";

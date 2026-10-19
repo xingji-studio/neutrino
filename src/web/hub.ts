@@ -31,6 +31,8 @@ export interface LiveMeta {
   paused: boolean;
   queued: string | null;
   compressing: boolean;
+  /** A failed history write, cleared after the next successful checkpoint. */
+  saveError?: string | null;
   tokens: { prompt: number; completion: number };
   /** Tool call waiting for a human decision, or null. */
   approval?: { tool: string; level: "high" | "extreme" } | null;

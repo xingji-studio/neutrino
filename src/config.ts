@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
 import { sameCwd } from "./cwd.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -206,7 +207,7 @@ export function saveSession(
 ): string {
   ensureDirs();
   const now = new Date();
-  const id = sessionId ?? now.toISOString().replace(/[:.]/g, "-");
+  const id = sessionId ?? `${now.toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
   const existing = sessionId ? loadSession(sessionId) : null;
   const created_at = existing ? existing.created_at : now.toISOString();
 
@@ -232,7 +233,24 @@ export function saveSession(
   };
 
   const filePath = path.join(SESSION_DIR, `${id}.json`);
-  fs.writeFileSync(filePath, JSON.stringify(session, null, 2), "utf-8");
+  // Keep the last complete transcript intact if writing or replacing fails.
+  // The temporary file shares the destination directory so rename is atomic.
+  const tempPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  const contents = JSON.stringify(session, null, 2);
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(tempPath, "wx", 0o600);
+    fs.writeFileSync(fd, contents, "utf-8");
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    fd = undefined;
+    fs.renameSync(tempPath, filePath);
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch { /* Preserve the write error. */ }
+    }
+    try { fs.rmSync(tempPath, { force: true }); } catch { /* Best-effort cleanup. */ }
+  }
   return id;
 }
 
