@@ -14,6 +14,33 @@
  */
 
 import type { ConversationContext } from "../compact.js";
+import type { ResolvedModelSelection, ApprovalMode } from "../config.js";
+import type { RiskAssessment } from "../llm/risk.js";
+
+export type ModelChangeResult = { ok: true } | { ok: false; error: string };
+
+/** Complete proposal shown before a human or automated approval decision. */
+export interface LiveApprovalRequest {
+  tool: string;
+  level: "high" | "extreme";
+  arguments: Record<string, unknown>;
+  cwd: string;
+  summary: string;
+  reasons: string[];
+}
+
+export interface LiveReviewProgress {
+  total: number;
+  round: number;
+  rounds: number;
+  request?: LiveApprovalRequest;
+}
+
+export function liveApprovalDetails(
+  tool: string, args: Record<string, unknown>, risk: RiskAssessment, cwd: string,
+): LiveApprovalRequest {
+  return { tool, level: risk.level, arguments: args, cwd, summary: risk.summary, reasons: risk.reasons };
+}
 
 /** A message as understood by the web UI. */
 export type LiveWireMessage =
@@ -37,9 +64,10 @@ export interface LiveMeta {
   saveError?: string | null;
   tokens: { prompt: number; completion: number };
   /** Tool call waiting for a human decision, or null. */
-  approval?: { tool: string; level: "high" | "extreme" } | null;
+  approval?: LiveApprovalRequest | null;
   /** Reviewer count while an automated approval review is running. */
-  reviewing?: number | null;
+  reviewing?: LiveReviewProgress | null;
+  approvalMode?: ApprovalMode;
 }
 
 /** Everything a browser needs to render a live conversation. */
@@ -65,6 +93,9 @@ export interface LiveAgent {
   liveSend(text: string): void;
   /** Answer a pending approval. Returns false when nothing was pending. */
   liveApprove?(approved: boolean): boolean;
+  liveSetApprovalMode?(mode: ApprovalMode): void;
+  /** Apply a server-resolved choice to future turns, while idle or paused. */
+  liveConfigure?(selection: ResolvedModelSelection): ModelChangeResult;
 }
 
 /** Summary of a live session, as shown in the sidebar. */
@@ -222,6 +253,22 @@ class LiveHub {
     const handled = entry.agent.liveApprove(approved);
     this.notify(key);
     return handled;
+  }
+
+  configure(key: string, selection: ResolvedModelSelection): ModelChangeResult {
+    const entry = this.entries.get(key);
+    if (!entry?.agent.liveConfigure) return { ok: false, error: "this session cannot change models" };
+    const result = entry.agent.liveConfigure(selection);
+    if (result.ok) this.notify(key);
+    return result;
+  }
+
+  setApprovalMode(key: string, mode: ApprovalMode): boolean {
+    const entry = this.entries.get(key);
+    if (!entry?.agent.liveSetApprovalMode) return false;
+    entry.agent.liveSetApprovalMode(mode);
+    this.notify(key);
+    return true;
   }
 }
 

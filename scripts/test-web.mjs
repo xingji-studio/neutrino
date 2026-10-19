@@ -103,7 +103,7 @@ function readSSE(url, needle, timeoutMs = 3000) {
 
 const agent = makeFakeAgent();
 const key = hub.register(agent);
-const server = await startWebServer({ port: 0 });
+const server = await startWebServer({ port: 0, auth: false });
 const base = server.url;
 
 try {
@@ -117,8 +117,10 @@ try {
   }
   {
     const res = await fetch(`${base}/app.js`);
+    const body = await res.text();
     assert(res.status === 200, "app.js is served");
     assert((res.headers.get("content-type") || "").includes("javascript"), "app.js is javascript");
+    assert(body.includes("function renderApprovalDetails("), "served app includes the approval command renderer");
   }
   {
     const res = await fetch(`${base}/..%2fpackage.json`);

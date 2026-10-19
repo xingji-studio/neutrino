@@ -12,12 +12,13 @@ const { ChatScreen } = await import("../dist/screens/chat.js");
 const { WebSession } = await import("../dist/web/session.js");
 const { LLMClient } = await import("../dist/llm/client.js");
 const { Buffer: ScreenBuffer } = await import("../dist/terminal/buffer.js");
-const { loadSession, saveConfig, listSessionsForCwd } = await import("../dist/config.js");
+const { loadSession, saveConfig, saveModels, listSessionsForCwd } = await import("../dist/config.js");
+const { updateWebSettings } = await import("../dist/web/settings.js");
 const { normalizeContext } = await import("../dist/compact.js");
 const { defaultState } = await import("../dist/state.js");
 const { App } = await import("../dist/app.js");
 
-saveConfig({ context_compress_threshold: 8000 });
+saveConfig({});
 const original = [
   { role: "user", content: "FIRST ORIGINAL PROMPT" },
   { role: "assistant", content: "FIRST ORIGINAL ANSWER" },
@@ -65,12 +66,44 @@ const render = screen => {
 };
 
 try {
+  // Both runners use the exact provider/model, reload capacity changes in live
+  // chats, and trigger precisely at 80%, preserving history through compression.
+  const capacityModel = { ...model, name: "shared" };
+  saveModels({ providers: [
+    { name: "capacity-a", models: [{ ...capacityModel, context_window: 128000 }] },
+    { name: "capacity-b", models: [{ ...capacityModel, context_window: 256000 }] },
+  ] });
+  for (const kind of ["tui", "web"]) {
+    const runner = make(kind);
+    if (kind === "tui") runner.summarizeTranscript = LLMClient.prototype.summarize;
+    runner.model = capacityModel;
+    if (kind === "tui") runner.modelProvider = "capacity-a";
+    else runner.provider = "capacity-a";
+    assert.equal(runner.compressThreshold(), 102400, `${kind}: 80% of 128K`);
+    if (kind === "tui") runner.modelProvider = "capacity-b";
+    else runner.provider = "capacity-b";
+    assert.equal(runner.compressThreshold(), 204800, `${kind}: same model name uses the new provider's capacity`);
+    updateWebSettings({ selection: { provider: "capacity-b", model: "shared", intensity: "High" }, settings: { model_context_window: 64000 } });
+    assert.equal(runner.compressThreshold(), 51200, `${kind}: existing runner picks up a Settings change`);
+    runner.lastPromptTokens = 51199;
+    await runner.autoCompress(0);
+    assert.equal(runner.context, null, `${kind}: does not compress below 80%`);
+    runner.lastPromptTokens = 51200;
+    await runner.autoCompress(0);
+    assert.equal(runner.context.end, 4, `${kind}: compresses at exactly 80%`);
+    assert.deepEqual(loadSession(runner.sessionId).messages, original);
+    close(runner);
+    updateWebSettings({ settings: { model_context_window: 256000 } });
+  }
+  saveConfig({});
+  console.log("ok tui and web: model/provider capacity, live settings and exact 80% boundary");
+
   for (const kind of ["tui", "web"]) {
     transcripts = [];
     LLMClient.prototype.summarize = async transcript => { transcripts.push(transcript); return `summary ${transcripts.length}`; };
     const runner = make(kind);
     if (kind === "tui") runner.summarizeTranscript = LLMClient.prototype.summarize;
-    runner.lastPromptTokens = 10000;
+    runner.lastPromptTokens = 800000;
     await runner.autoCompress(0);
     const saved = loadSession(runner.sessionId);
     assert.deepEqual(saved.messages, original, `${kind}: every original message/tool result survives`);
@@ -107,7 +140,7 @@ try {
     // it never removes the first originals or overwrites their tool results.
     const newer = Array.from({ length: 4 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: `new ${i}` }));
     runner.messages.push(...newer);
-    runner.lastPromptTokens = 10000;
+    runner.lastPromptTokens = 800000;
     await runner.autoCompress(0);
     assert.ok(transcripts[1].includes("summary 1"));
     assert.ok(!transcripts[1].includes(original[0].content));
@@ -136,7 +169,7 @@ try {
     // A message arriving during summarization must not be lost or assigned to
     // the wrong folded range. Failed summaries must retain the originals too.
     const race = make(kind);
-    race.lastPromptTokens = 10000;
+    race.lastPromptTokens = 800000;
     let release;
     const pending = new Promise(resolve => { release = resolve; });
     const delayed = async () => { await pending; return "stale snapshot summary"; };

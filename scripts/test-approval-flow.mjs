@@ -62,7 +62,10 @@ function startLlm() {
                     type: "function",
                     function: {
                       name: "run_command",
-                      arguments: JSON.stringify({ command: "git clean -fdx __approval_probe__" }),
+                      arguments: JSON.stringify({
+                        command: "git clean -fdx __approval_probe__",
+                        reason: "remove the probe directory the test created",
+                      }),
                     },
                   },
                 ],

@@ -9,15 +9,16 @@
  *
  * The server binds to loopback by default: it can read your whole conversation
  * history and drive an agent with shell access, so exposing it on a public
- * interface is an explicit opt-in, and doing so requires an access token.
+ * interface is an explicit opt-in. The API requires a persistent password.
  */
-import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { SESSION_DIR, listSessions, type SessionData, type SessionMeta } from "../config.js";
+import { SESSION_DIR, listSessions, resolveModelSelection, type ModelSelection, type ResolvedModelSelection, type SessionData, type SessionMeta } from "../config.js";
+import { getWebSettings, updateWebSettings } from "./settings.js";
+import { WebAuth } from "./auth.js";
 import { normalizeCwd } from "../cwd.js";
 import { hub, type LiveEntrySummary, type LiveSnapshot } from "./hub.js";
 import { writeCrashLog } from "../terminal/restore.js";
@@ -47,26 +48,19 @@ export interface WebServerOptions {
   port: number;
   /** Interface to bind. Defaults to loopback. */
   host?: string;
-  /**
-   * Shared secret every `/api/*` request must present.
-   *
-   * `undefined` means "decide for me": a loopback bind needs no secret, while a
-   * bind that other machines can reach gets a random one — this API can drive an
-   * agent with shell access, so it must never be open by accident. `null`
-   * disables authentication outright, for a network you fully trust.
-   */
-  token?: string | null;
+  /** Require password login by default. `false` explicitly disables authentication. */
+  auth?: boolean;
 }
 
 export interface WebServerHandle {
   /** Loopback URL. Always usable from this machine. */
   url: string;
-  /** Every URL a client can open, with the token attached when one is needed. */
+  /** Addresses to open. Credentials are never included in URLs. */
   urls: string[];
   port: number;
   host: string;
-  /** Secret required on `/api/*`, or `null` when the API is open. */
-  token: string | null;
+  /** Whether a browser must log in before using the API. */
+  authRequired: boolean;
   close(): Promise<void>;
 }
 
@@ -106,24 +100,10 @@ export function lanAddresses(): string[] {
   return found;
 }
 
-/**
- * Decide whether this server needs a token.
- *
- * An explicit string is honoured, `null` turns authentication off, and
- * `undefined` generates a random secret for anything reachable from elsewhere.
- */
-export function resolveWebToken(host: string, requested?: string | null): string | null {
-  if (requested === null) return null;
-  if (typeof requested === "string" && requested.trim()) return requested.trim();
-  if (isLoopbackHost(host)) return null;
-  return crypto.randomBytes(24).toString("base64url");
-}
-
 /** Build the list of addresses worth showing to the operator. */
-export function webUrls(host: string, port: number, token: string | null): { url: string; urls: string[] } {
+export function webUrls(host: string, port: number): { url: string; urls: string[] } {
   const normalized = host.trim() || "127.0.0.1";
   const wildcard = WILDCARD_HOSTS.has(normalized.toLowerCase());
-  const suffix = token ? `/?t=${encodeURIComponent(token)}` : "/";
 
   const hosts: string[] = [];
   if (isLoopbackHost(normalized)) {
@@ -137,52 +117,8 @@ export function webUrls(host: string, port: number, token: string | null): { url
 
   return {
     url: `http://${wildcard ? "127.0.0.1" : normalized}:${port}`,
-    urls: hosts.map((h) => `http://${h}:${port}${suffix}`),
+    urls: hosts.map((h) => `http://${h}:${port}/`),
   };
-}
-
-/**
- * Everything about who can reach the server and what they must present.
- * Exported so the policy can be tested without binding a socket.
- */
-export function describeWebAccess(options: WebServerOptions): {
-  token: string | null;
-  url: string;
-  urls: string[];
-} {
-  const host = options.host?.trim() || "127.0.0.1";
-  const token = resolveWebToken(host, options.token);
-  return { token, ...webUrls(host, options.port, token) };
-}
-
-/**
- * Pull the caller's token out of a request.
- *
- * `EventSource` cannot set headers, so the SSE stream carries it in the query
- * string; everything else uses a header.
- */
-function tokenFromRequest(req: http.IncomingMessage, url: URL): string | null {
-  const header = req.headers["x-neutrino-token"];
-  if (typeof header === "string" && header.trim()) return header.trim();
-
-  const authorization = req.headers.authorization;
-  if (typeof authorization === "string") {
-    const match = /^Bearer\s+(.+)$/i.exec(authorization.trim());
-    if (match) return match[1].trim();
-  }
-
-  const query = url.searchParams.get("t") ?? url.searchParams.get("token");
-  return query && query.trim() ? query.trim() : null;
-}
-
-/** Constant-time token comparison. */
-function tokenMatches(expected: string, provided: string | null): boolean {
-  if (!provided) return false;
-  // Hash first: timingSafeEqual requires equal lengths, and a wrong-length guess
-  // should not be distinguishable from a wrong guess of the right length.
-  const a = crypto.createHash("sha256").update(provided).digest();
-  const b = crypto.createHash("sha256").update(expected).digest();
-  return crypto.timingSafeEqual(a, b);
 }
 
 interface OverviewSession extends SessionMeta {
@@ -460,28 +396,71 @@ async function handleApi(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   url: URL,
-  token: string | null,
+  auth: WebAuth,
 ): Promise<boolean> {
   const { pathname } = url;
   if (!pathname.startsWith("/api/")) return false;
 
   if (req.method === "OPTIONS") {
     // Same-origin only: no CORS headers, so cross-site preflights are rejected.
-    // Answered before the token check because it reveals nothing.
+    // Answered before the login check because it reveals nothing.
     res.writeHead(204, { Allow: "GET, POST, OPTIONS" });
     res.end();
     return true;
   }
 
-  // Everything below reads every saved conversation and can drive an agent that
-  // runs shell commands, so a server another machine can reach demands proof
-  // that the caller was handed the token.
-  if (token && !tokenMatches(token, tokenFromRequest(req, url))) {
-    res.setHeader("WWW-Authenticate", 'Bearer realm="neutrino"');
-    sendJson(res, 401, {
-      error: "unauthorized",
-      hint: "open the URL printed by the terminal (it carries ?t=<token>), or send an X-Neutrino-Token header",
-    });
+  if (pathname === "/api/auth/login" || pathname === "/api/auth/logout") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "method not allowed" });
+    } else if (!isSameOrigin(req)) {
+      sendJson(res, 403, { error: "cross-origin request rejected" });
+    } else if (pathname.endsWith("/logout")) {
+      auth.forget(res);
+      sendJson(res, 200, { ok: true });
+    } else {
+      let body: unknown;
+      try { body = await readJsonBody(req, 4096); } catch {
+        sendJson(res, 400, { error: "invalid JSON body" });
+        return true;
+      }
+      if (await auth.login((body as { password?: unknown } | null)?.password)) {
+        auth.remember(res);
+        sendJson(res, 200, { ok: true });
+      } else {
+        sendJson(res, 401, { error: "Incorrect password." });
+      }
+    }
+    return true;
+  }
+
+  if (!auth.authenticated(req)) {
+    sendJson(res, 401, { error: "Password login required." });
+    return true;
+  }
+
+  if (pathname === "/api/settings") {
+    if (req.method === "GET") {
+      sendJson(res, 200, getWebSettings());
+    } else if (req.method === "POST") {
+      if (!isSameOrigin(req)) {
+        sendJson(res, 403, { error: "cross-origin request rejected" });
+        return true;
+      }
+      try {
+        const body = await readJsonBody(req);
+        updateWebSettings(body);
+        if ((body as { settings?: { web_password?: unknown } }).settings?.web_password !== undefined) {
+          auth.remember(res);
+        }
+        sendJson(res, 200, getWebSettings());
+      } catch (err) {
+        sendJson(res, (err as NodeJS.ErrnoException)?.code ? 500 : 400, {
+          error: err instanceof Error ? err.message : "invalid settings",
+        });
+      }
+    } else {
+      sendJson(res, 405, { error: "method not allowed" });
+    }
     return true;
   }
 
@@ -528,9 +507,27 @@ async function handleApi(
       return true;
     }
 
+    let selection: ResolvedModelSelection | undefined;
+    try {
+      const body = await readJsonBody(req);
+      if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("invalid JSON body");
+      const requested = (body as { selection?: unknown }).selection;
+      if (requested !== undefined) selection = resolveModelSelection(requested);
+    } catch (err) {
+      sendJson(res, 400, { error: err instanceof Error ? err.message : "invalid model selection" });
+      return true;
+    }
+
     // Already running (TUI or another tab)? Attach instead of duplicating.
     const existing = hub.list().find((entry) => entry.sessionId === id);
     if (existing) {
+      if (selection) {
+        const changed = hub.configure(existing.key, selection);
+        if (!changed.ok) {
+          sendJson(res, 409, { error: changed.error });
+          return true;
+        }
+      }
       sendJson(res, 200, { key: existing.key, attached: true });
       return true;
     }
@@ -541,7 +538,10 @@ async function handleApi(
       return true;
     }
 
-    const outcome = resumeSession(data);
+    const requested: ModelSelection | undefined = selection ? {
+      provider: selection.provider, model: selection.model.name, intensity: selection.intensity,
+    } : undefined;
+    const outcome = resumeSession(data, requested);
     if (!outcome.ok) {
       sendJson(res, 400, { error: outcome.error });
       return true;
@@ -559,7 +559,7 @@ async function handleApi(
     return true;
   }
 
-  const liveMatch = /^\/api\/live\/([^/]+)(?:\/(pause|resume|message|approve|close))?$/.exec(pathname);
+  const liveMatch = /^\/api\/live\/([^/]+)(?:\/(pause|resume|message|approve|close|model|approval-mode))?$/.exec(pathname);
   if (liveMatch) {
     const key = decodeURIComponent(liveMatch[1]);
     const action = liveMatch[2];
@@ -581,6 +581,37 @@ async function handleApi(
       }
       if (!hub.has(key)) {
         sendJson(res, 404, { error: "unknown live session" });
+        return true;
+      }
+      if (action === "approval-mode") {
+        let body: unknown;
+        try {
+          body = await readJsonBody(req);
+        } catch {
+          sendJson(res, 400, { error: "invalid JSON body" });
+          return true;
+        }
+        const mode = (body as { mode?: unknown } | null)?.mode;
+        if (mode !== "request" && mode !== "auto") {
+          sendJson(res, 400, { error: "mode must be request or auto" });
+        } else if (!hub.setApprovalMode(key, mode)) {
+          sendJson(res, 409, { error: "this session cannot change approval mode" });
+        } else {
+          sendJson(res, 200, { ok: true, snapshot: hub.snapshot(key) });
+        }
+        return true;
+      }
+      if (action === "model") {
+        let selection: ResolvedModelSelection;
+        try {
+          selection = resolveModelSelection(await readJsonBody(req));
+        } catch (err) {
+          sendJson(res, 400, { error: err instanceof Error ? err.message : "invalid model selection" });
+          return true;
+        }
+        const changed = hub.configure(key, selection);
+        if (!changed.ok) sendJson(res, 409, { error: changed.error });
+        else sendJson(res, 200, { ok: true, snapshot: hub.snapshot(key) });
         return true;
       }
       if (action === "pause") {
@@ -646,7 +677,7 @@ async function handleApi(
 async function handleRequest(
   req: http.IncomingMessage,
   res: http.ServerResponse,
-  token: string | null,
+  auth: WebAuth,
 ): Promise<void> {
   let url: URL;
   try {
@@ -656,7 +687,7 @@ async function handleRequest(
     return;
   }
 
-  if (await handleApi(req, res, url, token)) return;
+  if (await handleApi(req, res, url, auth)) return;
 
   if (req.method !== "GET" && req.method !== "HEAD") {
     sendText(res, 405, "Method not allowed");
@@ -668,12 +699,10 @@ async function handleRequest(
 /** Start the web UI. Resolves once the socket is actually listening. */
 export async function startWebServer(options: WebServerOptions): Promise<WebServerHandle> {
   const host = options.host ?? "127.0.0.1";
-  // Resolved before the socket is up so the request handler can capture it; the
-  // random token must not be regenerated once the real port is known.
-  const token = resolveWebToken(host, options.token);
+  const auth = new WebAuth(options.auth !== false);
 
   const server = http.createServer((req, res) => {
-    handleRequest(req, res, token).catch((err) => {
+    handleRequest(req, res, auth).catch((err) => {
       if (!res.headersSent) {
         sendJson(res, 500, { error: err instanceof Error ? err.message : "internal error" });
       } else {
@@ -712,8 +741,8 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
   return {
     host,
     port,
-    token,
-    ...webUrls(host, port, token),
+    authRequired: auth.enabled,
+    ...webUrls(host, port),
     close: () =>
       new Promise<void>((resolve) => {
         for (const key of [...webSessions.keys()]) closeWebSession(key);

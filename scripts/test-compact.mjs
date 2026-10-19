@@ -1,6 +1,6 @@
 // Regression tests for auto context compression:
 //   * the pure compaction helpers (split / transcript),
-//   * the configurable threshold (defaults + options),
+//   * model context windows and the derived 80% threshold,
 //   * the settings screen editing & persisting it, and
 //   * compression shrinking model input while retaining the original history.
 import fs from "node:fs";
@@ -14,7 +14,7 @@ process.env.HOME = tmpHome;
 process.env.USERPROFILE = tmpHome;
 
 const { planCompaction, transcriptFor } = await import("../dist/compact.js");
-const { DEFAULT_CONFIG, COMPRESS_THRESHOLD_OPTIONS, loadConfig, saveConfig } = await import(
+const { DEFAULT_CONTEXT_WINDOW, CONTEXT_WINDOW_OPTIONS, contextWindow, contextCompressionThreshold, loadModels, saveModels, saveConfig } = await import(
   "../dist/config.js"
 );
 const { SettingsScreen } = await import("../dist/screens/settings.js");
@@ -116,38 +116,38 @@ function stubApp(w = 80, h = 24) {
 }
 
 // ---------------------------------------------------------------------------
-// 3. Threshold defaults & options
+// 3. Model capacity defaults and validation
 // ---------------------------------------------------------------------------
 {
-  eq(DEFAULT_CONFIG.context_compress_threshold, 32000, "default threshold is 32k tokens");
-  assert(
-    COMPRESS_THRESHOLD_OPTIONS.some((o) => o.value === 0 && o.label === "Off"),
-    "an Off (0) option is offered",
-  );
-  const values = COMPRESS_THRESHOLD_OPTIONS.map((o) => o.value);
-  eq(values, [...values].sort((a, b) => a - b), "options are ordered");
-  const cfg = loadConfig();
-  eq(cfg.context_compress_threshold, 32000, "loadConfig falls back to the default threshold");
+  eq(DEFAULT_CONTEXT_WINDOW, 1_000_000, "default model capacity is 1M tokens");
+  for (const invalid of [undefined, null, 0, -1, NaN, Infinity, 1.5, "128000", Number.MAX_SAFE_INTEGER + 1]) {
+    eq(contextWindow(invalid), 1_000_000, `invalid capacity ${invalid} uses 1M`);
+  }
+  eq(contextWindow(128000), 128000, "custom capacity is retained");
+  eq(CONTEXT_WINDOW_OPTIONS, [...CONTEXT_WINDOW_OPTIONS].sort((a, b) => a - b), "options are ordered");
+  const model = { name: "unregistered" };
+  saveConfig({ context_compress_threshold: 32000 });
+  eq(contextCompressionThreshold("unknown", model), 800000, "legacy 32K config does not override the 80% rule");
+  saveConfig({ context_compress_threshold: 0 });
+  eq(contextCompressionThreshold("unknown", model), 800000, "legacy off setting does not disable the 80% rule");
 }
 
 // ---------------------------------------------------------------------------
-// 4. Settings screen edits and persists the threshold
+// 4. Settings edits and persists the current model's context window
 // ---------------------------------------------------------------------------
 {
-  const app = stubApp();
   const screen = new SettingsScreen();
-  screen.app = app;
+  screen.app = stubApp();
   screen.onActivate();
-
   const key = (name) => ({ name, ctrl: false, meta: false, shift: false, char: "", sequence: "" });
-  screen.onKey(key("down")); // select the auto-compress row
-  screen.onKey(key("right")); // 32K -> 64K
-
-  const cfg = loadConfig();
-  eq(cfg.context_compress_threshold, 64000, "settings persists the new threshold");
-
-  // Reset to the default for the ChatScreen tests below.
-  saveConfig({ ...cfg, context_compress_threshold: 32000 });
+  screen.onKey(key("down"));
+  screen.onKey(key("right")); // 1M -> 2M
+  const models = loadModels();
+  const model = models.providers[0].models.find(m => m.name === "deepseek-chat");
+  eq(model.context_window, 2_000_000, "settings persists capacity for the current model");
+  eq(contextCompressionThreshold("DeepSeek", model), 1_600_000, "threshold follows the saved capacity");
+  model.context_window = 1_000_000;
+  saveModels(models);
 }
 
 // ---------------------------------------------------------------------------
@@ -166,7 +166,7 @@ function longHistory() {
   const screen = new ChatScreen("");
   screen.app = stubApp();
   screen.messages = longHistory();
-  screen.lastPromptTokens = 10;
+  screen.lastPromptTokens = 799_999;
   let calls = 0;
   screen.summarizeTranscript = async () => {
     calls++;
@@ -182,7 +182,7 @@ function longHistory() {
   const screen = new ChatScreen("");
   screen.app = stubApp();
   screen.messages = longHistory();
-  screen.lastPromptTokens = 1_000_000; // certainly over any threshold
+  screen.lastPromptTokens = 800_000; // exactly 80% of the default 1M window
   let usedTranscript = "";
   screen.summarizeTranscript = async (t) => {
     usedTranscript = t;

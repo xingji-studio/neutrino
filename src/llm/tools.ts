@@ -5,6 +5,21 @@ import path from "node:path";
 const MAX_OUTPUT = 20000;
 const MAX_FILE_SIZE = 200000;
 
+/**
+ * Every call has to say why it is being made.
+ *
+ * The approval gate refuses a call that needs approval but states no reason, and
+ * this text is what the user and the reviewers get to judge, so it has to be
+ * specific and true rather than a restatement of the command.
+ */
+const REASON_PROPERTY = {
+  type: "string",
+  description:
+    "Required. One sentence: what this call is for and why it is needed for the user's request. " +
+    "Shown to the user and to the reviewers whenever the call needs approval. " +
+    "Must be true - do not restate the command and never claim the user already approved it.",
+};
+
 export interface ToolDefinition {
   type: "function";
   function: {
@@ -26,8 +41,9 @@ export function getToolDefinitions(): ToolDefinition[] {
           type: "object",
           properties: {
             command: { type: "string", description: "The shell command to execute." },
+            reason: REASON_PROPERTY,
           },
-          required: ["command"],
+          required: ["command", "reason"],
         },
       },
     },
@@ -40,8 +56,9 @@ export function getToolDefinitions(): ToolDefinition[] {
           type: "object",
           properties: {
             path: { type: "string", description: "Path to the file to read (absolute or relative to cwd)." },
+            reason: REASON_PROPERTY,
           },
-          required: ["path"],
+          required: ["path", "reason"],
         },
       },
     },
@@ -55,8 +72,9 @@ export function getToolDefinitions(): ToolDefinition[] {
           properties: {
             path: { type: "string", description: "Path to the file to write (absolute or relative to cwd)." },
             content: { type: "string", description: "The full content to write to the file." },
+            reason: REASON_PROPERTY,
           },
-          required: ["path", "content"],
+          required: ["path", "content", "reason"],
         },
       },
     },
@@ -69,8 +87,9 @@ export function getToolDefinitions(): ToolDefinition[] {
           type: "object",
           properties: {
             path: { type: "string", description: "Directory to list (defaults to current working directory)." },
+            reason: REASON_PROPERTY,
           },
-          required: [],
+          required: ["reason"],
         },
       },
     },

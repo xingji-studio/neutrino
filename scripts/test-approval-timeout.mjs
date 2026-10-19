@@ -60,13 +60,14 @@ const gate = new ApprovalGate({
     intensity: "Medium",
   }),
   extremeAutoApprovalEnabled: () => true,
+  autoApprovalEnabled: () => true,
   reviewTimeoutMs: () => 150,
   onReview: (info) => seen.push(info ? info.total : null),
 });
 
 const request = {
   tool: "run_command",
-  args: { command: "rm -rf build" },
+  args: { command: "rm -rf build", reason: "remove the stale build directory before rebuilding" },
   cwd: process.cwd(),
   prompt: "\u81ea\u52a8\u5ba1\u6279\uff0c\u6e05\u7406\u6784\u5efa\u4ea7\u7269",
   risk: { level: "extreme", reasons: ["delete-class command"] },
@@ -81,8 +82,8 @@ assert(decision.approved === false, "an unanswered review fails closed");
 assert(decision.source === "ai", `the decision is attributed to review (got ${decision.source})`);
 assert(asked === 0, `the human is not left holding a hung review (asked ${asked}x)`);
 assert(
-  seen[0] === 3 && seen[seen.length - 1] === null,
-  `the UI is told about all three reviewers (got ${JSON.stringify(seen)})`,
+  seen[0] === 2 && seen[seen.length - 1] === null,
+  `the UI is told about both reviews (got ${JSON.stringify(seen)})`,
 );
 
 blackHole.close();

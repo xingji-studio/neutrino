@@ -142,6 +142,7 @@ function chatRender(w, h) {
   // must not leave residue once the decision is in.
   screen.pendingApproval = {
     tool: "run_command",
+    args: { command: "rm -rf build dist", reason: "remove the stale build output" },
     risk: {
       level: "extreme",
       tool: "run_command",
@@ -158,6 +159,10 @@ function chatRender(w, h) {
   if (!flat.includes("Request Approval")) fail(`approval: header text missing at ${w}x${h}`);
   if (!flat.includes("rm -rf build dist")) fail(`approval: card text missing at ${w}x${h}`);
   if (!flat.includes("Approve")) fail(`approval: buttons missing at ${w}x${h}`);
+  if (!flat.includes("Why:")) fail(`approval: stated reason line missing at ${w}x${h}`);
+  if (flat.includes("the agent gave no reason")) {
+    fail(`approval: stated reason was dropped at ${w}x${h}`);
+  }
 
   screen.pendingApproval = null;
   app.state.approval = null;

@@ -3,31 +3,42 @@ import { Screen } from "../terminal/screen.js";
 import type { Key, MouseEvent } from "../terminal/input.js";
 import { C } from "../colors.js";
 import {
-  COMPRESS_THRESHOLD_OPTIONS,
+  CONTEXT_WINDOW_OPTIONS,
+  DEFAULT_CONTEXT_WINDOW,
+  contextWindow,
   CONFIG_FILE,
   INTENSITY_LEVELS,
   getModelsByProvider,
   loadConfig,
+  loadModels,
   saveConfig,
+  saveModels,
 } from "../config.js";
 import { drawHeader } from "../header.js";
 import { centerVertically, drawHint } from "../ui.js";
+import { hashWebPassword } from "../web/auth.js";
 
 /** The settings that can be changed here, top to bottom. */
-const ROWS = ["intensity", "compress", "approval_model", "extreme_approval"] as const;
+const ROWS = ["intensity", "compress", "approval_model", "extreme_approval", "sound", "web_password"] as const;
 type RowId = (typeof ROWS)[number];
 
 export class SettingsScreen extends Screen {
   private intensityIdx = 2;
-  private thresholdIdx = 3;
+  private contextTokens = DEFAULT_CONTEXT_WINDOW;
+  private contextChanged = false;
   /** 0 = same model as the chat, otherwise index + 1 into `models`. */
   private approvalModelIdx = 0;
-  /** 0 = off (human only), 1 = on (three reviewers). */
+  /** 0 = off (human only), 1 = on (two independent assessments). */
   private extremeIdx = 0;
+  /** 0 = silent, 1 = audible cue on turn end and on approval requests. */
+  private soundIdx = 1;
   private models: string[] = [];
   private rowIdx = 0;
   private lastHoverX = -1;
   private lastHoverY = -1;
+  private editingPassword = false;
+  private passwordDraft = "";
+  private passwordMessage = "Press Enter to change";
 
   onActivate(): void {
     const config = loadConfig();
@@ -35,19 +46,27 @@ export class SettingsScreen extends Screen {
     const i = INTENSITY_LEVELS.indexOf(current);
     this.intensityIdx = i >= 0 ? i : 2;
 
-    const threshold = Number(config.context_compress_threshold ?? 32000);
-    const t = COMPRESS_THRESHOLD_OPTIONS.findIndex((o) => o.value === threshold);
-    this.thresholdIdx = t >= 0 ? t : 3;
+    const state = this.app.state;
+    const model = getModelsByProvider()[state.selectedProvider]?.find((m) => m.name === state.selectedModelName);
+    this.contextTokens = contextWindow(model?.context_window);
+    this.contextChanged = false;
 
     this.models = Object.values(getModelsByProvider()).flatMap((list) => list.map((m) => m.name));
     const currentApproval = String(config.approval_model ?? "");
     const approvalAt = currentApproval ? this.models.indexOf(currentApproval) : -1;
     this.approvalModelIdx = approvalAt >= 0 ? approvalAt + 1 : 0;
     this.extremeIdx = config.auto_approve_extreme_risk === true ? 1 : 0;
+    this.soundIdx = config.sound_alerts === false ? 0 : 1;
   }
 
   /** Change the value of a row by `delta` steps and persist it immediately. */
   private cycle(row: RowId, delta: number): void {
+    if (row === "web_password") {
+      this.editingPassword = true;
+      this.passwordDraft = "";
+      this.passwordMessage = "Type new password";
+      return;
+    }
     if (row === "intensity") {
       const n = INTENSITY_LEVELS.length;
       this.intensityIdx = (this.intensityIdx + delta + n) % n;
@@ -57,14 +76,45 @@ export class SettingsScreen extends Screen {
     } else if (row === "extreme_approval") {
       // A switch, not a list: any nudge flips it.
       this.extremeIdx = this.extremeIdx === 1 ? 0 : 1;
+    } else if (row === "sound") {
+      this.soundIdx = this.soundIdx === 1 ? 0 : 1;
     } else {
-      const n = COMPRESS_THRESHOLD_OPTIONS.length;
-      this.thresholdIdx = (this.thresholdIdx + delta + n) % n;
+      const options = [...new Set([...CONTEXT_WINDOW_OPTIONS, this.contextTokens])].sort((a, b) => a - b);
+      const i = options.indexOf(this.contextTokens);
+      this.contextTokens = options[(i + delta + options.length) % options.length];
+      this.contextChanged = true;
     }
     this.save();
   }
 
   onKey(key: Key): void {
+    if (this.editingPassword) {
+      if (key.name === "escape") {
+        this.editingPassword = false;
+        this.passwordDraft = "";
+        this.passwordMessage = "Press Enter to change";
+      } else if (key.name === "enter" || key.name === "return") {
+        try {
+          const hash = hashWebPassword(this.passwordDraft);
+          const config = loadConfig();
+          config.web_password_hash = hash;
+          saveConfig(config);
+          this.editingPassword = false;
+          this.passwordDraft = "";
+          this.passwordMessage = "Saved permanently";
+        } catch (error) {
+          this.passwordMessage = error instanceof Error ? error.message : "Could not save password";
+        }
+      } else if (key.name === "backspace") {
+        this.passwordDraft = Array.from(this.passwordDraft).slice(0, -1).join("");
+      } else if (key.ctrl && key.name === "u") {
+        this.passwordDraft = "";
+      } else if (key.char && !key.ctrl && !key.meta) {
+        this.passwordDraft = (this.passwordDraft + key.char).slice(0, 256);
+      }
+      this.app.render();
+      return;
+    }
     if (key.name === "up") {
       this.rowIdx = (this.rowIdx + ROWS.length - 1) % ROWS.length;
       this.app.render();
@@ -78,7 +128,8 @@ export class SettingsScreen extends Screen {
       this.cycle(ROWS[this.rowIdx], 1);
       this.app.render();
     } else if (key.name === "enter" || key.name === "return") {
-      this.save();
+      if (ROWS[this.rowIdx] === "web_password") this.cycle("web_password", 1);
+      else this.save();
       this.app.render();
     } else if (key.name === "escape") {
       this.save();
@@ -87,6 +138,7 @@ export class SettingsScreen extends Screen {
   }
 
   onMouse(ev: MouseEvent): void {
+    if (this.editingPassword) return;
     const layout = this.layout();
     if (!layout) return;
 
@@ -135,17 +187,38 @@ export class SettingsScreen extends Screen {
     }
   }
 
+  onPaste(text: string): void {
+    if (!this.editingPassword) return;
+    this.passwordDraft = (this.passwordDraft + text).slice(0, 256);
+    this.app.render();
+  }
+
+  onDeactivate(): void {
+    this.passwordDraft = "";
+    this.editingPassword = false;
+  }
+
   private rowTexts(): { label: string; value: string }[] {
     return [
       { label: "Default intensity", value: INTENSITY_LEVELS[this.intensityIdx] },
-      { label: "Auto-compress context", value: COMPRESS_THRESHOLD_OPTIONS[this.thresholdIdx].label },
+      { label: "Model context (80%)", value: `${this.contextTokens.toLocaleString("en-US")} tokens` },
       {
         label: "Approval reviewer model",
         value: this.approvalModelIdx === 0 ? "Same as chat" : this.models[this.approvalModelIdx - 1] ?? "Same as chat",
       },
       {
         label: "Extreme-risk auto-approval",
-        value: this.extremeIdx === 1 ? "On (3 reviewers)" : "Off (human only)",
+        // Names the mechanism: three separate review rounds, not three reviewers
+        // sitting in one panel.
+        value: this.extremeIdx === 1 ? "On (3 separate rounds)" : "Off (human only)",
+      },
+      {
+        label: "Sound alerts",
+        value: this.soundIdx === 1 ? "On (turn end, approvals)" : "Off",
+      },
+      {
+        label: "Web password",
+        value: this.editingPassword ? "*".repeat(Math.min(this.passwordDraft.length, 24)) || "Type new password" : this.passwordMessage,
       },
     ];
   }
@@ -166,9 +239,19 @@ export class SettingsScreen extends Screen {
   private save(): void {
     const config = loadConfig();
     config.default_intensity = INTENSITY_LEVELS[this.intensityIdx];
-    config.context_compress_threshold = COMPRESS_THRESHOLD_OPTIONS[this.thresholdIdx].value;
+    if (this.contextChanged) {
+      const data = loadModels();
+      const state = this.app.state;
+      const model = data.providers.find((p) => p.name === state.selectedProvider)?.models.find((m) => m.name === state.selectedModelName);
+      if (model) {
+        model.context_window = this.contextTokens;
+        saveModels(data);
+      }
+      this.contextChanged = false;
+    }
     config.approval_model = this.approvalModelIdx === 0 ? "" : this.models[this.approvalModelIdx - 1] ?? "";
     config.auto_approve_extreme_risk = this.extremeIdx === 1;
+    config.sound_alerts = this.soundIdx === 1;
     saveConfig(config);
   }
 
@@ -193,7 +276,7 @@ export class SettingsScreen extends Screen {
       const selected = i === this.rowIdx;
       const marker = selected ? "▸ " : "  ";
       const label = rows[i].label.padEnd(labelW);
-      const value = selected ? `◂ ${rows[i].value} ▸` : rows[i].value;
+      const value = selected && ROWS[i] !== "web_password" ? `◂ ${rows[i].value} ▸` : rows[i].value;
       const text = marker + label + "   " + value;
       if (selected) {
         buf.centerText(y, " " + text + " ", { fg: C.accent, bg: C.highlightBg, bold: true });
@@ -205,11 +288,13 @@ export class SettingsScreen extends Screen {
 
     y += 1;
     if (y < h) {
-      buf.centerText(y, `config: ${CONFIG_FILE}`, { fg: C.dim });
+      buf.centerText(y, this.editingPassword ? this.passwordMessage : `config: ${CONFIG_FILE}`, { fg: C.dim });
       y += 1;
     }
     if (y < h) {
-      drawHint(buf, y, "↑/↓ select  ·  ←/→ change  ·  Enter apply  ·  right-click back  ·  Esc back");
+      drawHint(buf, y, this.editingPassword
+        ? "Type or paste password  ·  Enter save  ·  Esc cancel"
+        : "↑/↓ select  ·  ←/→ change  ·  Enter apply  ·  right-click back  ·  Esc back");
     }
   }
 }

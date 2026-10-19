@@ -2,7 +2,7 @@ import type { Buffer } from "../terminal/buffer.js";
 import { Screen } from "../terminal/screen.js";
 import type { Key, MouseEvent } from "../terminal/input.js";
 import { C } from "../colors.js";
-import { loadLogo, loadVersion } from "../config.js";
+import { loadLogo, loadVersion, loadConfig, saveConfig, normalizeApprovalMode } from "../config.js";
 import { drawHeader } from "../header.js";
 import {
   centerVertically,
@@ -12,12 +12,14 @@ import {
   drawInputBox,
   drawTabButton,
   inRect,
+  approvalToggle,
+  drawApprovalToggle,
 } from "../ui.js";
 
 const TABS = ["Model", "History", "Settings"];
 const LOGO = loadLogo();
 
-const FOCUS_COUNT = TABS.length + 1; // input box + 3 tabs
+const FOCUS_COUNT = TABS.length + 2; // input box + 3 tabs + approval mode
 const INPUT_H = 3;
 const TAB_H = 3;
 
@@ -34,10 +36,27 @@ function isLowSurrogate(code: number): boolean {
 }
 
 export class StartScreen extends Screen {
+  private get approvalMode() {
+    return normalizeApprovalMode(loadConfig().approval_mode);
+  }
+
+  private toggleApproval(): void {
+    const config = loadConfig();
+    config.approval_mode = this.approvalMode === "auto" ? "request" : "auto";
+    saveConfig(config);
+    this.app.render();
+  }
+
+  private logoLines(): string[] {
+    const lines = LOGO.replace(/\n+$/, "").split("\n");
+    const count = Math.max(0, Math.min(lines.length, this.app.height - 13));
+    return count ? lines.slice(-count) : [];
+  }
+
   private inputValue = "";
   private cursor = 0;
-  private focusIdx = 0; // 0 = input box, 1..3 = tabs
-  private hoverIdx = -1; // -1 = nothing, 0 = input box, 1..3 = tabs
+  private focusIdx = 0; // 0 = input box, 1..3 = tabs, 4 = approval mode
+  private hoverIdx = -1; // -1 = nothing, otherwise the control index
   private lastHoverX = -1;
   private lastHoverY = -1;
 
@@ -58,6 +77,10 @@ export class StartScreen extends Screen {
   }
 
   onKey(key: Key): void {
+    if (key.name === "tab") {
+      this.move(key.shift ? -1 : 1);
+      return;
+    }
     // When the input box is focused and holds text, left/right move the text
     // cursor instead of switching between the input box and the tabs. When the
     // input box is empty (or another control is focused), left/right switch.
@@ -82,6 +105,8 @@ export class StartScreen extends Screen {
       if (this.focusIdx === 0) {
         const text = this.inputValue.trim();
         if (text) this.app.startNewChat(text);
+      } else if (this.focusIdx === FOCUS_COUNT - 1) {
+        this.toggleApproval();
       } else {
         this.enterTab();
       }
@@ -138,7 +163,9 @@ export class StartScreen extends Screen {
 
       const layout = this.layout();
       let hover = -1;
-      if (layout && inRect(ev.x, ev.y, { x: layout.inputX, y: layout.inputY, w: layout.inputW, h: INPUT_H })) {
+      if (inRect(ev.x, ev.y, approvalToggle(this.app.width, this.app.height - 4, this.approvalMode))) {
+        hover = FOCUS_COUNT - 1;
+      } else if (layout && inRect(ev.x, ev.y, { x: layout.inputX, y: layout.inputY, w: layout.inputW, h: INPUT_H })) {
         hover = 0;
       } else if (layout && ev.y >= layout.tabY && ev.y < layout.tabY + TAB_H) {
         for (let i = 0; i < layout.tabs.length; i++) {
@@ -159,6 +186,11 @@ export class StartScreen extends Screen {
       const layout = this.layout();
       if (!layout) return;
       if (ev.button === 2) return; // right click: no-op on start screen
+      if (ev.y >= 1 && inRect(ev.x, ev.y, approvalToggle(this.app.width, this.app.height - 4, this.approvalMode))) {
+        this.focusIdx = FOCUS_COUNT - 1;
+        this.toggleApproval();
+        return;
+      }
       if (ev.y === 0) {
         this.app.openModelConfig();
         return;
@@ -198,6 +230,7 @@ export class StartScreen extends Screen {
     const h = this.app.height;
     const rows: number[] = [];
     for (let y = inputY; y <= tabY + TAB_H; y++) if (y >= 0 && y < h) rows.push(y);
+    if (h - 4 >= 1) rows.push(h - 4);
     return rows;
   }
 
@@ -206,10 +239,11 @@ export class StartScreen extends Screen {
     const h = this.app.height;
     const inputW = Math.min(78, w - 4);
     const inputX = Math.floor((w - inputW) / 2);
-    const logoLines = LOGO.replace(/\n+$/, "").split("\n");
+    const logoLines = this.logoLines();
     const gap = 1;
-    const contentH = logoLines.length + 1 + INPUT_H + gap + TAB_H;
-    const inputY = centerVertically(h, contentH) + logoLines.length + 1;
+    const logoGap = logoLines.length ? 1 : 0;
+    const contentH = logoLines.length + logoGap + INPUT_H + gap + TAB_H;
+    const inputY = centerVertically(h - 4, contentH) + logoLines.length + logoGap;
     const tabY = inputY + INPUT_H + gap;
     const tabGap = 2;
     const tabInner = inputW - tabGap * (TABS.length - 1);
@@ -262,19 +296,20 @@ export class StartScreen extends Screen {
     const inputW = Math.min(78, w - 4);
     const inputX = Math.floor((w - inputW) / 2);
 
-    const logoLines = LOGO.replace(/\n+$/, "").split("\n");
+    const logoLines = this.logoLines();
     const logoMax = logoLines.reduce((m, l) => Math.max(m, l.length), 0);
     const logoX = Math.max(0, Math.floor((w - logoMax) / 2));
     const gap = 1;
-    const contentH = logoLines.length + 1 + INPUT_H + gap + TAB_H;
-    const top = centerVertically(h, contentH);
+    const logoGap = logoLines.length ? 1 : 0;
+    const contentH = logoLines.length + logoGap + INPUT_H + gap + TAB_H;
+    const top = centerVertically(h - 4, contentH);
 
     let y = top;
     for (const line of logoLines) {
       buf.writeText(logoX, y, line, { fg: C.accent, bold: true });
       y++;
     }
-    y += 1;
+    y += logoGap;
 
     drawInputBox(buf, inputX, y, inputW, this.inputValue, this.cursor, {
       active: this.focusIdx === 0,
@@ -302,10 +337,10 @@ export class StartScreen extends Screen {
     const versionY = h - 2;
     const showVersion = version.length > 0 && versionY >= 1;
 
-    // The hint sits right below the tabs, but is dropped when it would land on
-    // or below the reserved version row so the two never collide.
+    // Reserve the button row and the blank row between it and the version.
     const hintY = y + TAB_H + 1;
-    if (hintY < h && (!showVersion || hintY < versionY)) {
+    const approvalY = h - 4;
+    if (hintY < approvalY) {
       const nav = this.focusIdx === 0 && this.inputValue.length > 0
         ? "←/→ move cursor · ↑/↓ switch"
         : "←/→ / ↑/↓ switch";
@@ -315,5 +350,7 @@ export class StartScreen extends Screen {
     if (showVersion) {
       buf.centerText(versionY, `v${version}`, { fg: C.dim });
     }
+    drawApprovalToggle(buf, approvalY, this.approvalMode,
+      this.focusIdx === FOCUS_COUNT - 1 || this.hoverIdx === FOCUS_COUNT - 1);
   }
 }

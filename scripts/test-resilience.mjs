@@ -258,7 +258,7 @@ console.log("WEB STREAM RESILIENCE");
     liveApprove: () => true,
   };
   const key = hub.register(agent);
-  const server = await startWebServer({ port: 0 });
+  const server = await startWebServer({ port: 0, auth: false });
   const base = `http://127.0.0.1:${server.port}`;
 
   const get = (p) =>

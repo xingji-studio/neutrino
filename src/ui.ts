@@ -1,6 +1,24 @@
 import type { Buffer } from "./terminal/buffer.js";
 import { C, type RGB, type Style } from "./colors.js";
 import { displayWidth, truncateByWidth, wcwidth } from "./width.js";
+import type { ApprovalMode } from "./config.js";
+
+/** One terminal row; shared geometry keeps rendering and hit testing aligned. */
+export function approvalToggle(width: number, y: number, mode: ApprovalMode) {
+  const label = mode === "auto" ? "[ Auto Approval ]" : "[ Request Approval ]";
+  const text = truncateByWidth(label, Math.max(0, width - 2));
+  return { x: Math.max(0, Math.floor((width - displayWidth(text)) / 2)), y, w: displayWidth(text), h: 1, text };
+}
+
+export function drawApprovalToggle(buf: Buffer, y: number, mode: ApprovalMode, focused = false): void {
+  if (y < 1 || y >= buf.height) return;
+  const button = approvalToggle(buf.width, y, mode);
+  buf.writeText(button.x, y, button.text, {
+    fg: focused ? C.black : mode === "auto" ? C.green : C.accent,
+    bg: focused ? C.accent : C.highlightBg,
+    bold: true,
+  });
+}
 
 function chunkByWidth(text: string, width: number): string[] {
   const chunks: string[] = [];

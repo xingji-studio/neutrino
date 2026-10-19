@@ -47,7 +47,7 @@ eq(assessToolCall("write_file", { path: "notes.md" }, cwd), null, "writing insid
 
 // ---- prompt directives ---------------------------------------------------
 const plain = parsePromptDirectives("refactor the parser");
-assert(!plain.noApproval && !plain.fullTrust && !plain.autoApprove, "plain prompt grants nothing");
+assert(!plain.noApproval && !plain.fullTrust, "plain prompt grants nothing");
 
 const noApproval = parsePromptDirectives("这个对话无需审批，直接改吧");
 assert(noApproval.noApproval, "无需审批 is detected");
@@ -58,17 +58,17 @@ assert(fullTrust.fullTrust, "full-trust sentence is detected");
 assert(fullTrust.noApproval === false, "full trust is its own switch");
 
 const auto = parsePromptDirectives("自动审批，全部交给你");
-assert(auto.autoApprove, "自动审批 is detected");
+assert(!("autoApprove" in auto), "自动审批 no longer selects the mode");
 
 const negated = parsePromptDirectives("不要自动审批，先问我");
-assert(!negated.autoApprove, "negated 自动审批 is ignored");
+assert(!("autoApprove" in negated), "negated 自动审批 cannot select the mode either");
 
 // ---- gate routing --------------------------------------------------------
 
 function requestFor(prompt, level = "high") {
   return {
     tool: "run_command",
-    args: { command: "rm -rf build" },
+    args: { command: "rm -rf build", reason: "remove the stale build directory before rebuilding" },
     cwd,
     prompt,
     risk: { level, tool: "run_command", summary: "rm -rf build", reasons: ["deletes files"] },
@@ -144,7 +144,7 @@ async function run() {
     eq(decision.source, "prompt", "full trust is a prompt decision");
   }
 
-  // 自动审批 but the extreme switch is off => human
+  // Auto Approval mode but the extreme switch is off => human
   {
     let asked = 0;
     const g = new ApprovalGate({
@@ -156,8 +156,9 @@ async function run() {
         throw new Error("reviewer must not run while the switch is off");
       },
       extremeAutoApprovalEnabled: () => false,
+      autoApprovalEnabled: () => true,
     });
-    const decision = await g.decide(requestFor("自动审批", "extreme"));
+    const decision = await g.decide(requestFor("clean the build output", "extreme"));
     eq(decision.source, "human", "switch off forces a human for delete-class");
     eq(asked, 1, "human was asked once");
   }

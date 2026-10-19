@@ -95,9 +95,9 @@ export class App {
    * Mount the browser UI on the given port. Safe to call once; subsequent calls
    * return the already-running server.
    */
-  async enableWeb(port: number, host?: string, token?: string | null): Promise<WebServerHandle> {
+  async enableWeb(port: number, host?: string, auth = true): Promise<WebServerHandle> {
     if (this.webHandle) return this.webHandle;
-    this.webHandle = await startWebServer({ port, host, token });
+    this.webHandle = await startWebServer({ port, host, auth });
     return this.webHandle;
   }
 
@@ -387,6 +387,22 @@ export class App {
   }
 
   // Public so screens can surface transient status (e.g. "reviewing 3/3").
+  /**
+   * Audible cue for something the user is waiting on.
+   *
+   * Silent when `sound_alerts` is off, so the bell stays a preference rather
+   * than unavoidable noise. A pending approval rings twice: it is the one event
+   * that actually blocks the agent, and a single blip is easy to miss.
+   */
+  bell(kind: "turn" | "approval" = "turn"): void {
+    try {
+      if (loadConfig().sound_alerts === false) return;
+    } catch {
+      // A config we cannot read must not swallow the cue.
+    }
+    this.renderer.bell(kind === "approval" ? 2 : 1);
+  }
+
   showToast(text: string): void {
     this.toast = text;
     if (this.toastTimer) clearTimeout(this.toastTimer);
@@ -417,6 +433,7 @@ export class App {
   }
 
   startNewChat(text: string): void {
+    this.restoreSelection();
     this.pushScreen(new ChatScreen(text));
   }
 
@@ -430,6 +447,7 @@ export class App {
     screen.loadedIntensity = data.intensity || null;
     screen.loadedTokens = data.tokens ?? null;
     screen.loadedContext = data.context ?? null;
+    screen.loadedApprovalMode = data.approval_mode ?? null;
     if (data.provider) this.state.selectedProvider = data.provider;
     if (data.model) this.state.selectedModelName = data.model;
     if (data.intensity) this.state.selectedIntensity = data.intensity;

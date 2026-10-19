@@ -19,7 +19,7 @@ A CLI coding agent that lives in your terminal. Neutrino gives you an interactiv
 - **Token usage stats** — click the `ⓘ` in the chat header to see prompt/completion/total token counts for the current session.
 - **Agent history browser** — view past sessions from other CLI agents (Claude Code, Codex, OpenCode) directly from the history screen.
 - **Approval gate** — risky commands and paths outside the working directory need your sign-off. The header turns orange and reads **Request Approval**; press `Y` or `N`. Delete-class commands always ask, unless you explicitly granted full trust, and there is an opt-in reviewer agent for automatic decisions.
-- **Browser UI on any port** — mount a local website that lists every saved conversation grouped by working directory, streams the running one in real time, and lets you pause/resume it or send new messages from the browser.
+- **Browser UI on any port** — mount a local website that lists every saved conversation grouped by working directory, streams the running one in real time, and lets you pause/resume it, send messages, switch provider/model/intensity, and edit settings from the browser.
 
 ## Requirements
 
@@ -63,6 +63,7 @@ Type a message on the start screen and press `Enter` to begin a new chat.
 | `Esc` | Clear an active selection |
 | `PgUp` / `PgDn` | Scroll chat history |
 | `Ctrl+C` | Copy the selection, or quit if nothing is selected |
+| `Ctrl+A` | Toggle Request Approval / Auto Approval in a conversation |
 | `Y` | Approve the pending request (while the approval card is up) |
 | `N` / `Esc` | Deny the pending request |
 | `Ctrl+Q` | Quit |
@@ -88,7 +89,8 @@ The selection highlight is drawn over whatever is on screen, so it works uniform
 Settings are stored under `~/.neutrino/`:
 
 - `model.json` — provider and model definitions (edit to add your own endpoints).
-- `config.json` — app configuration (selected provider/model/intensity, theme, language).
+- `config.json` — app configuration (selected provider/model/intensity, theme,
+  language, approval mode, `auto_approve_extreme_risk`, `sound_alerts`).
 - `session/` — saved conversation sessions, one JSON file per session.
 
 Set your API key in the model select screen or directly in `model.json`.
@@ -99,7 +101,6 @@ A few environment variables override flags:
 | --- | --- |
 | `NEUTRINO_WEB_PORT` | Web UI port: like `--web-port` in TUI mode, and the port in `neutrino web`. |
 | `NEUTRINO_WEB_HOST` | Interface to bind, like `--host`. |
-| `NEUTRINO_WEB_TOKEN` | Access token for `/api/*`, like `--token`. Set it to keep remote links stable across restarts. |
 
 ### Approvals
 
@@ -113,9 +114,16 @@ Every tool call is classified before it runs.
 
 While a call waits for an answer the top bar turns orange and reads
 **Request Approval**, and an orange card floats above the input box with the
-command, why it was flagged, and `[ Y ] Approve` / `[ N ] Deny`. Approving runs
-the call; denying returns a note to the model so it can pick another route
-instead of retrying.
+command, **why the agent says it needs it**, why it was flagged, and
+`[ Y ] Approve` / `[ N ] Deny`. Approving runs the call; denying returns a note
+to the model so it can pick another route instead of retrying.
+
+Every tool call carries a `reason` argument, and a call that needs approval but
+states none does not run: the gate refuses it before you are interrupted or a
+reviewer is paid for, and the model is told to resend the same call with a
+reason. The reason is the agent's own claim, shown apart from the arguments.
+A vague, imperfect or seemingly unrelated reason is not itself a safety hazard;
+reviewers judge the actual call's consequences and explicit user restrictions.
 
 Two phrases in your message change the policy for that conversation:
 
@@ -123,20 +131,60 @@ Two phrases in your message change the policy for that conversation:
 | --- | --- |
 | `无需审批` | High-risk calls run without asking. Delete-class calls still ask. |
 | `我已知悉风险，同意给予完整权限，无需任何审批` | Nothing asks, including delete-class calls. |
-| `自动审批` | Approvals go to a reviewer agent instead of you. |
 
-With `自动审批`, a separate reviewer agent (its own system prompt, no tools, no
-shared context) judges each pending call and answers with a JSON verdict. For
-delete-class commands it spawns **three** independent reviewers, each looking at
-the proposal from a different angle (data loss, blast radius, intent), and the
-call only goes through when all three agree. A reviewer that fails, times out or
-answers in the wrong shape counts as a denial.
+The one-row **Request Approval / Auto Approval** button above the main menu's
+version label sets and remembers the default for new conversations. Each terminal
+conversation has its own button above the input (or **Ctrl+A**), and each browser
+conversation has a switch in its controls. The conversation's choice is saved
+with its history and synced between terminal and browser. Writing `自动审批` or
+`自动批准` in a prompt no longer enables automatic review.
+
+With **Auto Approval** enabled, each pending tool call receives **two independent
+safety reviews**. A review round passes when its average safety score is at least
+60/100 and no concrete safety hazard or failed review blocks it. Task relevance
+has zero weight and no ordinary minimum: even a score of 0 does not by itself
+prevent a safe call from running, and doubts about purpose must not lower safety.
+
+Only an extreme, obvious task mismatch can veto on relevance: both reviewers
+must independently mark it, give a relevance score of at most 5/100, and provide
+specific evidence comparing the task and proposed action. One suspicion, weak
+justification, or uncertainty about the task is insufficient.
+
+The policy favors ordinary implementation and verification steps, including
+scoped edits, dependency installation, public network checks and temporary test
+files. Concrete serious hazards and explicit user prohibitions block approval;
+a failed, timed-out or malformed review also prevents automatic execution.
+Every assessment and the safety result are included in the decision, per round
+for delete-class calls.
+
+Each turn captures its literal user request and earlier user messages separately
+from summaries and tool output, so short follow-ups keep their task context.
+Queued messages take effect on the next turn. Denied tool results include the
+reviewed user request and recent user requests for diagnosis.
 
 Automatic approval of delete-class commands is behind a switch in **Settings →
 Extreme-risk auto-approval**, which is **off by default**: while it is off,
-delete-class calls always go to a human even if you wrote `自动审批`. The reviewer
-model defaults to the chat model and can be changed in **Settings → Approval
-reviewer model**.
+delete-class calls always go to a human even in **Auto Approval** mode.
+
+With the switch on, a delete-class call is reviewed **three separate times**.
+Each round is the usual pair of independent reviewers; the rounds run one after
+another and no round is told what an earlier one concluded. Every round is
+judged on its own scores and the call only runs if **all three** approve, so the
+first round that denies or fails ends the sequence: a deletion never gets a
+second chance to pass. The switches are layered, so turning **Auto Approval**
+off still sends every delete-class request to you. The reviewer model defaults
+to the chat model and can be changed in **Settings → Approval reviewer model**.
+
+### Sound alerts
+
+A short cue plays when a turn finishes and when an approval request appears, in
+both the terminal and the web UI, so a long task or a blocking approval is
+noticeable from another window. Approval requests ring twice; finished turns
+ring once. Toggle it in **Settings → Sound alerts** (TUI or web), or set
+`"sound_alerts": false` in `config.json`.
+
+Browsers refuse to start audio before a user gesture, so the web UI stays silent
+until the page has been clicked or a key has been pressed at least once.
 
 ### Browsing other agents' history
 
@@ -160,6 +208,20 @@ A saved transcript opens read-only, because nothing is running for it. Press
 in-process — same model, working directory and token counters — so you can keep
 chatting from the browser with no terminal attached. Turns are written back to
 the same session file.
+
+Use the selectors above a conversation to change its provider, model or
+intensity, then press **Apply to conversation** (pause an active turn first).
+The **⚙ Settings** button in the sidebar edits defaults for new conversations,
+context compression and approval settings. Conversation choices are saved with
+the transcript and do not overwrite the defaults. Configured models and keys
+are shared with the terminal; keys stay on the server.
+
+Context auto-compression starts at 80% of the current model's context window.
+Models default to 1,000,000 tokens (compression at 800,000). Adjust the model
+context window in terminal Settings or select the provider/model in Web Settings
+and enter its capacity in tokens. This is saved per provider/model and applies
+to future turns in active conversations. The legacy fixed
+`context_compress_threshold` setting is no longer used.
 
 ```sh
 # Mount the web UI while the terminal UI runs
@@ -190,29 +252,29 @@ device you are on:
 ```
 Neutrino web UI listening on 0.0.0.0:8765
 Open the address that matches your device:
-  http://100.105.130.25:8765/?t=b2yzzvZyypcbmoDFdpT470qowAOE9Ca4
-  http://192.168.1.211:8765/?t=b2yzzvZyypcbmoDFdpT470qowAOE9Ca4
-  http://127.0.0.1:8765/?t=b2yzzvZyypcbmoDFdpT470qowAOE9Ca4
+  http://100.105.130.25:8765/
+  http://192.168.1.211:8765/
+  http://127.0.0.1:8765/
 ```
 
-**The `?t=…` is an access token, and it is not optional.** This API can read
-every saved conversation and drive an agent that runs shell commands, so exposing
-it unauthenticated would hand anyone on the network a remote shell as your user.
-Binding beyond loopback therefore generates a random token and requires it on
-every `/api/*` request. The browser picks it up from the URL once, stores it, and
-strips it from the address bar; if you open the bare address without it, the page
-asks for the token instead of failing silently.
+Open the address and sign in with your permanent Web password. The initial
+password is **`114514`**. Change it in the browser's **Settings → Web access**
+or in the terminal's **Settings → Web password**. It is saved as a salted hash
+in `~/.neutrino/config.json` and survives restarts.
 
-Some notes that matter in practice:
+For automatic login, open `http://<host>:8765/?pwd=114514`. The page checks the
+password, remembers the login, and removes `pwd` from the address bar. If it is
+incorrect, the password login dialog lets you try again. URL-encode special
+characters in your password.
 
-- **Treat the printed link as a password.** Whoever holds it has your agent.
-- **The token changes on restart** unless you pin it, so the phone forgets it
-  every time. Fix one with `NEUTRINO_WEB_TOKEN=<secret>` (or `--token <secret>`)
-  to keep the link stable across restarts.
-- **`--no-auth` disables the token** for a network you fully trust, such as a
-  WireGuard/Tailscale range only your own devices can join.
-- **Only static files are public** (`/`, `/app.js`, `/style.css`) — that is what
-  makes the token prompt loadable. Everything under `/api/` is guarded.
+The browser remembers your login in an HttpOnly cookie for up to one year,
+including across server restarts. Changing the password signs out other
+browsers; the browser that saves the new password stays signed in. Addresses
+and startup output never contain your password or session credentials.
+
+- **`--no-auth`** explicitly disables password login.
+- Static files and the login endpoint remain public; all conversation and
+  settings APIs require a login, including when accessed through localhost.
 - **Firewall:** the first bind to `0.0.0.0` triggers an allow prompt on Windows
   and macOS. Allow it for private networks, and check that your WLAN is not
   marked "public", where incoming connections are blocked anyway.
@@ -227,6 +289,11 @@ The agent can call the following tools during a conversation:
 - `read_file` — read a text file (capped at 200KB).
 - `write_file` — write content to a file.
 - `list_files` — list directory contents.
+
+Every tool takes an additional `reason` argument: one sentence saying what the
+call is for and why it is needed now. It is what the approval card shows and what
+reviewers check the arguments against, so it is required even for calls that
+usually run without asking.
 
 ## Development
 
@@ -256,6 +323,8 @@ node scripts/test-history-fold.mjs # verify full-history retention, folding and 
 node scripts/test-web-history.mjs  # verify browser history disclosures and streaming state
 node scripts/test-tools.mjs      # verify tool-output folding
 node scripts/test-web.mjs        # verify the web server, API, SSE stream and path-traversal guards
+node scripts/test-web-settings.mjs # verify model switching, persistence, browser controls and defaults
+node scripts/test-web-settings-http.mjs # verify authenticated settings and model changes over HTTP
 ```
 
 ### Rendering model

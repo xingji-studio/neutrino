@@ -93,6 +93,18 @@ export class Renderer {
     this.draw(this.lastBuf, all);
   }
 
+  /**
+   * Ring the terminal bell.
+   *
+   * Written straight to the stream rather than into a frame: BEL has no visual
+   * effect, so it cannot desync the diffed rows, and it must never end up in
+   * `lastBuf` where repaint() would replay it.
+   */
+  bell(times = 1): void {
+    const count = Math.max(1, Math.trunc(times) || 1);
+    this.write("\x07".repeat(count));
+  }
+
   private draw(buf: Buffer, forceRows: readonly number[]): void {
     const w = buf.width;
     const h = buf.height;

@@ -13,7 +13,9 @@
 
 import {
   findModel,
+  contextCompressionThreshold,
   loadConfig,
+  normalizeApprovalMode,
   loadModels,
   loadPrompt,
   saveSession,
@@ -21,6 +23,9 @@ import {
   type SessionData,
   type SessionMessage,
   type TokenUsage,
+  type ResolvedModelSelection,
+  type ModelSelection,
+  type ApprovalMode,
 } from "../config.js";
 import {
   COMPACT_KEEP,
@@ -35,15 +40,18 @@ import {
 import { LLMClient, describeError } from "../llm/client.js";
 import { executeTool, getToolDefinitions } from "../llm/tools.js";
 import { assessToolCall, type RiskAssessment } from "../llm/risk.js";
-import { ApprovalGate, type ApprovalDecision } from "../llm/approval.js";
+import { ApprovalGate, captureApprovalContext, describeApprovalIntent, type ApprovalDecision, type ApprovalContext } from "../llm/approval.js";
 import { SessionCheckpoint } from "../persistence.js";
 import { writeCrashLog } from "../terminal/restore.js";
 import {
   hub,
+  liveApprovalDetails,
   type LiveAgent,
   type LiveMeta,
   type LiveSnapshot,
   type LiveWireMessage,
+  type ModelChangeResult,
+  type LiveReviewProgress,
 } from "./hub.js";
 
 /** Same in-memory shape the TUI uses. */
@@ -97,9 +105,7 @@ export function resolveModel(
 ): { ok: true; model: ModelInfo } | { ok: false; error: string } {
   const providers = loadModels().providers ?? [];
   const scoped = providers.find((p) => p.name === providerName);
-  const model =
-    scoped?.models?.find((m) => m.name === modelName) ??
-    providers.flatMap((p) => p.models ?? []).find((m) => m.name === modelName);
+  const model = scoped?.models?.find((m) => m.name === modelName);
   if (!model) {
     return { ok: false, error: `model "${modelName}" is not configured any more` };
   }
@@ -110,24 +116,26 @@ export function resolveModel(
 }
 
 /** Build a web session from a saved transcript, or explain why we cannot. */
-export function resumeSession(source: SessionData): ResumeOutcome {
-  const resolved = resolveModel(source.model, source.provider);
+export function resumeSession(source: SessionData, selection?: ModelSelection): ResumeOutcome {
+  const updated = selection ? { ...source, ...selection } : source;
+  const resolved = resolveModel(updated.model, updated.provider);
   if (!resolved.ok) return resolved;
-  return { ok: true, session: new WebSession(source, resolved.model) };
+  return { ok: true, session: new WebSession(updated, resolved.model) };
 }
 
 export class WebSession implements LiveAgent {
   key: string | null = null;
 
-  private readonly model: ModelInfo;
-  private readonly provider: string;
-  private readonly intensity: string;
+  private model: ModelInfo;
+  private provider: string;
+  private intensity: string;
   private readonly dir: string;
   private readonly tokens: TokenUsage;
 
   private messages: Msg[];
   private sessionId: string;
   private busy = false;
+  private approvalMode: ApprovalMode;
   private paused = false;
   private queued: string | null = null;
   private compressing = false;
@@ -146,15 +154,17 @@ export class WebSession implements LiveAgent {
   /** Non-null while a tool call waits for the browser to answer. */
   private pendingApproval: {
     tool: string;
+    args: Record<string, unknown>;
     risk: RiskAssessment;
-    resolve(approved: boolean): void;
+    resolve(approved: boolean | null): void;
   } | null = null;
 
   /** Reviewer count while an automated review runs, null otherwise. */
-  private reviewing: number | null = null;
+  private reviewing: LiveReviewProgress | null = null;
 
   constructor(source: SessionData, model: ModelInfo) {
     this.model = model;
+    this.approvalMode = normalizeApprovalMode(source.approval_mode ?? loadConfig().approval_mode);
     this.provider = source.provider;
     this.intensity = source.intensity;
     this.dir = source.cwd;
@@ -171,6 +181,7 @@ export class WebSession implements LiveAgent {
   start(): string {
     this.checkpoint.register();
     this.key = hub.register(this);
+    this.save();
     this.touch();
     this.publishLive();
     return this.key;
@@ -198,6 +209,19 @@ export class WebSession implements LiveAgent {
     return this.dir;
   }
 
+  liveConfigure(selection: ResolvedModelSelection): ModelChangeResult {
+    if (this.disposed) return { ok: false, error: "this session has ended" };
+    if (this.busy || this.pendingApproval) {
+      return { ok: false, error: "pause the current turn before changing models" };
+    }
+    this.model = { ...selection.model };
+    this.provider = selection.provider;
+    this.intensity = selection.intensity;
+    this.save();
+    this.publishLive();
+    return { ok: true };
+  }
+
   liveMeta(): LiveMeta {
     return {
       sessionId: this.sessionId,
@@ -205,6 +229,7 @@ export class WebSession implements LiveAgent {
       provider: this.provider,
       model: this.model.name,
       intensity: this.intensity,
+      approvalMode: this.approvalMode,
       busy: this.busy,
       paused: this.paused,
       queued: this.queued,
@@ -212,7 +237,7 @@ export class WebSession implements LiveAgent {
       saveError: this.saveError,
       tokens: { prompt: this.tokens.prompt, completion: this.tokens.completion },
       approval: this.pendingApproval
-        ? { tool: this.pendingApproval.tool, level: this.pendingApproval.risk.level }
+        ? liveApprovalDetails(this.pendingApproval.tool, this.pendingApproval.args, this.pendingApproval.risk, this.dir)
         : null,
       reviewing: this.reviewing,
     };
@@ -280,6 +305,19 @@ export class WebSession implements LiveAgent {
     return true;
   }
 
+  liveSetApprovalMode(mode: ApprovalMode): void {
+    if (this.approvalMode === mode) return;
+    this.approvalMode = mode;
+    const pending = this.pendingApproval;
+    if (pending) {
+      this.pendingApproval = null;
+      pending.resolve(null);
+    }
+    this.touch();
+    this.save();
+    this.publishLive();
+  }
+
   // ---- turn driving ----------------------------------------------------
 
   private send(text: string): void {
@@ -306,6 +344,8 @@ export class WebSession implements LiveAgent {
   }
 
   private startTurn(): void {
+    const turnMessages = this.messages.slice();
+    const approvalContext = captureApprovalContext(turnMessages);
     this.busy = true;
     const token = ++this.turnToken;
     this.streamingContent = "";
@@ -313,7 +353,7 @@ export class WebSession implements LiveAgent {
     void (async () => {
       await this.autoCompress(token);
       if (token !== this.turnToken || this.paused) return;
-      await this.agentLoop(this.buildApiMessages(), token);
+      await this.agentLoop(this.buildApiMessages(turnMessages), token, approvalContext);
     })().catch((err) => {
       if (token === this.turnToken) this.failTurn(err);
     });
@@ -332,9 +372,9 @@ export class WebSession implements LiveAgent {
     }
   }
 
-  private buildApiMessages(): ApiMessage[] {
+  private buildApiMessages(messages = this.messages): ApiMessage[] {
     const api: ApiMessage[] = [{ role: "system", content: loadPrompt() }];
-    for (const m of modelHistory(this.messages, this.context)) {
+    for (const m of modelHistory(messages, this.context)) {
       if (m.role === "user" || m.role === "assistant") {
         api.push({ role: m.role, content: m.content });
       } else if (m.role === "summary") {
@@ -344,7 +384,7 @@ export class WebSession implements LiveAgent {
     return api;
   }
 
-  private async agentLoop(apiMessages: ApiMessage[], token: number): Promise<void> {
+  private async agentLoop(apiMessages: ApiMessage[], token: number, approvalContext: ApprovalContext): Promise<void> {
     const tools = getToolDefinitions();
     try {
       for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -390,12 +430,20 @@ export class WebSession implements LiveAgent {
           this.save();
           this.publishLive();
 
-          const decision = await this.requestApproval(call.name, args);
+          const decision = await this.requestApproval(call.name, args, {
+            ...approvalContext,
+            context: captureApprovalContext(apiMessages).context,
+          });
           if (token !== this.turnToken || this.paused) return;
           if (!decision.approved) {
+            // A malformed request was never shown to anyone, so there is no
+            // verdict to respect and the right move is a corrected retry.
             const denied =
-              `[Not executed: approval denied (${decision.source}): ${decision.reason}] ` +
-              "Do not retry this call unchanged; ask the user how to proceed.";
+              decision.source === "input"
+                ? `[Not executed: ${decision.reason}]`
+                : `[Not executed: approval denied (${decision.source}): ${decision.reason}] ` +
+                  describeApprovalIntent(approvalContext) +
+                  "Do not retry this call unchanged; ask the user how to proceed.";
             toolMsg.result = denied;
             apiMessages.push({ role: "tool", content: denied, tool_call_id: call.id });
             this.save();
@@ -449,24 +497,30 @@ export class WebSession implements LiveAgent {
   private async requestApproval(
     tool: string,
     args: Record<string, unknown>,
+    context = captureApprovalContext(this.messages),
   ): Promise<ApprovalDecision> {
     const risk = assessToolCall(tool, args, this.dir);
     if (!risk) return { approved: true, source: "prompt", reason: "routine call" };
     const gate = new ApprovalGate({
       askHuman: () =>
-        new Promise<boolean>((resolve) => {
-          this.pendingApproval = { tool, risk, resolve };
+        new Promise<boolean | null>((resolve) => {
+          this.pendingApproval = { tool, args, risk, resolve };
           this.publishLive();
         }),
       reviewer: () => this.reviewerModel(),
+      autoApprovalEnabled: () => this.approvalMode === "auto",
       extremeAutoApprovalEnabled: () => loadConfig().auto_approve_extreme_risk === true,
-      context: () => this.reviewerContext(),
       onReview: (info) => {
-        this.reviewing = info ? info.total : null;
+        this.reviewing = info
+          ? {
+            total: info.total, round: info.round ?? 1, rounds: info.rounds ?? 1,
+            request: liveApprovalDetails(tool, args, risk, this.dir),
+          }
+          : null;
         this.publishLive();
       },
     });
-    return gate.decide({ tool, args, cwd: this.dir, prompt: this.currentPrompt(), risk });
+    return gate.decide({ tool, args, cwd: this.dir, ...context, risk });
   }
 
   /** Reviewer model: `approval_model` when set, otherwise the chat model. */
@@ -482,33 +536,10 @@ export class WebSession implements LiveAgent {
     return { model: this.model, provider: this.provider, intensity: this.intensity };
   }
 
-  /** The user message that opened this turn. */
-  private currentPrompt(): string {
-    for (let i = this.messages.length - 1; i >= 0; i--) {
-      const m = this.messages[i];
-      if (m.role === "user") return m.content;
-    }
-    return "";
-  }
-
-  /** Short conversation tail, so the reviewer sees the intent behind the call. */
-  private reviewerContext(): string {
-    return this.messages
-      .slice(-6)
-      .map((m) => {
-        if (m.role === "tool") return `tool ${m.name}: ${m.result.slice(0, 500)}`;
-        if (m.role === "summary") return `summary: ${m.content.slice(0, 500)}`;
-        return `${m.role}: ${m.content.slice(0, 1000)}`;
-      })
-      .join("\n");
-  }
-
   // ---- compression -----------------------------------------------------
 
   private compressThreshold(): number {
-    const raw = loadConfig().context_compress_threshold;
-    const n = typeof raw === "number" ? raw : Number(raw);
-    return Number.isFinite(n) && n > 0 ? n : 0;
+    return contextCompressionThreshold(this.provider, this.model);
   }
 
   private async autoCompress(token: number): Promise<void> {
@@ -595,6 +626,7 @@ export class WebSession implements LiveAgent {
         this.sessionId,
         this.tokens,
         this.context,
+        this.approvalMode,
       );
       this.saveError = null;
       return true;

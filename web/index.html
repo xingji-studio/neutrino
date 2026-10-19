@@ -17,6 +17,7 @@
             <span id="status" class="status">connecting…</span>
           </div>
           <button id="refresh" class="icon-btn" title="Refresh conversations" aria-label="Refresh">⟳</button>
+          <button id="settings-open" class="icon-btn" title="Settings" aria-label="Settings">⚙</button>
         </header>
         <div id="sessions" class="sessions"></div>
       </aside>
@@ -30,6 +31,14 @@
           <div id="controls" class="controls"></div>
         </header>
 
+        <form id="model-picker" class="model-picker hidden" aria-label="Conversation model">
+          <label>Provider<select id="model-provider"></select></label>
+          <label>Model<select id="model-name"></select></label>
+          <label>Thinking intensity<select id="model-intensity"></select></label>
+          <button id="model-apply" class="control" type="submit">Apply to conversation</button>
+          <p id="model-feedback" class="form-feedback" role="status" aria-live="polite"></p>
+        </form>
+
         <section id="messages" class="messages">
           <div class="empty">Choose a conversation from the sidebar to view it.</div>
         </section>
@@ -41,6 +50,37 @@
         </footer>
       </main>
     </div>
+
+    <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
+      <form id="settings-form">
+        <header class="settings-header">
+          <h2 id="settings-title">Settings</h2>
+          <button id="settings-close" class="icon-btn" type="button" aria-label="Close settings">×</button>
+        </header>
+        <div class="settings-fields">
+          <h3>Defaults for new conversations</h3>
+          <label>Provider<select id="default-provider"></select></label>
+          <label>Model<select id="default-model"></select></label>
+          <label>Thinking intensity<select id="default-intensity"></select></label>
+          <h3>Conversation and approvals</h3>
+          <label>Model context window (tokens)<input id="settings-context" type="number" min="1" max="9007199254740991" step="1" required></label>
+          <p id="settings-compress-note" class="settings-note">Auto-compress at 80% of this model's context window. Default: 1,000,000 tokens.</p>
+          <label>Approval reviewer model<select id="settings-reviewer"></select></label>
+          <label class="checkbox-label"><input id="settings-extreme" type="checkbox"> Extreme-risk auto-approval (del class, 3 separate review rounds)</label>
+          <label class="checkbox-label"><input id="settings-sound" type="checkbox"> Sound alerts (turn finished, approval waiting)</label>
+          <p class="settings-note">Safety determines automatic approval; task relevance only blocks unanimously confirmed, extreme mismatches. Delete-class automatic approval also requires this setting.</p>
+          <h3>Web access</h3>
+          <label>New Web password<input id="settings-password" type="password" autocomplete="new-password" maxlength="256" placeholder="Leave blank to keep current password"></label>
+          <label>Confirm password<input id="settings-password-confirm" type="password" autocomplete="new-password" maxlength="256" placeholder="Repeat new password"></label>
+          <p class="settings-note">The password is permanent and survives restarts. Default: 114514. Saving a new password signs out other browsers.</p>
+          <p id="settings-feedback" class="form-feedback" role="status" aria-live="polite"></p>
+        </div>
+        <footer class="settings-actions">
+          <button id="settings-cancel" class="control" type="button">Cancel</button>
+          <button id="settings-save" class="primary" type="submit">Save settings</button>
+        </footer>
+      </form>
+    </dialog>
 
     <script src="app.js" type="module"></script>
   </body>

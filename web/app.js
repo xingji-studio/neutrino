@@ -1,10 +1,13 @@
+import { createSettingsUI } from "./settings.js";
+
 // Neutrino web UI — a dependency-free single page app.
 //
-// It talks to four endpoints:
+// It talks to the server API:
 //   GET  /api/overview                      every saved conversation grouped by cwd
 //   GET  /api/session/:id                   one saved transcript
 //   GET  /api/live/:key/stream              SSE stream of a running conversation
-//   POST /api/live/:key/{pause|resume|message}
+//   POST /api/live/:key/{pause|resume|message|model}
+//   GET/POST /api/settings                  model defaults and conversation settings
 //
 // The sidebar is refreshed on a timer; the open live conversation is pushed
 // over SSE so tokens appear as they are generated.
@@ -14,95 +17,91 @@ const REFRESH_MS = 4000;
 
 // -------------------------------------------------------------------- access
 //
-// The server may require a token. It arrives once in the URL printed by the
-// terminal (`?t=…`) and is then kept in localStorage, because typing a
-// 32-character secret on a phone is not something anyone should have to do.
-// It is stripped from the address bar so that reloading, bookmarking or
-// sharing a screenshot cannot leak it.
-const TOKEN_KEY = "neutrino.token";
+// Login is remembered in an HttpOnly cookie shared by fetch and EventSource.
+// Remove credentials left behind by older versions of the UI.
+try { localStorage.removeItem("neutrino.token"); } catch { /* Storage may be blocked. */ }
+async function loginWithPassword(password) {
+  const response = await fetch("/api/auth/login", {
+    method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || "Could not sign in.");
+}
 
-const token = (() => {
+// Complete URL login before API requests start, so a slow password check cannot
+// flash the login dialog or race the initial conversation/settings requests.
+const initialLogin = (() => {
   const params = new URLSearchParams(location.search);
-  const fromUrl = params.get("t") || params.get("token");
-  if (fromUrl) {
+  const password = params.get("pwd");
+  if (params.has("pwd") || params.has("t") || params.has("token")) {
+    params.delete("pwd");
     params.delete("t");
     params.delete("token");
     const query = params.toString();
     try {
       history.replaceState(null, "", location.pathname + (query ? `?${query}` : "") + location.hash);
-    } catch {
-      // Cosmetic only — a browser that refuses this still works.
-    }
-    try {
-      localStorage.setItem(TOKEN_KEY, fromUrl);
-    } catch {
-      // Storage may be blocked; the token is still in memory for this page.
-    }
-    return fromUrl;
+    } catch { /* Login still works when history updates are unavailable. */ }
   }
-  try {
-    return localStorage.getItem(TOKEN_KEY) || null;
-  } catch {
-    return null;
-  }
+  if (password === null) return Promise.resolve(true);
+  return loginWithPassword(password).then(() => true).catch(error => {
+    showGate(error.message);
+    return false;
+  });
 })();
 
-/** Append the token to a URL, for the cases where a header is impossible. */
-function withToken(path) {
-  if (!token) return path;
-  return `${path}${path.includes("?") ? "&" : "?"}t=${encodeURIComponent(token)}`;
-}
-
-/**
- * fetch() that authenticates.
- *
- * EventSource cannot set headers, so the SSE stream gets the token in its query
- * string; everything else uses a header so it stays out of logs.
- */
 async function apiFetch(path, init = {}) {
-  const headers = new Headers(init.headers || undefined);
-  if (token) headers.set("X-Neutrino-Token", token);
-  const response = await fetch(path, { ...init, headers });
+  if (!await initialLogin) throw new Error("Password login required.");
+  const response = await fetch(path, { ...init, credentials: "same-origin" });
   if (response.status === 401) {
     showGate();
-    throw new Error("HTTP 401 (access token required)");
+    throw new Error("Password login required.");
   }
   return response;
 }
 
 let gateShown = false;
 
-/** Ask for the token instead of leaving a blank page behind a 401. */
-function showGate() {
+function showGate(message = "") {
   if (gateShown) return;
   gateShown = true;
   closeStream();
   setStatus("locked", "offline");
+  document.getElementById("settings-dialog").close();
 
-  const gate = document.createElement("div");
+  // A modal dialog stays above streaming repaints and traps keyboard focus.
+  const gate = document.createElement("dialog");
   gate.className = "gate";
+  gate.setAttribute("aria-labelledby", "login-title");
   gate.innerHTML =
     '<form class="gate-card">' +
-    "<h2>Access token required</h2>" +
-    "<p>Open the URL printed by the terminal — it ends in <code>?t=…</code> — or paste the token below.</p>" +
-    '<input type="password" autocomplete="off" spellcheck="false" placeholder="access token">' +
-    '<button class="primary" type="submit">Unlock</button>' +
+    '<h2 id="login-title">Sign in to Neutrino</h2>' +
+    '<p>Enter your Web password. The default password is 114514.</p>' +
+    '<label for="login-password">Password</label>' +
+    '<input id="login-password" name="password" type="password" autocomplete="current-password" maxlength="256" required autofocus>' +
+    '<p class="form-feedback error" role="alert"></p>' +
+    '<button class="primary" type="submit">Sign in</button>' +
     "</form>";
-
-  gate.querySelector("form").addEventListener("submit", (event) => {
+  gate.querySelector(".form-feedback").textContent = message;
+  gate.addEventListener("cancel", event => event.preventDefault());
+  gate.querySelector("form").addEventListener("submit", async event => {
     event.preventDefault();
-    const value = gate.querySelector("input").value.trim();
-    if (!value) return;
+    const input = gate.querySelector("input");
+    const button = gate.querySelector("button");
+    const feedback = gate.querySelector(".form-feedback");
+    button.disabled = true;
+    feedback.textContent = "";
     try {
-      localStorage.setItem(TOKEN_KEY, value);
-    } catch {
-      // Nothing we can do; the reload will simply ask again.
-    }
-    location.reload();
+      await loginWithPassword(input.value);
+      location.reload();
+    } catch (error) {
+      feedback.textContent = error.message;
+      input.focus();
+      input.select();
+    } finally { button.disabled = false; }
   });
-
   document.body.appendChild(gate);
-  gate.querySelector("input").focus();
+  gate.showModal();
 }
 
 const el = {
@@ -131,6 +130,94 @@ const state = {
   openTools: new Set(),
   openContext: null,
 };
+
+const preferences = createSettingsUI({
+  apiFetch,
+  async applyModel(selection) {
+    const current = state.selection;
+    if (!current) throw new Error("Select a conversation first.");
+    if (current.kind === "file") {
+      await continueSession(current.id, selection);
+      return;
+    }
+    const response = await apiFetch(`/api/live/${encodeURIComponent(current.key)}/model`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(selection),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+    if (state.selection?.kind === "live" && state.selection.key === current.key) {
+      state.snapshot = body.snapshot;
+      renderLive();
+    }
+  },
+});
+
+// ------------------------------------------------------------------- sounds
+//
+// A turn that ends while the tab is in the background is invisible, so finished
+// turns and waiting approvals each get a short motif. Browsers refuse to start
+// audio without a user gesture, so the context is created on the first
+// interaction and reused; before that a cue is skipped rather than queued.
+
+let audioContext = null;
+
+function unlockAudio() {
+  try {
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    if (!Ctor) return;
+    if (!audioContext) audioContext = new Ctor();
+    if (audioContext.state === "suspended") audioContext.resume().catch(() => {});
+  } catch {
+    // No audio available (blocked, unsupported, mocked): stay silent.
+    audioContext = null;
+  }
+}
+
+// Feature-detected: some embedders (and the test harness) expose no events.
+if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+  document.addEventListener("pointerdown", unlockAudio, true);
+  document.addEventListener("keydown", unlockAudio, true);
+}
+
+const SOUND_MOTIFS = {
+  // Turn finished: two short rising notes.
+  turn: [[660, 0], [988, 0.13]],
+  // Approval waiting: three insistent notes, because this blocks the agent.
+  approval: [[784, 0], [587, 0.16], [784, 0.32]],
+};
+
+function chime(kind) {
+  if (!preferences.soundAlerts()) return;
+  unlockAudio();
+  if (!audioContext || audioContext.state === "closed") return;
+  const start = audioContext.currentTime + 0.01;
+  for (const [frequency, offset] of SOUND_MOTIFS[kind] || SOUND_MOTIFS.turn) {
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    oscillator.type = "sine";
+    oscillator.frequency.value = frequency;
+    const at = start + offset;
+    gain.gain.setValueAtTime(0.0001, at);
+    gain.gain.exponentialRampToValueAtTime(0.16, at + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.13);
+    oscillator.connect(gain);
+    gain.connect(audioContext.destination);
+    oscillator.start(at);
+    oscillator.stop(at + 0.15);
+  }
+}
+
+/**
+ * Cues fire on transitions, not on every frame: the stream re-sends a snapshot
+ * on every update, so comparing against the previous one keeps this from
+ * turning into a metronome. The first frame is skipped because it describes a
+ * state the page has just loaded.
+ */
+function announce(previous, next) {
+  if (!previous || previous.key !== next.key) return;
+  if (!previous.approval && next.approval) chime("approval");
+  else if (previous.busy && !next.busy && !next.approval) chime("turn");
+}
 
 // ------------------------------------------------------------------ helpers
 
@@ -210,12 +297,14 @@ async function loadOverview(options = {}) {
   try {
     const response = await apiFetch("/api/overview", { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    state.overview = await response.json();
+    const overview = await response.json();
+    if (gateShown) return;
+    state.overview = overview;
     setStatus(state.selection?.kind === "live" ? "live" : "online", state.selection?.kind === "live" ? "live" : "online");
     renderSidebar();
     syncSelection();
   } catch (error) {
-    setStatus("offline", "offline");
+    if (!gateShown) setStatus("offline", "offline");
     if (!options.silent) console.error(error);
   }
 }
@@ -344,6 +433,7 @@ function resetMessagePane(text) {
 }
 
 async function selectLive(key) {
+  preferences.clear();
   closeStream();
   state.selection = { kind: "live", key };
   state.snapshot = null;
@@ -361,7 +451,7 @@ async function selectLive(key) {
 
 function openStream(key) {
   closeStream();
-  const source = new EventSource(withToken(`/api/live/${encodeURIComponent(key)}/stream`));
+  const source = new EventSource(`/api/live/${encodeURIComponent(key)}/stream`);
   state.eventSource = source;
 
   source.addEventListener("snapshot", (event) => {
@@ -371,8 +461,11 @@ function openStream(key) {
     } catch {
       return;
     }
+    if (gateShown) return;
+    const previous = state.snapshot;
     state.snapshot = snapshot;
     if (snapshot.sessionId) state.lastSessionId = snapshot.sessionId;
+    announce(previous, snapshot);
     setStatus("live", "live");
     renderLive();
   });
@@ -397,6 +490,7 @@ function closeStream() {
 }
 
 async function selectFile(id) {
+  preferences.clear();
   closeStream();
   state.selection = { kind: "file", id };
   state.snapshot = null;
@@ -426,6 +520,7 @@ function renderFile(data) {
   const messages = Array.isArray(data.messages) ? data.messages : [];
   el.title.textContent = firstUserMessage(messages) || "Conversation";
   el.sub.textContent = [data.cwd, data.model, data.provider].filter(Boolean).join(" · ");
+  preferences.showConversation(data, `file:${data.id}`);
   renderMessageList(messages, null, { readOnly: true, context: data.context });
   renderFileControls(data);
 }
@@ -459,12 +554,18 @@ function renderFileControls(data) {
     }
   });
   el.controls.appendChild(button);
+  renderApprovalModeControl(data.approval_mode, async (mode) => {
+    const key = await continueSession(data.id);
+    await changeApprovalMode(key, mode);
+  });
 }
 
 /** Attach to a resumed conversation, creating it server-side when needed. */
-async function continueSession(id) {
+async function continueSession(id, selection = preferences.selectionForFile(id)) {
   const response = await apiFetch(`/api/session/${encodeURIComponent(id)}/continue`, {
     method: "POST",
+    headers: selection ? { "Content-Type": "application/json" } : undefined,
+    body: selection ? JSON.stringify({ selection }) : undefined,
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
@@ -481,8 +582,77 @@ function setComposerMode(mode) {
 }
 
 function hideComposer() {
-  hideComposer();
+  preferences.clear();
+  el.composer.classList.add("hidden");
   renderApproval(null);
+}
+
+function renderApprovalDetails(request, fallbackCwd = "") {
+  const details = document.createElement("div");
+  details.className = "approval-details";
+  const tool = document.createElement("div");
+  tool.className = "approval-tool";
+  tool.textContent = request.tool || "Tool call";
+  details.appendChild(tool);
+
+  const cwd = request.cwd || fallbackCwd;
+  if (cwd) {
+    const location = document.createElement("div");
+    location.className = "approval-location";
+    location.textContent = `Working directory: ${cwd}`;
+    details.appendChild(location);
+  }
+
+  const args = request.arguments;
+  // `reason` is the agent's own justification for asking. It gets its own line so
+  // the command block below stays exactly what would run.
+  const stated = args && typeof args.reason === "string" ? args.reason.trim() : "";
+  const callArgs = args
+    ? Object.fromEntries(Object.entries(args).filter(([name]) => name !== "reason"))
+    : null;
+  const command = callArgs && typeof callArgs.command === "string" ? callArgs.command : null;
+  const code = document.createElement("pre");
+  code.className = "approval-code";
+  // Literal text preserves the complete command and prevents tool arguments
+  // from becoming markup. Risk summaries may be shortened; arguments are not.
+  code.textContent = command !== null ? command
+    : callArgs ? JSON.stringify(callArgs, null, 2) : request.summary || "Command details unavailable.";
+  details.appendChild(code);
+
+  if (stated) {
+    const why = document.createElement("div");
+    why.className = "approval-why";
+    const label = document.createElement("strong");
+    label.textContent = "Why: ";
+    const claim = document.createElement("span");
+    claim.textContent = stated;
+    why.append(label, claim);
+    details.appendChild(why);
+  }
+
+  if (command !== null && Object.keys(callArgs).some(name => name !== "command")) {
+    const argumentsBox = document.createElement("details");
+    argumentsBox.className = "approval-arguments";
+    const label = document.createElement("summary");
+    label.textContent = "All arguments";
+    const parameters = document.createElement("pre");
+    parameters.className = "approval-code";
+    parameters.textContent = JSON.stringify(callArgs, null, 2);
+    argumentsBox.append(label, parameters);
+    details.appendChild(argumentsBox);
+  }
+
+  if (Array.isArray(request.reasons) && request.reasons.length) {
+    const reasons = document.createElement("ul");
+    reasons.className = "approval-reasons";
+    for (const reason of request.reasons) {
+      const item = document.createElement("li");
+      item.textContent = reason;
+      reasons.appendChild(item);
+    }
+    details.appendChild(reasons);
+  }
+  return details;
 }
 
 function renderApproval(snapshot) {
@@ -490,8 +660,8 @@ function renderApproval(snapshot) {
   if (!pending) {
     // An automated review runs before a card exists, so without this the tab
     // just looks stuck for however long the reviewers take.
-    const reviewers = snapshot && snapshot.reviewing;
-    if (reviewers) {
+    const review = snapshot && snapshot.reviewing;
+    if (review) {
       el.approval.className = "approval high";
       const head = document.createElement("div");
       head.className = "approval-head";
@@ -499,9 +669,16 @@ function renderApproval(snapshot) {
       title.textContent = "Independent review";
       const note = document.createElement("span");
       note.className = "approval-risk";
-      note.textContent = `${reviewers} reviewer${reviewers > 1 ? "s" : ""}`;
+      // Delete-class calls report which of the three separate rounds is running.
+      const rounds = review.rounds || 1;
+      const which = rounds > 1 ? `round ${review.round || 1} of ${rounds}, ` : "";
+      note.textContent = `${which}${review.total} reviewer${review.total > 1 ? "s" : ""}`;
       head.append(title, note);
-      el.approval.replaceChildren(head);
+      if (review.request) {
+        el.approval.replaceChildren(head, renderApprovalDetails(review.request, snapshot.cwd));
+      } else {
+        el.approval.replaceChildren(head);
+      }
       return;
     }
     el.approval.classList.add("hidden");
@@ -520,9 +697,7 @@ function renderApproval(snapshot) {
   risk.textContent = extreme ? "EXTREME RISK" : "HIGH RISK";
   head.append(title, risk);
 
-  const tool = document.createElement("div");
-  tool.className = "approval-tool";
-  tool.textContent = pending.tool;
+  const details = renderApprovalDetails(pending, snapshot.cwd);
 
   const actions = document.createElement("div");
   actions.className = "approval-actions";
@@ -536,7 +711,7 @@ function renderApproval(snapshot) {
   deny.addEventListener("click", () => decideApproval(false));
   actions.append(approve, deny);
 
-  el.approval.replaceChildren(head, tool, actions);
+  el.approval.replaceChildren(head, details, actions);
 }
 
 function decideApproval(approved) {
@@ -550,13 +725,53 @@ function renderLive() {
   if (!snapshot) return;
   el.title.textContent = snapshot.title || "New conversation";
   el.sub.textContent = [snapshot.cwd, snapshot.model, snapshot.provider].filter(Boolean).join(" · ");
+  preferences.showConversation(snapshot, `live:${snapshot.key}`);
   renderControls(snapshot);
   renderApproval(snapshot);
   renderMessageList(snapshot.messages ?? [], snapshot.streamingContent, { readOnly: false, context: snapshot.context });
 }
 
+async function changeApprovalMode(key, mode) {
+  const response = await apiFetch(`/api/live/${encodeURIComponent(key)}/approval-mode`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode }),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+  if (state.selection?.kind === "live" && state.selection.key === key) {
+    state.snapshot = body.snapshot;
+    renderLive();
+  }
+}
+
+function renderApprovalModeControl(mode, change) {
+  const automatic = mode === "auto";
+  const button = document.createElement("button");
+  button.className = "control";
+  button.type = "button";
+  button.setAttribute("role", "switch");
+  button.setAttribute("aria-label", "Auto Approval");
+  button.setAttribute("aria-checked", String(automatic));
+  button.textContent = automatic ? "Auto Approval" : "Request Approval";
+  button.title = "Switch between requesting approval and automatic review";
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      await change(automatic ? "request" : "auto");
+    } catch (error) {
+      el.sub.textContent = `Could not change approval mode: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  });
+  el.controls.appendChild(button);
+}
+
 function renderControls(snapshot) {
   el.controls.innerHTML = "";
+  renderApprovalModeControl(snapshot.approvalMode, mode =>
+    changeApprovalMode(snapshot.key, mode));
 
   const badge = document.createElement("span");
   const mode = snapshot.paused ? "paused" : snapshot.busy ? "busy" : "idle";
@@ -779,5 +994,6 @@ el.input.addEventListener("keydown", (event) => {
 
 window.addEventListener("beforeunload", closeStream);
 
+preferences.load().catch(error => console.error(error));
 loadOverview();
 setInterval(() => loadOverview({ silent: true }), REFRESH_MS);

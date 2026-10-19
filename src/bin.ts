@@ -40,19 +40,17 @@ Options:
       --host <host>   Interface to bind. Default: 127.0.0.1
       --lan           Short for --host ${WILDCARD_HOST}: reachable from other
                       devices on your LAN or VPN.
-      --token <text>  Access token for /api/*. Generated when exposed.
-      --no-auth       Serve without a token. Only on a network you trust.
+      --no-auth       Serve without password login.
       --web-port <n>  Also mount the web UI while the TUI runs.
   -h, --help          Show this help.
 
 Environment:
   NEUTRINO_WEB_PORT   Same as --web-port for the TUI, or the port in web mode.
   NEUTRINO_WEB_HOST   Same as --host.
-  NEUTRINO_WEB_TOKEN  Same as --token, and keeps the link stable across restarts.
 
 The web UI can read every saved conversation and drive an agent with shell
-access, so it binds to loopback by default. Binding anywhere else requires a
-token unless you pass --no-auth; the addresses to open are printed at startup.
+access, so it binds to loopback by default. Log in with the permanent password
+(default: 114514). Change it in Settings. --no-auth disables password login.
 `,
   );
 }
@@ -71,7 +69,6 @@ interface Options {
   port: number | null;
   host?: string;
   lan: boolean;
-  token?: string;
   noAuth: boolean;
 }
 
@@ -95,10 +92,6 @@ function parseArgs(argv: string[]): Options {
       options.host = arg.slice("--host=".length);
     } else if (arg === "--lan") {
       options.lan = true;
-    } else if (arg === "--token") {
-      options.token = requireValue(argv, ++i, "--token");
-    } else if (arg.startsWith("--token=")) {
-      options.token = arg.slice("--token=".length);
     } else if (arg === "--no-auth") {
       options.noAuth = true;
     } else if (arg === "--help" || arg === "-h") {
@@ -111,21 +104,7 @@ function parseArgs(argv: string[]): Options {
   if (options.lan && options.host) {
     throw new Error("use either --lan or --host, not both");
   }
-  if (options.noAuth && options.token) {
-    throw new Error("use either --token or --no-auth, not both");
-  }
   return options;
-}
-
-/**
- * Turn the flags into the server's `token` option: a string to enforce one,
- * `null` to disable authentication, `undefined` to let the server decide.
- */
-function resolveTokenOption(options: Options): string | null | undefined {
-  if (options.noAuth) return null;
-  const raw = options.token ?? process.env.NEUTRINO_WEB_TOKEN;
-  const trimmed = raw?.trim();
-  return trimmed ? trimmed : undefined;
 }
 
 /** Print every address a client can open, plus what it takes to open one. */
@@ -143,14 +122,10 @@ function reportAccess(handle: WebServerHandle): void {
       "note: no reachable network address found, so only this machine can connect.\n",
     );
   }
-  if (handle.token) {
-    // The token is in the URL because browsers cannot send headers on the SSE
-    // stream, and because typing a 32-character secret on a phone is awful.
-    process.stdout.write(
-      "These links carry the access token — anyone who has one can drive the agent.\n",
-    );
-  } else if (wildcard) {
-    process.stdout.write("WARNING: no access token; anyone who can reach this port can drive the agent.\n");
+  if (handle.authRequired) {
+    process.stdout.write("Sign in with your permanent Web password (default: 114514). Change it in Settings.\n");
+  } else {
+    process.stdout.write("Password login is disabled.\n");
   }
 }
 
@@ -168,14 +143,14 @@ try {
 installCrashGuard();
 
 const host = options.lan ? WILDCARD_HOST : options.host || process.env.NEUTRINO_WEB_HOST || undefined;
-const token = resolveTokenOption(options);
+const auth = !options.noAuth;
 
 if (options.mode === "web") {
   // Headless: serve the saved history (and any live sessions in this process,
   // which for a standalone server is none).
   const port = options.port ?? envPort() ?? DEFAULT_WEB_PORT;
   try {
-    const handle = await startWebServer({ port, host, token });
+    const handle = await startWebServer({ port, host, auth });
     reportAccess(handle);
     process.stdout.write("Serving saved conversations. Press Ctrl+C to stop.\n");
     const shutdown = () => {
@@ -198,7 +173,7 @@ if (options.mode === "web") {
   const webPort = options.port ?? envPort();
   if (webPort !== null) {
     try {
-      const handle = await app.enableWeb(webPort, host, token);
+      const handle = await app.enableWeb(webPort, host, auth);
       reportAccess(handle);
     } catch (err) {
       process.stderr.write(`neutrino: failed to start web server: ${err instanceof Error ? err.message : String(err)}\n`);

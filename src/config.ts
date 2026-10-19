@@ -19,6 +19,43 @@ export interface ModelInfo {
   url: string;
   api_key: string;
   supports_streaming: boolean;
+  /** Context capacity in tokens; omitted models use 1M. */
+  context_window?: number;
+}
+
+export const DEFAULT_CONTEXT_WINDOW = 1_000_000;
+export const CONTEXT_COMPRESSION_RATIO = 0.8;
+export const CONTEXT_WINDOW_OPTIONS = [32_000, 64_000, 128_000, 200_000, 256_000, 512_000, 1_000_000, 2_000_000, 4_000_000];
+
+export function isContextWindow(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+export function contextWindow(value: unknown): number {
+  return isContextWindow(value) ? value : DEFAULT_CONTEXT_WINDOW;
+}
+
+/** Reload the exact provider/model so settings also apply to active chats. */
+export function modelContextWindow(provider: string, model: ModelInfo): number {
+  const saved = loadModels().providers.find((p) => p.name === provider)?.models.find((m) => m.name === model.name);
+  return contextWindow((saved ?? model).context_window);
+}
+
+export function contextCompressionThreshold(provider: string, model: ModelInfo): number {
+  return Math.max(1, Math.floor(modelContextWindow(provider, model) * CONTEXT_COMPRESSION_RATIO));
+}
+
+export interface ModelSelection {
+  provider: string;
+  model: string;
+  intensity: string;
+}
+
+/** Resolved only on the server; credentials must never be serialized to clients. */
+export interface ResolvedModelSelection {
+  provider: string;
+  model: ModelInfo;
+  intensity: string;
 }
 
 export interface Provider {
@@ -59,14 +96,16 @@ export const DEFAULT_CONFIG: Record<string, unknown> = {
   language: "en",
   theme: "default",
   default_intensity: "High",
-  // Delete-class commands still need a human unless this is on AND the prompt
-  // says 自动审批. Off by default.
+  // Default for new conversations; each conversation can override it.
+  approval_mode: "request",
+  // Delete-class commands need a human unless this and Auto Approval are on.
   auto_approve_extreme_risk: false,
+  // Audible cue when a turn ends or an approval request is waiting.
+  sound_alerts: true,
   // Model that reviews approval requests. Empty = same model as the chat.
   approval_model: "",
-  // Estimated prompt tokens above which the conversation is auto-compressed.
-  // 0 disables auto-compression.
-  context_compress_threshold: 32000,
+  // Initialized as a salted hash of the default Web password on first use.
+  web_password_hash: "",
 };
 
 export const INTENSITY_LEVELS = ["Low", "Medium", "High", "Max", "Ultra"];
@@ -78,19 +117,6 @@ export const INTENSITY_PARAMS: Record<string, { temperature: number; top_p: numb
   Max: { temperature: 1.0, top_p: 1.0 },
   Ultra: { temperature: 1.5, top_p: 1.0 },
 };
-
-/**
- * Selectable auto-compression thresholds, in estimated prompt tokens.
- * `0` turns the feature off. Rendered as-is in the settings screen.
- */
-export const COMPRESS_THRESHOLD_OPTIONS: { value: number; label: string }[] = [
-  { value: 0, label: "Off" },
-  { value: 8000, label: "8K tokens" },
-  { value: 16000, label: "16K tokens" },
-  { value: 32000, label: "32K tokens" },
-  { value: 64000, label: "64K tokens" },
-  { value: 128000, label: "128K tokens" },
-];
 
 export interface SessionMeta {
   id: string;
@@ -136,6 +162,17 @@ export interface SessionData {
   tokens?: TokenUsage;
   /** Model context is separate from messages, which always retain the originals. */
   context?: ConversationContext;
+  approval_mode?: ApprovalMode;
+}
+
+export type ApprovalMode = "request" | "auto";
+
+export function normalizeApprovalMode(value: unknown): ApprovalMode {
+  // Config files are hand-edited: "Auto" or " autO " must not silently
+  // downgrade the conversation to a prompt on every tool call.
+  return typeof value === "string" && value.trim().toLowerCase() === "auto"
+    ? "auto"
+    : "request";
 }
 
 export function ensureDirs(): void {
@@ -144,14 +181,15 @@ export function ensureDirs(): void {
 }
 
 export function loadModels(): ModelsData {
-  ensureDirs();
-  if (!fs.existsSync(MODEL_FILE)) {
-    saveModels(DEFAULT_MODELS);
-    return DEFAULT_MODELS;
-  }
   try {
+    ensureDirs();
+    if (!fs.existsSync(MODEL_FILE)) {
+      saveModels(DEFAULT_MODELS);
+      return DEFAULT_MODELS;
+    }
     return JSON.parse(fs.readFileSync(MODEL_FILE, "utf-8")) as ModelsData;
   } catch {
+    // Same reasoning as loadConfig: this sits on the approval path.
     return DEFAULT_MODELS;
   }
 }
@@ -162,14 +200,16 @@ export function saveModels(data: ModelsData): void {
 }
 
 export function loadConfig(): Record<string, unknown> {
-  ensureDirs();
-  if (!fs.existsSync(CONFIG_FILE)) {
-    saveConfig(DEFAULT_CONFIG);
-    return { ...DEFAULT_CONFIG };
-  }
   try {
+    ensureDirs();
+    if (!fs.existsSync(CONFIG_FILE)) {
+      saveConfig(DEFAULT_CONFIG);
+      return { ...DEFAULT_CONFIG };
+    }
     return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf-8")) as Record<string, unknown>;
   } catch {
+    // The approval gate reads this on every tool call; a directory we cannot
+    // create or a file we cannot parse must fall back, not throw.
     return { ...DEFAULT_CONFIG };
   }
 }
@@ -199,6 +239,21 @@ export function getModelsByProvider(): Record<string, ModelInfo[]> {
   return result;
 }
 
+/** Resolve a provider/model pair exactly, including when names repeat across providers. */
+export function resolveModelSelection(value: unknown, requireKey = true): ResolvedModelSelection {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid model selection");
+  const input = value as Partial<ModelSelection>;
+  if (typeof input.provider !== "string" || typeof input.model !== "string" ||
+      typeof input.intensity !== "string") throw new Error("provider, model and intensity are required");
+  if (!INTENSITY_LEVELS.includes(input.intensity)) throw new Error("invalid thinking intensity");
+  const provider = loadModels().providers.find((p) => p.name === input.provider);
+  if (!provider) throw new Error("unknown provider");
+  const model = provider.models.find((m) => m.name === input.model);
+  if (!model) throw new Error("unknown model for this provider");
+  if (requireKey && !model.api_key?.trim()) throw new Error("this model has no API key configured");
+  return { provider: provider.name, model: { ...model }, intensity: input.intensity };
+}
+
 export function saveSession(
   messages: SessionMessage[],
   modelName: string,
@@ -208,6 +263,7 @@ export function saveSession(
   sessionId?: string,
   tokens?: TokenUsage,
   context?: ConversationContext | null,
+  approvalMode?: ApprovalMode,
 ): string {
   ensureDirs();
   const now = new Date();
@@ -234,6 +290,7 @@ export function saveSession(
     title,
     messages,
     tokens,
+    approval_mode: normalizeApprovalMode(approvalMode ?? existing?.approval_mode),
   };
   const validContext = normalizeContext(context, messages.filter((m) => m.role !== "system").length);
   if (validContext) session.context = validContext;
