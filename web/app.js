@@ -105,6 +105,8 @@ function showGate(message = "") {
 }
 
 const el = {
+  app: document.getElementById("app"),
+  back: document.getElementById("back-to-menu"),
   sessions: document.getElementById("sessions"),
   status: document.getElementById("status"),
   refresh: document.getElementById("refresh"),
@@ -418,11 +420,22 @@ function renderSession(session) {
   item.addEventListener("click", () => {
     if (session.liveKey) selectLive(session.liveKey);
     else if (session.id) selectFile(session.id);
+    else return;
+    setConversationView(true);
   });
   return item;
 }
 
 // ------------------------------------------------------------------- select
+
+// Only explicit navigation changes the mobile pane. Background refreshes and
+// live-to-saved transitions must not take the user away from the menu.
+function setConversationView(open) {
+  el.app.classList.toggle("conversation-open", open);
+  if (!window.matchMedia("(max-width: 760px)").matches) return;
+  if (open) el.back.focus();
+  else (el.sessions.querySelector(".session.selected") || el.refresh).focus();
+}
 
 function resetMessagePane(text) {
   el.messages.innerHTML = "";
@@ -983,6 +996,7 @@ function autosize() {
 // --------------------------------------------------------------------- init
 
 el.refresh.addEventListener("click", () => loadOverview());
+el.back.addEventListener("click", () => setConversationView(false));
 el.send.addEventListener("click", sendMessage);
 el.input.addEventListener("input", autosize);
 el.input.addEventListener("keydown", (event) => {
