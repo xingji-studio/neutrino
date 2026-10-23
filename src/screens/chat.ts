@@ -1254,7 +1254,7 @@ export class ChatScreen extends Screen implements LiveAgent {
       status = "PAUSED — press ESC ESC to resume";
       statusStyle = { fg: C.amber, bold: true };
     } else if (this.busy) {
-      status = "Streaming... press ESC ESC to pause";
+      status = "Streaming... press Ctrl+C or ESC ESC to pause";
       statusStyle = { fg: C.dim };
     }
     if (status && this.approvalToggleY(h) !== 1) buf.centerText(1, status.slice(0, w), statusStyle);
@@ -1310,7 +1310,7 @@ export class ChatScreen extends Screen implements LiveAgent {
     });
 
     const hintY = h - 1;
-    const hints = "Enter send · ESC ESC pause · Ctrl+A approval · Ctrl+B menu · Ctrl+L clear · drag to copy";
+    const hints = "Enter send · Ctrl+C pause · ESC ESC pause · Ctrl+A approval · Ctrl+B menu · Ctrl+L clear · drag to copy";
     const hintW = displayWidth(hints);
     const hintX = Math.max(0, w - 1 - hintW);
     const pathAvail = Math.max(0, hintX - 2);

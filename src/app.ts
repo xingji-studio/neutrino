@@ -20,6 +20,8 @@ import { startWebServer, type WebServerHandle } from "./web/server.js";
 
 const CURSOR_BLINK_MS = 530;
 const TOAST_MS = 1600;
+const INTERRUPT_WINDOW_MS = 1500;
+const EXIT_HINT = "press ctrl+shift+c or press ctrl+c 3 times to exit";
 // How often the whole frame is re-emitted as a safety net, so terminal-side
 // drift (ConPTY reflow, stray scroll) can never leave any row stale for long.
 // Re-emitting the cached frame is a no-op when nothing drifted.
@@ -40,6 +42,9 @@ export class App {
   private toastTimer: NodeJS.Timeout | null = null;
   private repaintTimer: NodeJS.Timeout | null = null;
   private toast = "";
+  private toastPosition: "top" | "bottom" = "bottom";
+  private interruptCount = 0;
+  private lastInterruptTime = 0;
   // Consecutive failed renders. A screen that cannot draw itself is fatal;
   // a single bad frame is not.
   private renderFailures = 0;
@@ -109,7 +114,7 @@ export class App {
     this.renderer.init();
     this.input.start((ev) => this.handleEvent(ev));
     process.stdout.on("resize", this.resizeHandler);
-    process.on("SIGINT", () => this.quit());
+    process.on("SIGINT", () => this.handleInterrupt());
     process.on("SIGTERM", () => this.quit());
     this.sizeTimer = setInterval(() => {
       if (this.syncSize()) this.render();
@@ -200,7 +205,7 @@ export class App {
 
   private drawToast(buf: Buffer): void {
     if (!this.toast) return;
-    const y = buf.height - 1;
+    const y = this.toastPosition === "top" ? 0 : buf.height - 1;
     buf.fillRect(0, y, buf.width, 1, { bg: C.black });
     buf.centerText(y, ` ${this.toast} `, { fg: C.black, bg: C.accent, bold: true });
   }
@@ -235,6 +240,10 @@ export class App {
   }
 
   private dispatchEvent(ev: InputEvent): void {
+    const interrupt = ev.type === "key" && ev.key.ctrl && ev.key.name === "c";
+    if (!interrupt && (ev.type !== "mouse" || ev.event.type === "click" || ev.event.type === "wheel")) {
+      this.interruptCount = 0;
+    }
     if (ev.type === "paste") {
       // Pasted text arrives with its newlines already flattened to spaces, so
       // it is inserted into the input instead of being submitted.
@@ -252,13 +261,8 @@ export class App {
         return;
       }
       if (k.ctrl && k.name === "c") {
-        // Ctrl+C copies the selection when there is one, otherwise it quits —
-        // the usual terminal convention.
-        if (this.state.selection) {
-          this.copySelection();
-          return;
-        }
-        this.quit();
+        if (k.shift) this.quit();
+        else this.handleInterrupt();
         return;
       }
       if (k.name === "escape" && this.state.selection) {
@@ -377,13 +381,23 @@ export class App {
     this.barDrag = null;
   }
 
-  private copySelection(): void {
-    const sel = this.state.selection;
-    if (!sel || !this.lastBuffer) return;
-    const text = selectionText(this.lastBuffer, sel);
-    if (text.trim().length === 0) return;
-    copyToClipboard(text);
-    this.showToast(`Copied ${text.length} char${text.length === 1 ? "" : "s"}`);
+  private handleInterrupt(): void {
+    const now = Date.now();
+    this.interruptCount = now - this.lastInterruptTime <= INTERRUPT_WINDOW_MS
+      ? this.interruptCount + 1 : 1;
+    this.lastInterruptTime = now;
+    if (this.interruptCount >= 3) {
+      this.quit();
+      return;
+    }
+    // A model/settings overlay can sit above the current conversation.
+    const chat = [...this.screens].reverse().find((screen) => screen instanceof ChatScreen);
+    const meta = chat instanceof ChatScreen ? chat.liveMeta() : null;
+    if (chat instanceof ChatScreen && meta?.busy && !meta.paused) {
+      chat.livePause();
+      return;
+    }
+    this.showToast(EXIT_HINT, "top");
   }
 
   // Public so screens can surface transient status (e.g. "reviewing 3/3").
@@ -403,8 +417,9 @@ export class App {
     this.renderer.bell(kind === "approval" ? 2 : 1);
   }
 
-  showToast(text: string): void {
+  showToast(text: string, position: "top" | "bottom" = "bottom"): void {
     this.toast = text;
+    this.toastPosition = position;
     if (this.toastTimer) clearTimeout(this.toastTimer);
     this.toastTimer = setTimeout(() => {
       this.toastTimer = null;

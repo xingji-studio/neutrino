@@ -223,6 +223,23 @@ export class InputReader {
   private finishCsi(): void {
     const s = this.csiBuf;
     const final = s[s.length - 1];
+    // CSI-u (kitty) and xterm modifyOtherKeys preserve Ctrl+Shift separately.
+    const extended = final === "u"
+      ? /^(\d+)(?::[\d:]*)?(?:;(\d+)(?::(\d+))?)?(?:;[\d:]*)?u$/.exec(s)
+      : /^27;(\d+);(\d+)~$/.exec(s);
+    if (extended) {
+      const code = Number(extended[final === "u" ? 1 : 2]);
+      const modifiers = Number(extended[final === "u" ? 2 : 1] ?? 1) - 1;
+      // Ignore key-up reports: releasing C must not count as another press.
+      if (final === "u" && extended[3] === "3") return;
+      if (code < 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return;
+      const char = String.fromCodePoint(code);
+      const special: Record<number, string> = { 13: "return", 9: "tab", 27: "escape", 127: "backspace" };
+      const ctrl = (modifiers & 4) !== 0;
+      this.emitKey(special[code] ?? (ctrl ? char.toLowerCase() : char), ctrl,
+        (modifiers & 2) !== 0, (modifiers & 1) !== 0, char, "\x1b[" + s);
+      return;
+    }
     if (final === "A") this.emitKey("up", false, false, false, "\x1b[A");
     else if (final === "B") this.emitKey("down", false, false, false, "\x1b[B");
     else if (final === "C") this.emitKey("right", false, false, false, "\x1b[C");
@@ -294,6 +311,7 @@ export class InputReader {
     meta: boolean,
     shift: boolean,
     char: string,
+    sequence = char,
   ): void {
     if (!this.handler) return;
     this.handler({
@@ -304,7 +322,7 @@ export class InputReader {
         meta,
         shift,
         char,
-        sequence: char,
+        sequence,
       },
     });
   }

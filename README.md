@@ -62,7 +62,9 @@ Type a message on the start screen and press `Enter` to begin a new chat.
 | `Esc Esc` | Pause / resume streaming |
 | `Esc` | Clear an active selection |
 | `PgUp` / `PgDn` | Scroll chat history |
-| `Ctrl+C` | Copy the selection, or quit if nothing is selected |
+| `Ctrl+C` | Pause the running conversation; otherwise show the exit hint at the top |
+| `Ctrl+C` × 3 | Quit after three consecutive presses, no more than 1.5 seconds apart (another key, paste, click or scroll resets the count) |
+| `Ctrl+Shift+C` | Quit immediately (requires the terminal to forward the shortcut) |
 | `Ctrl+A` | Toggle Request Approval / Auto Approval in a conversation |
 | `Y` | Approve the pending request (while the approval card is up) |
 | `N` / `Esc` | Deny the pending request |

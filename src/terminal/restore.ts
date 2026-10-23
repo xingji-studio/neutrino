@@ -15,6 +15,7 @@ const NEUTRINO_DIR = path.join(os.homedir(), ".neutrino");
  * remaining writes would land on the main screen.
  */
 export const TUI_TEARDOWN =
+  "\x1b[<u\x1b[>4m" + // restore kitty keyboard flags and xterm modified keys
   "\x1b[?2004l" + // bracketed paste off
   "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l" + // mouse tracking off
   "\x1b[?25h" + // cursor visible
@@ -122,7 +123,7 @@ export function installCrashGuard(): void {
   });
 
   // These signals otherwise bypass Node's exit hook, including Ctrl+Break on
-  // Windows. SIGINT/SIGTERM are handled by App.quit (or the web server).
+  // Windows. The app handles SIGINT as an interrupt and SIGTERM as a quit.
   process.on("SIGHUP", () => process.exit(129));
   process.on("SIGBREAK", () => process.exit(149));
 

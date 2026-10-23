@@ -59,6 +59,7 @@ export class Renderer {
     this.write("\x1b[?25l"); // hide cursor
     this.write("\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?1015h"); // mouse tracking (incl. any-event for hover)
     this.write("\x1b[?2004h"); // bracketed paste (so pastes can be told apart from typing)
+    this.write("\x1b[>4;2m\x1b[>1u"); // xterm/kitty modified keys, including Ctrl+Shift+C
   }
 
   dispose(): void {
