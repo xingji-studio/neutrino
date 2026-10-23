@@ -40,7 +40,6 @@ try {
   chat.streamingContent = "partial response";
   chat.turnToken = 7;
   app.state.isThinking = true;
-  app.state.selection = { anchor: { x: 0, y: 0 }, cursor: { x: 4, y: 0 } };
   // Model/settings overlays must not prevent pausing the current chat.
   app.screens.push({ onKey() {} });
   press(app, "\x03");
@@ -63,6 +62,29 @@ try {
   press(app, "\x03");
   assert.equal(app.exits, 1, "the initial pause counts toward the three presses");
 
+  for (const busy of [true, false]) {
+    const { app, chat } = fixture(busy);
+    const selection = { anchor: { x: 0, y: 0 }, cursor: { x: 4, y: 0 } };
+    app.state.selection = selection;
+    app.pressed = true;
+    app.pressStart = selection.anchor;
+    press(app, "\x03\x1b[99;5u\x1b[27;5;99~");
+    app.handleInterrupt();
+    assert.equal(app.exits, undefined, "selected Ctrl+C never exits, even after three presses");
+    assert.equal(chat.busy, busy, "selected Ctrl+C never pauses the conversation");
+    assert.equal(chat.paused, false);
+    assert.equal(chat.saves, undefined);
+    assert.equal(app.toast, "", "selected Ctrl+C never shows a hint");
+    assert.equal(app.state.selection, selection);
+    assert.equal(app.pressed, true, "Ctrl+C must not interrupt an ongoing drag");
+    assert.equal(app.pressStart, selection.anchor);
+    app.state.selection = null;
+    press(app, "\x03\x03");
+    assert.equal(app.exits, undefined, "ignored presses do not count toward exit");
+    press(app, "\x03");
+    assert.equal(app.exits, 1);
+  }
+
   const idle = fixture().app;
   press(idle, "\x03\x03");
   assert.equal(idle.exits, undefined);
@@ -82,6 +104,7 @@ try {
 
   for (const chunks of [["\x1b[99;6u"], ["\x1b[27;6;67~"], ["\x1b[", "99;", "6u"]]) {
     const { app } = fixture(true);
+    app.state.selection = { anchor: { x: 0, y: 0 }, cursor: { x: 4, y: 0 } };
     press(app, ...chunks);
     assert.equal(app.exits, 1, "Ctrl+Shift+C exits immediately, including split reads");
   }
@@ -128,6 +151,14 @@ try {
     const { chat } = fixture(true);
     chat.app = signalApp;
     signalApp.screens = [chat];
+    signalApp.state.selection = { anchor: { x: 0, y: 0 }, cursor: { x: 4, y: 0 } };
+    process.emit("SIGINT");
+    process.emit("SIGINT");
+    process.emit("SIGINT");
+    assert.equal(chat.busy, true, "SIGINT is ignored while text is selected too");
+    assert.equal(signalApp.exits, undefined);
+    assert.equal(signalApp.toast, "");
+    signalApp.state.selection = null;
     process.emit("SIGINT");
     assert.equal(chat.paused, true);
     assert.equal(signalApp.exits, undefined);

@@ -21,6 +21,7 @@ import { startWebServer, type WebServerHandle } from "./web/server.js";
 const CURSOR_BLINK_MS = 530;
 const TOAST_MS = 1600;
 const INTERRUPT_WINDOW_MS = 1500;
+const SELECTION_FRAME_MS = 16;
 const EXIT_HINT = "press ctrl+shift+c or press ctrl+c 3 times to exit";
 // How often the whole frame is re-emitted as a safety net, so terminal-side
 // drift (ConPTY reflow, stray scroll) can never leave any row stale for long.
@@ -51,6 +52,9 @@ export class App {
   // Most recently rendered frame. Kept so a selection can be turned back into
   // text without having to re-run the screen's render.
   private lastBuffer: Buffer | null = null;
+  // Cache the screen without selection so dragging never reflows the history.
+  private contentBuffer: Buffer | null = null;
+  private selectionTimer: NodeJS.Timeout | null = null;
   // Mouse selection bookkeeping. `pressed` is true between a left-button press
   // and its release; `pressStart` is where the press landed, used as the anchor
   // once the pointer starts moving (i.e. once it becomes a drag). A plain click
@@ -148,9 +152,18 @@ export class App {
     this.render();
   }
 
-  render(): void {
+  render(selectionOnly = false): void {
+    if (this.selectionTimer) {
+      clearTimeout(this.selectionTimer);
+      this.selectionTimer = null;
+    }
     try {
-      this.renderFrame();
+      if (selectionOnly && this.contentBuffer
+        && this.contentBuffer.width === this.width && this.contentBuffer.height === this.height) {
+        this.renderBuffer(this.contentBuffer);
+      } else {
+        this.renderFrame();
+      }
       this.renderFailures = 0;
     } catch (err) {
       // Rendering runs from timers and stream callbacks too, so an escaping
@@ -192,15 +205,30 @@ export class App {
 
     const buf = new Buffer(this.width, this.height);
     this.top?.render(buf);
-    this.lastBuffer = buf;
+    this.contentBuffer = buf;
+    this.renderBuffer(buf, this.top?.alwaysRepaintRows() ?? []);
+  }
 
+  private renderBuffer(content: Buffer, forceRows: readonly number[] = []): void {
     // The selection overlay is painted over the finished frame, so it works on
     // every screen (chat log, input box, menus, …) without each having to know
     // about selection at all.
-    if (this.state.selection) applySelection(buf, this.state.selection);
+    let buf = content;
+    if (this.state.selection) {
+      buf = new Buffer(content.width, content.height);
+      buf.cells = content.cells.map((row) => row.map((cell) => ({ ...cell })));
+      applySelection(buf, this.state.selection);
+    }
     this.drawToast(buf);
+    this.lastBuffer = buf;
 
-    this.renderer.render(buf, this.top?.alwaysRepaintRows() ?? []);
+    this.renderer.render(buf, forceRows);
+  }
+
+  private scheduleSelectionRender(): void {
+    if (!this.selectionTimer) {
+      this.selectionTimer = setTimeout(() => this.render(true), SELECTION_FRAME_MS);
+    }
   }
 
   private drawToast(buf: Buffer): void {
@@ -254,6 +282,11 @@ export class App {
     }
     if (ev.type === "key") {
       const k = ev.key;
+      // Leave an active drag/selection untouched by the terminal copy shortcut.
+      if (k.ctrl && k.name === "c" && !k.shift && this.state.selection) {
+        this.interruptCount = 0;
+        return;
+      }
       // Any keystroke ends a pending mouse gesture (in case a release was lost).
       this.resetMouse();
       if (k.ctrl && k.name === "q") {
@@ -338,11 +371,13 @@ export class App {
       }
       if (this.pressed && this.pressStart) {
         const s = this.pressStart;
-        if (ev.x !== s.x || ev.y !== s.y) {
+        const sel = this.state.selection;
+        if ((ev.x !== s.x || ev.y !== s.y || sel)
+          && (!sel || ev.x !== sel.cursor.x || ev.y !== sel.cursor.y)) {
           // The pointer left the press cell, so this is a drag: grow/shrink the
           // selection instead of forwarding a hover to the screen.
           this.state.selection = { anchor: s, cursor: { x: ev.x, y: ev.y } };
-          this.render();
+          this.scheduleSelectionRender();
         }
         return;
       }
@@ -351,6 +386,11 @@ export class App {
     }
 
     if (ev.type === "release") {
+      // A release can arrive before the queued frame (or the final move).
+      if (this.pressed && this.pressStart && this.state.selection) {
+        this.state.selection = { anchor: this.pressStart, cursor: { x: ev.x, y: ev.y } };
+      }
+      if (this.selectionTimer) this.render(true);
       const sel = this.state.selection;
       this.pressed = false;
       this.pressStart = null;
@@ -382,6 +422,10 @@ export class App {
   }
 
   private handleInterrupt(): void {
+    if (this.state.selection) {
+      this.interruptCount = 0;
+      return;
+    }
     const now = Date.now();
     this.interruptCount = now - this.lastInterruptTime <= INTERRUPT_WINDOW_MS
       ? this.interruptCount + 1 : 1;
@@ -508,6 +552,10 @@ export class App {
     if (this.toastTimer) {
       clearTimeout(this.toastTimer);
       this.toastTimer = null;
+    }
+    if (this.selectionTimer) {
+      clearTimeout(this.selectionTimer);
+      this.selectionTimer = null;
     }
     // Disable mouse reporting before input returns to cooked/echo mode.
     this.renderer.dispose();

@@ -43,13 +43,19 @@ export class Renderer {
   private prevH = 0;
   private out = process.stdout;
   /**
-   * The most recent frame and the rows that were force-repainted for it. Kept
-   * so `repaint()` can re-emit the exact same frame — without re-running the
+   * The most recent frame, kept so `repaint()` can re-emit it without re-running the
    * screen's (potentially expensive) render — to heal any drift the terminal
    * introduced behind our back.
    */
   private lastBuf: Buffer | null = null;
-  private lastForce: readonly number[] = [];
+  private blocked = false;
+  private pendingForce = new Set<number>();
+  private drainHandler = () => {
+    this.blocked = false;
+    const forceRows = [...this.pendingForce];
+    this.pendingForce.clear();
+    if (!this.disposed && this.lastBuf) this.draw(this.lastBuf, forceRows);
+  };
 
   init(): void {
     // Tell the crash guard the terminal is ours *before* touching it, so a
@@ -65,6 +71,8 @@ export class Renderer {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.out.removeListener?.("drain", this.drainHandler);
+    this.pendingForce.clear();
     // stdout.write may still be queued when App.quit calls process.exit.
     // Use the same synchronous teardown as the crash/exit guard.
     restoreTerminalSync();
@@ -78,7 +86,6 @@ export class Renderer {
    */
   render(buf: Buffer, forceRows: readonly number[] = []): void {
     this.lastBuf = buf;
-    this.lastForce = forceRows;
     this.draw(buf, forceRows);
   }
 
@@ -107,6 +114,11 @@ export class Renderer {
   }
 
   private draw(buf: Buffer, forceRows: readonly number[]): void {
+    if (this.disposed) return;
+    if (this.blocked) {
+      for (const y of forceRows) this.pendingForce.add(y);
+      return;
+    }
     const w = buf.width;
     const h = buf.height;
     if (w !== this.prevW || h !== this.prevH) {
@@ -124,7 +136,12 @@ export class Renderer {
         this.prevSig[y] = sig;
       }
     }
-    if (out) this.write(out);
+    if (out && !this.write(out) && typeof this.out.once === "function") {
+      // The stream already accepted this frame. Wait for it to drain, then
+      // diff straight to the latest frame instead of queueing old mouse moves.
+      this.blocked = true;
+      this.out.once("drain", this.drainHandler);
+    }
   }
 
   private renderRow(y: number, row: import("./buffer.js").Cell[]): string {
@@ -153,13 +170,14 @@ export class Renderer {
     return s;
   }
 
-  private write(chunk: string): void {
-    if (this.disposed || this.out.destroyed || this.out.writableEnded) return;
+  private write(chunk: string): boolean {
+    if (this.disposed || this.out.destroyed || this.out.writableEnded) return true;
     try {
-      this.out.write(chunk);
+      return this.out.write(chunk) !== false;
     } catch {
       // A terminal that vanished (closed window, dying conhost) must not take
       // the whole session down with it.
+      return true;
     }
   }
 }
