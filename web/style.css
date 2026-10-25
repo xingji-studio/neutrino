@@ -597,6 +597,74 @@ button {
   margin-bottom: 18px;
 }
 
+/* A finished turn: one summary line, the whole round one click away. */
+.turn {
+  border: 1px dashed var(--border-soft);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  margin-bottom: 18px;
+}
+
+.turn > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.turn > summary::-webkit-details-marker {
+  display: none;
+}
+
+.turn-chevron {
+  flex: none;
+  display: inline-block;
+  color: var(--yellow);
+  transition: transform 0.15s;
+}
+
+.turn-you {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--user);
+}
+
+.turn-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-2);
+  font-size: 11px;
+}
+
+.turn-hint {
+  color: var(--muted);
+}
+
+.turn[open] > summary {
+  margin-bottom: 14px;
+}
+
+.turn[open] .turn-chevron {
+  transform: rotate(90deg);
+}
+
+.turn-messages {
+  display: flex;
+  flex-direction: column;
+}
+
+.turn-messages > .message:last-child {
+  margin-bottom: 0;
+}
+
 /* --------------------------------------------------------------- composer */
 
 .composer {

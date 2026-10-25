@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { turnFolds, turnPreview, turnRanges } from "../web/turns.js";
 
 class Element {
   children = [];
@@ -43,6 +44,12 @@ const render = vm.runInNewContext(`(${fn})`, {
   },
   isNearBottom: () => false,
   scrollToBottom() { throw new Error("reading earlier history must not jump to the bottom"); },
+  // Turn folding shares its rule with the browser module; none of the turns in
+  // this fixture is long enough to fold, which the stub below would report.
+  turnFolds,
+  turnPreview,
+  turnRanges,
+  renderTurnFold() { throw new Error("no turn in this fixture should fold"); },
 });
 const messages = Array.from({ length: 8 }, (_, index) => ({ role: index % 2 ? "assistant" : "user", content: `original ${index}` }));
 messages[2] = { role: "tool", name: "read_file", arguments: { path: "fixture" }, result: "x".repeat(12000) };

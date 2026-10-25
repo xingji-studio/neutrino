@@ -16,6 +16,7 @@ const { App } = await import("../dist/app.js");
 const { defaultState } = await import("../dist/state.js");
 const { hub } = await import("../dist/web/hub.js");
 const { createSettingsUI } = await import("../web/settings.js");
+const { turnFolds, turnPreview, turnRanges } = await import("../web/turns.js");
 
 const models = [
   { name: "Provider A", models: [{ name: "same", url: "https://a.invalid/v1", api_key: "secret-a", supports_streaming: true }] },
@@ -240,7 +241,7 @@ try {
   const browserRequests = [];
   let snapshot = { ...a, key: "browser-live", messages: [], busy: false, tokens: { prompt: 0, completion: 0 } };
   const browser = vm.createContext({
-    createSettingsUI, document: globalThis.document,
+    createSettingsUI, turnFolds, turnPreview, turnRanges, document: globalThis.document,
     localStorage: { removeItem() {} }, location: { search: "" },
     window: { addEventListener() {} }, URLSearchParams, setInterval() {},
     console: { error: error => browserErrors.push(error) },
@@ -257,7 +258,9 @@ try {
       return { ok: true, status: 200, json: async () => data };
     },
   });
-  const source = fs.readFileSync(new URL("../web/app.js", import.meta.url), "utf8").replace(/^import .*;\r?\n/, "");
+  // Strip every module import: the test injects the same bindings into the vm
+  // context above (settings.js and turns.js are real ES modules).
+  const source = fs.readFileSync(new URL("../web/app.js", import.meta.url), "utf8").replace(/^import .*;\r?\n/gm, "");
   vm.runInContext(source + "\nglobalThis.appTest = { state, preferences, loadOverview, selectLive, renderLive, syncSelection };", browser);
   const appTest = browser.appTest;
   await appTest.preferences.load();

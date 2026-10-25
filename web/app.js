@@ -1,4 +1,5 @@
 import { createSettingsUI } from "./settings.js";
+import { turnFolds, turnPreview, turnRanges } from "./turns.js";
 
 // Neutrino web UI — a dependency-free single page app.
 //
@@ -130,6 +131,8 @@ const state = {
   collapsed: new Set(),
   expanded: new Set(),
   openTools: new Set(),
+  // Turns the reader expanded; a finished turn is folded unless listed here.
+  openTurns: new Set(),
   openContext: null,
 };
 
@@ -452,6 +455,7 @@ async function selectLive(key) {
   state.snapshot = null;
   state.lastSessionId = null;
   state.openTools.clear();
+  state.openTurns.clear();
   state.openContext = null;
   renderSidebar();
   el.controls.innerHTML = "";
@@ -508,6 +512,7 @@ async function selectFile(id) {
   state.selection = { kind: "file", id };
   state.snapshot = null;
   state.openTools.clear();
+  state.openTurns.clear();
   state.openContext = null;
   renderSidebar();
   el.controls.innerHTML = "";
@@ -534,7 +539,7 @@ function renderFile(data) {
   el.title.textContent = firstUserMessage(messages) || "Conversation";
   el.sub.textContent = [data.cwd, data.model, data.provider].filter(Boolean).join(" · ");
   preferences.showConversation(data, `file:${data.id}`);
-  renderMessageList(messages, null, { readOnly: true, context: data.context });
+  renderMessageList(messages, null, { readOnly: true, context: data.context, active: false });
   renderFileControls(data);
 }
 
@@ -741,7 +746,13 @@ function renderLive() {
   preferences.showConversation(snapshot, `live:${snapshot.key}`);
   renderControls(snapshot);
   renderApproval(snapshot);
-  renderMessageList(snapshot.messages ?? [], snapshot.streamingContent, { readOnly: false, context: snapshot.context });
+  renderMessageList(snapshot.messages ?? [], snapshot.streamingContent, {
+    readOnly: false,
+    context: snapshot.context,
+    // The turn in flight must stay readable: only a finished turn folds. A
+    // paused turn is unfinished by the user's own choice, so it stays open too.
+    active: Boolean(snapshot.busy || snapshot.paused),
+  });
 }
 
 async function changeApprovalMode(key, mode) {
@@ -875,9 +886,24 @@ function renderMessageList(messages, streaming, options) {
     });
     el.messages.appendChild(details);
   }
-  original.forEach((message, index) => {
-    if (index >= end) el.messages.appendChild(renderMessage(message, index));
-  });
+  // Render the tail one turn at a time: a turn the agent has finished folds into
+  // a summary line, a running one stays open. The turn in flight is the last one,
+  // so `active` decides its state; a turn cut in half by the compressed prefix is
+  // rendered as plain messages instead.
+  const turns = turnRanges(original);
+  const running = options?.active && turns.length > 0 ? turns[turns.length - 1].start : -1;
+  for (const turn of turns) {
+    const from = Math.max(turn.start, end);
+    if (from >= turn.end) continue;
+    const body = original.slice(turn.start, turn.end);
+    if (from === turn.start && turn.start !== running && turnFolds(body)) {
+      el.messages.appendChild(renderTurnFold(turn.start, body));
+      continue;
+    }
+    for (let index = from; index < turn.end; index++) {
+      el.messages.appendChild(renderMessage(original[index], index));
+    }
+  }
 
   if (streaming !== null && streaming !== undefined && streaming !== "") {
     const block = renderMessage({ role: "assistant", content: streaming }, -1);
@@ -929,6 +955,67 @@ function renderMessage(message, index) {
   const who = message.role === "user" ? "You" : "Neutrino";
   article.innerHTML = `<div class="who">${who}</div><div class="body">${renderMarkdown(message.content)}</div>`;
   return article;
+}
+
+/**
+ * A finished turn, folded to one summary line. The messages are rendered on
+ * first open and dropped again on close, so a long transcript costs nothing
+ * until the reader asks for it. Nothing is lost either way: this is presentation
+ * only, and the saved transcript always holds every message.
+ */
+function renderTurnFold(start, messages) {
+  const details = document.createElement("details");
+  details.className = "turn";
+  details.open = state.openTurns.has(start);
+
+  const count = messages.length;
+  const summary = document.createElement("summary");
+  const chevron = document.createElement("span");
+  chevron.className = "turn-chevron";
+  chevron.textContent = "▸";
+  const you = document.createElement("span");
+  you.className = "turn-you";
+  you.textContent = `You: ${truncate(turnPreview(messages, "user"), 110)}`;
+  const meta = document.createElement("span");
+  meta.className = "turn-meta";
+  meta.textContent =
+    `${count} message${count === 1 ? "" : "s"} · ` +
+    truncate(turnPreview(messages, "assistant", true), 90);
+  // The hint cannot live in the static text: it says the opposite once open.
+  const hint = document.createElement("span");
+  hint.className = "turn-hint";
+  meta.appendChild(hint);
+  summary.appendChild(chevron);
+  summary.appendChild(you);
+  summary.appendChild(meta);
+  details.appendChild(summary);
+
+  const syncHint = () => {
+    hint.textContent = details.open ? " — click to collapse" : " — click to expand";
+  };
+  syncHint();
+
+  const body = document.createElement("div");
+  body.className = "turn-messages";
+  details.appendChild(body);
+  const populate = () => {
+    if (body.childNodes.length) return;
+    messages.forEach((message, offset) => body.appendChild(renderMessage(message, start + offset)));
+  };
+  if (details.open) populate();
+  details.addEventListener("toggle", () => {
+    // Detached disclosures can emit a delayed toggle during a stream repaint.
+    if (!details.isConnected) return;
+    if (details.open) {
+      state.openTurns.add(start);
+      populate();
+    } else {
+      state.openTurns.delete(start);
+      body.replaceChildren();
+    }
+    syncHint();
+  });
+  return details;
 }
 
 function firstUserMessage(messages) {

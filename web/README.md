@@ -5,7 +5,9 @@ a port you choose. It lets you:
 
 - browse every saved conversation grouped by working directory (like Codex),
   with only the five latest transcripts per path shown and the rest collapsed;
-- watch a running terminal conversation stream in real time;
+- watch a running terminal conversation stream in real time, with every
+  finished turn folded into one summary line that opens on a click (the turn
+  being answered stays open, and a paused turn is not folded either);
 - switch the provider, model and intensity for the next turn;
 - edit defaults, context compression and approval settings in a Settings dialog;
 - drive the running conversation: pause / resume the current turn and send new

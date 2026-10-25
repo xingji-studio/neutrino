@@ -15,6 +15,7 @@ A CLI coding agent that lives in your terminal. Neutrino gives you an interactiv
 - **Streaming responses** — token-by-token output with pause/resume (`ESC ESC`).
 - **Intensity control** — tune `temperature`/`top_p` from `Low` to `Ultra`.
 - **Session history** — messages are saved before a turn starts, streamed replies are checkpointed every second, and tool calls/results are saved immediately. The history screen lists conversations started in the current working directory. Failed saves are shown in the terminal and browser UI.
+- **Auto-folding turns** — as soon as the model finishes a reply, that round collapses into one summary line (prompt, answer preview, message count) in both the terminal and the browser. Click it to read the complete round again; short exchanges stay open, because hiding two lines helps nobody. A turn stopped with `ESC ESC` is paused, not finished, so it stays open. Nothing is dropped: the transcript, the saved session and the model's context keep every message.
 - **Complete conversation history** — context compression keeps every original message and tool result on disk. The earlier portion starts collapsed in the terminal and browser; click **Earlier conversation** to expand it, including in reopened history. Model requests use a separate summary plus recent messages.
 - **Token usage stats** — click the `ⓘ` in the chat header to see prompt/completion/total token counts for the current session.
 - **Agent history browser** — view past sessions from other CLI agents (Claude Code, Codex, OpenCode) directly from the history screen.
@@ -59,7 +60,7 @@ Type a message on the start screen and press `Enter` to begin a new chat.
 | `Ctrl+E` | Open model config |
 | `Ctrl+B` | Back to menu (from chat) |
 | `Ctrl+L` | Clear conversation (from chat) |
-| `Esc Esc` | Pause / resume streaming |
+| `Esc Esc` | Pause / resume streaming (a paused turn stays open: only a finished reply folds) |
 | `Esc` | Clear an active selection |
 | `PgUp` / `PgDn` | Scroll chat history |
 | `Ctrl+C` | Do nothing while text is selected; otherwise pause the running conversation or show the exit hint at the top |
@@ -77,6 +78,8 @@ Type a message on the start screen and press `Enter` to begin a new chat.
 | Hover over an item | Highlight / select it in lists and menus |
 | Click an item | Select and confirm (open a screen, load a session, apply a setting…) |
 | Click the input box | Focus it and place the cursor at the clicked position |
+| Click a folded turn | Expand the complete round, or fold it again |
+| Click `⚙ tool` | Expand or collapse a tool call's output |
 | Click and drag | Select text under the rectangle; releasing copies it to the clipboard |
 | Click the header (left of `ⓘ`) | Open the model selector |
 | Click `ⓘ` (chat header) | Toggle token usage stats |
@@ -202,7 +205,8 @@ Only sessions that were started in the current working directory are listed, so 
 
 Neutrino can mount a small website on a port of your choice. It groups every
 saved conversation by working directory (showing the five newest per path with
-the rest collapsed), streams a running conversation live, and lets you pause or
+the rest collapsed), folds every finished turn into one summary line that opens
+on a click, streams a running conversation live, and lets you pause or
 resume it and send new messages from the browser.
 
 A saved transcript opens read-only, because nothing is running for it. Press
@@ -323,6 +327,7 @@ node scripts/test-fetch.mjs      # verify streamed requests release aborts and r
 node scripts/test-compact.mjs    # verify context-compression planning
 node scripts/test-history-fold.mjs # verify full-history retention, folding and resume
 node scripts/test-web-history.mjs  # verify browser history disclosures and streaming state
+node scripts/test-turn-fold.mjs    # verify finished turns fold in both UIs and keep every message
 node scripts/test-tools.mjs      # verify tool-output folding
 node scripts/test-web.mjs        # verify the web server, API, SSE stream and path-traversal guards
 node scripts/test-web-settings.mjs # verify model switching, persistence, browser controls and defaults

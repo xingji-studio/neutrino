@@ -62,6 +62,15 @@ type Msg =
 
 const TOOLS = getToolDefinitions();
 
+/**
+ * A finished turn only folds into a one-line summary when hiding it saves real
+ * space: four or more visible blocks, or roughly six wrapped lines of text.
+ * Short exchanges stay readable without a click. `web/turns.js` applies the
+ * same rule in the browser, so both UIs fold exactly the same turns.
+ */
+export const TURN_FOLD_MIN_BLOCKS = 4;
+export const TURN_FOLD_MIN_CHARS = 600;
+
 function parseArgs(s: string): Record<string, unknown> {
   if (!s || !s.trim()) return {};
   try {
@@ -132,6 +141,20 @@ export class ChatScreen extends Screen implements LiveAgent {
   /** Terminal row -> tool message index, rebuilt each render for hit-testing. */
   private toolRows = new Map<number, number>();
 
+  // ---- collapsible turns ----
+  /** First message index of every turn whose reply has finished. A transcript
+   *  loaded from disk starts finished: reopening history reviews past work. */
+  private finishedTurns = new Set<number>();
+  /** Turns the reader opened; a finished turn stays folded unless listed here. */
+  private expandedTurns = new Set<number>();
+  /** First message index of the turn being answered right now, if any. */
+  private activeTurnStart: number | null = null;
+  /** For each built line, the folded turn it belongs to (-1 = none). Only the
+   *  header lines carry it, so clicks inside a tool block still target the tool. */
+  private turnLineIndex: number[] = [];
+  /** Terminal row -> folded turn start, rebuilt each render for hit-testing. */
+  private turnRows = new Map<number, number>();
+
   // ---- web bridge ----
   private liveKey: string | null = null;
   private liveDir = process.cwd();
@@ -183,6 +206,8 @@ export class ChatScreen extends Screen implements LiveAgent {
     for (const m of this.loadedMessages ?? []) {
       this.messages.push(m as Msg);
     }
+    // Everything already on disk was answered, so history opens compact.
+    for (const start of this.userMessageIndexes()) this.finishedTurns.add(start);
     this.context = normalizeContext(this.loadedContext, this.messages.filter((m) => m.role !== "system").length);
     this.liveDir = this.loadedCwd ?? process.cwd();
     this.checkpoint.register();
@@ -485,6 +510,9 @@ export class ChatScreen extends Screen implements LiveAgent {
       const sysText = this.messages[0] && this.messages[0].role === "system" ? this.messages[0].content : "";
       this.messages = [{ role: "system", content: sysText }];
       this.expandedTools.clear();
+      this.finishedTurns.clear();
+      this.expandedTurns.clear();
+      this.activeTurnStart = null;
       this.streamingContent = null;
       this.scrollTop = 0;
       this.followBottom = true;
@@ -559,6 +587,11 @@ export class ChatScreen extends Screen implements LiveAgent {
         this.followBottom = false;
         this.scrollTop = Math.min(this.scrollTop, Math.min(...this.contextLines));
         this.app.render();
+        return;
+      }
+      const turn = this.turnRows.get(ev.y);
+      if (turn !== undefined) {
+        this.toggleTurn(turn);
         return;
       }
       const tool = this.toolRows.get(ev.y);
@@ -642,6 +675,12 @@ export class ChatScreen extends Screen implements LiveAgent {
   }
 
   private startTurn(): void {
+    // Sending closes every earlier turn, including one left unfinished by
+    // ESC ESC: it is folded from here on, but never while it is still paused.
+    const starts = this.userMessageIndexes();
+    const active = starts.length > 0 ? starts[starts.length - 1] : null;
+    for (const start of starts) if (start !== active) this.finishedTurns.add(start);
+    this.activeTurnStart = active;
     const turnMessages = this.messages.slice();
     const approvalContext = captureApprovalContext(turnMessages);
     this.busy = true;
@@ -746,7 +785,7 @@ export class ChatScreen extends Screen implements LiveAgent {
           if (content) this.messages.push({ role: "assistant", content });
           this.streamingContent = null;
           this.app.render();
-          this.onTurnFinished();
+          this.onTurnFinished(false);
           return;
         }
 
@@ -827,7 +866,13 @@ export class ChatScreen extends Screen implements LiveAgent {
     }
   }
 
-  private onTurnFinished(): void {
+  /**
+   * Ends the turn. `finished` is false when the turn was cut short (ESC ESC,
+   * Ctrl+C): a paused turn is not a completed one and stays open for reading.
+   */
+  private onTurnFinished(finished = true): void {
+    if (finished && this.activeTurnStart !== null) this.finishedTurns.add(this.activeTurnStart);
+    this.activeTurnStart = null;
     this.busy = false;
     this.paused = false;
     this.app.state.isThinking = false;
@@ -977,6 +1022,123 @@ export class ChatScreen extends Screen implements LiveAgent {
       approve: { x: boxX + 2, y: by, w: approve.length },
       deny: { x: denyX, y: by, w: deny.length },
     };
+  }
+
+  // ---- turn folding ----------------------------------------------------
+
+  /** First message index of every turn: a turn starts at a user message and
+   *  ends where the next one begins. */
+  private userMessageIndexes(): number[] {
+    const starts: number[] = [];
+    for (let i = 0; i < this.messages.length; i++) {
+      if (this.messages[i].role === "user") starts.push(i);
+    }
+    return starts;
+  }
+
+  private turnEnd(start: number): number {
+    for (let i = start + 1; i < this.messages.length; i++) {
+      if (this.messages[i].role === "user") return i;
+    }
+    return this.messages.length;
+  }
+
+  /**
+   * A finished turn is only worth folding when it hides something substantial.
+   * Whether it is folded right now is a separate question (`expandedTurns`).
+   */
+  private turnHides(start: number, end: number): boolean {
+    if (!this.finishedTurns.has(start)) return false;
+    let blocks = 0;
+    let chars = 0;
+    for (let i = start; i < end; i++) {
+      const m = this.messages[i];
+      if (m.role === "user" || m.role === "assistant") {
+        blocks++;
+        chars += m.content.length;
+      }
+    }
+    return blocks >= TURN_FOLD_MIN_BLOCKS || chars >= TURN_FOLD_MIN_CHARS;
+  }
+
+  /** For every message, the first index of the turn folding it (-1 = none). */
+  private turnMap(): number[] {
+    const map = new Array<number>(this.messages.length).fill(-1);
+    for (const start of this.userMessageIndexes()) {
+      const end = this.turnEnd(start);
+      if (!this.turnHides(start, end)) continue;
+      for (let i = start; i < end; i++) map[i] = start;
+    }
+    return map;
+  }
+
+  /**
+   * The first line of the first message in `role` (the last one with `last`).
+   * Only one line: the preview is a signpost, and the full text is a click away.
+   */
+  private turnPreview(start: number, end: number, role: "user" | "assistant", last = false): string {
+    const slice = this.messages.slice(start, end);
+    for (const m of last ? slice.reverse() : slice) {
+      if (m.role !== role) continue;
+      const line = sanitizeText(m.content)
+        .split("\n")
+        .map((part) => part.trim())
+        .find((part) => part.length > 0);
+      if (line) return line;
+    }
+    return "";
+  }
+
+  /** The header standing in for a folded turn, or the way back into one. */
+  private pushTurnHeader(
+    start: number,
+    end: number,
+    width: number,
+    add: (line: Line, tool?: number, turn?: number) => void,
+  ): void {
+    const count = end - start;
+    if (this.expandedTurns.has(start)) {
+      // Open: the messages below say everything, so the line is only the way
+      // back. Reserve the room the hint needs so a narrow terminal keeps it.
+      const hint = " — click to collapse";
+      const label = `▾ ${count} message${count === 1 ? "" : "s"}`;
+      add(
+        {
+          spans: [
+            { text: ellipsize(label, Math.max(10, width - displayWidth(hint))), style: { fg: C.dim, bold: true } },
+            { text: hint, style: { fg: C.dim } },
+          ],
+        },
+        -1,
+        start,
+      );
+      return;
+    }
+    const you = `You: ${this.turnPreview(start, end, "user") || "(no text)"}`;
+    add({ spans: [{ text: ellipsize(`▸ ${you}`, width), style: { fg: C.amber, bold: true } }] }, -1, start);
+    const reply = this.turnPreview(start, end, "assistant", true);
+    const meta = `${count} message${count === 1 ? "" : "s"} folded`;
+    add(
+      {
+        spans: [
+          {
+            text: ellipsize(`  ${meta}${reply ? ` · Neutrino: ${reply}` : ""} — click to expand`, width),
+            style: { fg: C.dim },
+          },
+        ],
+      },
+      -1,
+      start,
+    );
+  }
+
+  /** Fold or unfold one turn. */
+  private toggleTurn(start: number): void {
+    if (this.expandedTurns.has(start)) this.expandedTurns.delete(start);
+    else this.expandedTurns.add(start);
+    // Expanding pushes the rest of the log down, so do not snap to the bottom.
+    this.followBottom = false;
+    this.app.render();
   }
 
   /** Expand/collapse the tool block belonging to message `index`. */
@@ -1132,9 +1294,13 @@ export class ChatScreen extends Screen implements LiveAgent {
     // Parallel map from rendered line -> owning tool message index (-1 = none),
     // used to turn a click on any line of a tool block into an expand/collapse.
     const toolLineIndex: number[] = [];
-    const add = (line: Line, tool = -1): void => {
+    // Same idea for a folded turn. Only its header lines point at the turn, so
+    // the messages of an expanded turn keep their own click targets.
+    const turnLineIndex: number[] = [];
+    const add = (line: Line, tool = -1, turn = -1): void => {
       lines.push(line);
       toolLineIndex.push(tool);
+      turnLineIndex.push(turn);
     };
     const pushText = (text: string, style: Style, tool = -1): void => {
       for (const ln of wrapText(text, width)) add({ spans: [{ text: ln, style }] }, tool);
@@ -1144,10 +1310,13 @@ export class ChatScreen extends Screen implements LiveAgent {
     };
 
     const context = normalizeContext(this.context, this.messages.filter((m) => m.role !== "system").length);
+    // Which turn owns each message: [] -> first index of that turn, -1 = none.
+    const turns = this.turnMap();
     this.contextLines.clear();
     let recordIndex = 0;
     for (let mi = 0; mi < this.messages.length; mi++) {
       const m = this.messages[mi];
+      const turn = m.role === "system" ? -1 : turns[mi];
       let archived = false;
       if (m.role !== "system") {
         if (recordIndex === 0 && context) {
@@ -1156,10 +1325,18 @@ export class ChatScreen extends Screen implements LiveAgent {
         }
         archived = context !== null && recordIndex < context.end;
         recordIndex++;
-        if (archived && !this.expandedContext) continue;
+      }
+      // A foldable turn always shows its control line first; its messages then
+      // render normally when the reader has opened it.
+      if (m.role !== "system" && turn === mi && !(archived && !this.expandedContext)) {
+        this.pushTurnHeader(mi, this.turnEnd(mi), width, add);
       }
       if (m.role === "system") {
         pushText(sanitizeText(m.content), { fg: C.dim });
+      } else if ((archived && !this.expandedContext) || (turn >= 0 && !this.expandedTurns.has(turn))) {
+        // Hidden, by the collapsed "Earlier conversation" fold or by the turn's
+        // own fold. Either way the message stays in the transcript, on disk and
+        // in the request; the header above says how to get it back on screen.
       } else if (m.role === "user") {
         add({ spans: [{ text: "You:", style: { fg: C.accent, bold: true } }] });
         pushMarkdown(sanitizeText(m.content), { fg: C.user });
@@ -1231,6 +1408,7 @@ export class ChatScreen extends Screen implements LiveAgent {
       pushMarkdown(sanitizeText(this.streamingContent), { fg: C.assistant });
     }
     this.toolLineIndex = toolLineIndex;
+    this.turnLineIndex = turnLineIndex;
     return lines;
   }
 
@@ -1284,11 +1462,14 @@ export class ChatScreen extends Screen implements LiveAgent {
     // click can expand/collapse it (see the onMouse handler).
     this.toolRows.clear();
     this.contextRows.clear();
+    this.turnRows.clear();
     for (let y = logTop; y <= logBottom; y++) {
       const li = this.scrollTop + (y - logTop);
       if (li >= lines.length) break;
       const tool = this.toolLineIndex[li];
       if (tool !== undefined && tool >= 0) this.toolRows.set(y, tool);
+      const turn = this.turnLineIndex[li];
+      if (turn !== undefined && turn >= 0) this.turnRows.set(y, turn);
       if (this.contextLines.has(li)) this.contextRows.add(y);
       drawSpans(buf, 2, y, lines[li].spans, Math.max(4, w - 4));
     }
