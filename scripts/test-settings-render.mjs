@@ -1,7 +1,17 @@
 // Smoke test: the settings screen shows the approval rows and renders at any size.
-import { Buffer } from "../dist/terminal/buffer.js";
-import { SettingsScreen } from "../dist/screens/settings.js";
-import { defaultState } from "../dist/state.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+// The screen renders the *saved* settings, so a clean home directory is needed:
+// otherwise a developer with extreme-risk auto-approval enabled sees "On" where
+// this test reads the default "Off (human only)".
+const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "neutrino-settings-render-"));
+process.env.HOME = testHome;
+process.env.USERPROFILE = testHome;
+const { Buffer } = await import("../dist/terminal/buffer.js");
+const { SettingsScreen } = await import("../dist/screens/settings.js");
+const { defaultState } = await import("../dist/state.js");
 
 const app = {
   state: defaultState(),
@@ -64,5 +74,6 @@ for (const [w, h] of [
   if (!text.includes("On (3 separate rounds)")) fail(`extreme switch value clipped at ${w}x${h}`);
 }
 
+fs.rmSync(testHome, { recursive: true, force: true });
 console.log(failures === 0 ? "SETTINGS RENDER TESTS PASSED" : `${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

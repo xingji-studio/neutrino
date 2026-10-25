@@ -4,10 +4,18 @@
 // must leave the filesystem untouched, approving it must run the command.
 import fs from "node:fs";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
-import { SESSION_DIR } from "../dist/config.js";
-import { WebSession } from "../dist/web/session.js";
-import { hub } from "../dist/web/hub.js";
+
+// The session inherits the saved approval mode, so it must not be the
+// developer's own config: with approval_mode "auto" saved, the risky call is
+// reviewed instead of parked and this test would wait for a human forever.
+const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "neutrino-approval-flow-"));
+process.env.HOME = testHome;
+process.env.USERPROFILE = testHome;
+const { SESSION_DIR } = await import("../dist/config.js");
+const { WebSession } = await import("../dist/web/session.js");
+const { hub } = await import("../dist/web/hub.js");
 
 let failures = 0;
 const fail = (msg) => {
@@ -148,5 +156,6 @@ async function scenario({ approve, expectFile }) {
 await scenario({ approve: false, expectFile: true });
 await scenario({ approve: true, expectFile: false });
 
+fs.rmSync(testHome, { recursive: true, force: true });
 console.log(failures === 0 ? "APPROVAL FLOW TESTS PASSED" : `${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
