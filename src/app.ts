@@ -3,11 +3,20 @@ import { Buffer } from "./terminal/buffer.js";
 import { InputReader, type InputEvent, type MouseEvent } from "./terminal/input.js";
 import { Renderer } from "./terminal/renderer.js";
 import { installCrashGuard, writeCrashLog } from "./terminal/restore.js";
-import { Screen } from "./terminal/screen.js";
+import { Screen, type ScrollbarHandle } from "./terminal/screen.js";
 import { defaultState, type AppState } from "./state.js";
 import { loadConfig, saveConfig, type ModelInfo, type SessionData } from "./config.js";
 import { C } from "./colors.js";
-import { applySelection, selectionText } from "./selection.js";
+import {
+  applySelection,
+  orderLinePoints,
+  rowCells,
+  rowSelectionText,
+  selectionText,
+  type Selection,
+  type LinePoint,
+  type Point,
+} from "./selection.js";
 import { offsetFromThumbTop, scrollbarGeometry } from "./ui.js";
 import { copyToClipboard } from "./clipboard.js";
 import { ChatScreen } from "./screens/chat.js";
@@ -27,6 +36,12 @@ const EXIT_HINT = "press ctrl+shift+c or press ctrl+c 3 times to exit";
 // drift (ConPTY reflow, stray scroll) can never leave any row stale for long.
 // Re-emitting the cached frame is a no-op when nothing drifted.
 const REPAINT_MS = 2000;
+// Auto-scrolling while drag-selecting: parked on the first/last row of the log,
+// the pointer scrolls it one line per tick, a few lines per tick once it has
+// been held for a while.
+const DRAG_SCROLL_MS = 60;
+const DRAG_SCROLL_RAMP = 8;
+const DRAG_SCROLL_MAX_ROWS = 3;
 
 export class App {
   state: AppState = defaultState();
@@ -64,6 +79,28 @@ export class App {
   // Active scrollbar drag: how many rows below the thumb's top the press
   // landed, so the thumb stays under the pointer as it moves.
   private barDrag: { grab: number } | null = null;
+  // Auto-scroll during a drag-select. `dragScrollDir` is where the pointer is
+  // parked (-1 top edge, 1 bottom edge, 0 neither) and `dragScrollTicks` counts
+  // how long it has been there, which speeds the scroll up.
+  private dragScrollTimer: NodeJS.Timeout | null = null;
+  private dragScrollDir: -1 | 0 | 1 = 0;
+  private dragScrollTicks = 0;
+  // Latest pointer position, so a scroll tick can keep the mark pinned to the
+  // edge the pointer is parked on.
+  private pointer: Point = { x: 0, y: 0 };
+  // True once a drag has scrolled the log. The anchor is then in *content*
+  // coordinates: it points at the line the drag started on, which may well be
+  // off screen by now.
+  private dragScrolled = false;
+  // True when the drag started inside the scrollable log, i.e. when its anchor
+  // is log content that is allowed to scroll away.
+  private anchorInLog = false;
+  // Rows covered by the current drag, keyed by content line, so text that
+  // scrolled out of the viewport still ends up in the copy.
+  private selRows = new Map<number, string[]>();
+  // Scroll offset the anchor was last reconciled with, so a log that moves on
+  // its own (streamed output, a resize) can still carry the anchor along.
+  private selOffset: number | null = null;
   private resizeHandler = () => this.onResize();
   private webHandle: WebServerHandle | null = null;
 
@@ -210,6 +247,9 @@ export class App {
   }
 
   private renderBuffer(content: Buffer, forceRows: readonly number[] = []): void {
+    // Snapshot the rows a drag has covered *before* painting: once a scroll
+    // pushes them off screen this is the only copy of their text left.
+    this.captureSelectionRows(content);
     // The selection overlay is painted over the finished frame, so it works on
     // every screen (chat log, input box, menus, …) without each having to know
     // about selection at all.
@@ -217,12 +257,216 @@ export class App {
     if (this.state.selection) {
       buf = new Buffer(content.width, content.height);
       buf.cells = content.cells.map((row) => row.map((cell) => ({ ...cell })));
-      applySelection(buf, this.state.selection);
+      applySelection(buf, this.displaySelection(this.state.selection, content.width));
     }
     this.drawToast(buf);
     this.lastBuffer = buf;
 
     this.renderer.render(buf, forceRows);
+  }
+
+  /**
+   * The selection as it should be *painted*.
+   *
+   * An end that scrolled out of the log is drawn from the log's own edge: the
+   * rows it points at are off screen, and highlighting the header or the input
+   * box instead would claim those were selected.
+   */
+  private displaySelection(sel: Selection, width: number): Selection {
+    const bar = this.top?.scrollbar();
+    if (!bar || !this.anchorInLog) return sel;
+    if (sel.anchor.y < bar.top) return { anchor: { x: 0, y: bar.top }, cursor: sel.cursor };
+    if (sel.anchor.y > bar.bottom) {
+      return { anchor: { x: width - 1, y: bar.bottom }, cursor: sel.cursor };
+    }
+    return sel;
+  }
+
+  /**
+   * Remember the log rows the current drag covers.
+   *
+   * Runs on every frame, because a row can only be captured while it is still
+   * on screen — after the scroll carries it away, its text is gone.
+   */
+  private captureSelectionRows(content: Buffer): void {
+    const sel = this.state.selection;
+    if (!sel || !this.pressed) return;
+    const bar = this.top?.scrollbar();
+    if (!bar) return;
+    // Anything else that moved the log — a streamed reply following the bottom,
+    // a resize — has to carry the anchor with it. Without this the anchor keeps
+    // its screen row while different text scrolls under it, and the copy
+    // silently covers the wrong lines.
+    if (this.selOffset === null) {
+      this.selOffset = bar.offset;
+    } else if (bar.offset !== this.selOffset) {
+      const drift = bar.offset - this.selOffset;
+      this.selOffset = bar.offset;
+      if (this.anchorInLog) {
+        this.state.selection = {
+          anchor: { x: sel.anchor.x, y: sel.anchor.y - drift },
+          cursor: sel.cursor,
+        };
+      }
+    }
+    const ends = this.lineSelection(bar);
+    if (!ends) return;
+    for (let y = bar.top; y <= bar.bottom && y < content.height; y++) {
+      const line = bar.offset + (y - bar.top);
+      if (line < ends.start.line || line > ends.end.line) continue;
+      this.selRows.set(line, rowCells(content, y));
+    }
+  }
+
+  /**
+   * The current selection expressed in content lines instead of screen rows.
+   *
+   * Rows under the pointer map straight through the log's scroll offset, and
+   * rows outside the log get keys of their own (negative above it, past `total`
+   * below it) so a drag that starts on the header or runs into the input box
+   * still copies what is actually drawn there. The anchor is the exception: once
+   * it belongs to the log it follows its text out of the viewport, which is what
+   * lets a selection outlive the frame it started in.
+   */
+  private lineSelection(bar: ScrollbarHandle): { start: LinePoint; end: LinePoint } | null {
+    const sel = this.state.selection;
+    if (!sel) return null;
+    const screenLine = (y: number): number => {
+      if (y < bar.top) return y - bar.top;
+      if (y > bar.bottom) return bar.total + (y - bar.bottom) - 1;
+      return bar.offset + (y - bar.top);
+    };
+    const anchorLine = this.anchorInLog
+      ? bar.offset + (sel.anchor.y - bar.top)
+      : screenLine(sel.anchor.y);
+    return orderLinePoints(
+      { line: anchorLine, x: sel.anchor.x },
+      { line: screenLine(sel.cursor.y), x: sel.cursor.x },
+    );
+  }
+
+  /**
+   * Text covered by the current selection, including the rows a drag scrolled
+   * out of the viewport.
+   */
+  private selectionToText(): string {
+    const buf = this.lastBuffer;
+    const sel = this.state.selection;
+    if (!buf || !sel) return "";
+    const bar = this.top?.scrollbar();
+    const ends = bar ? this.lineSelection(bar) : null;
+    // Nothing can scroll, so the frame holds the whole selection.
+    if (!bar || !ends) return selectionText(buf, sel);
+    const getRow = (line: number): readonly string[] | null => {
+      // Rows above/below the log are drawn at a fixed screen row.
+      if (line < 0) {
+        const y = line + bar.top;
+        return y >= 0 && y < buf.height ? rowCells(buf, y) : null;
+      }
+      if (line >= bar.total) {
+        const y = bar.bottom + (line - bar.total) + 1;
+        return y >= 0 && y < buf.height ? rowCells(buf, y) : null;
+      }
+      // A log line: read the frame while it is on screen and the drag's snapshot
+      // once it has scrolled away.
+      const y = bar.top + (line - bar.offset);
+      if (y >= bar.top && y <= bar.bottom && y < buf.height) return rowCells(buf, y);
+      return this.selRows.get(line) ?? null;
+    };
+    return rowSelectionText(getRow, ends.start, ends.end);
+  }
+
+  /** Where the mark sits, clamped into the log while a drag is scrolling it. */
+  private cursorAt(x: number, y: number): Point {
+    const bar = this.top?.scrollbar();
+    if (!bar || !this.dragScrolled) return { x, y };
+    return { x, y: Math.max(bar.top, Math.min(y, bar.bottom)) };
+  }
+
+  /**
+   * Start or stop the auto-scroll that runs while a drag sits on an edge of the
+   * log. Only a real drag scrolls: a press that never moved selects nothing, so
+   * clicking on the last row stays a plain click.
+   */
+  private updateDragScroll(): void {
+    const bar = this.top?.scrollbar();
+    const dir: -1 | 0 | 1 =
+      !bar || !this.state.selection
+        ? 0
+        : this.pointer.y <= bar.top
+          ? -1
+          : this.pointer.y >= bar.bottom
+            ? 1
+            : 0;
+    if (dir === this.dragScrollDir) return;
+    this.stopDragScroll();
+    if (dir === 0) return;
+    this.dragScrollDir = dir;
+    this.dragScrollTicks = 0;
+    // Reveal the first line at once: waiting a whole tick for it would make the
+    // edge feel dead. The tick schedules the ones that follow.
+    this.dragScrollTick();
+  }
+
+  /**
+   * One auto-scroll step: move the log a line (a few lines, the longer the
+   * pointer is held there) and grow the selection with it.
+   */
+  private dragScrollTick(): void {
+    const sel = this.state.selection;
+    const bar = this.top?.scrollbar();
+    if (!this.pressed || !sel || !bar || this.dragScrollDir === 0) {
+      this.stopDragScroll();
+      return;
+    }
+    const maxOffset = Math.max(0, bar.total - bar.viewport);
+    const rows = Math.min(
+      DRAG_SCROLL_MAX_ROWS,
+      1 + Math.floor(this.dragScrollTicks / DRAG_SCROLL_RAMP),
+    );
+    const target = Math.max(0, Math.min(bar.offset + this.dragScrollDir * rows, maxOffset));
+    const delta = target - bar.offset;
+    if (delta === 0) {
+      // The end of the log: nothing left to reveal in that direction.
+      this.stopDragScroll();
+      return;
+    }
+    this.dragScrollTicks++;
+    this.dragScrolled = true;
+    // The content moved by `delta` rows, so the anchor moves with it to stay on
+    // the line the drag started from. The mark stays under the pointer — that
+    // difference is what makes the selection grow instead of sliding along.
+    const anchor = this.anchorInLog ? { x: sel.anchor.x, y: sel.anchor.y - delta } : sel.anchor;
+    this.state.selection = { anchor, cursor: this.cursorAt(this.pointer.x, this.pointer.y) };
+    // This scroll is already accounted for; the frame that follows must not
+    // treat it as drift and move the anchor a second time.
+    this.selOffset = target;
+    // scrollTo re-renders, so the new offset, the highlight and the snapshot of
+    // the rows leaving the screen all land in a single paint.
+    bar.scrollTo(target);
+    // The next step is scheduled only now that this frame is drawn: laying out a
+    // very long log can take longer than one tick, and a fixed interval would
+    // queue ticks faster than they can be served.
+    if (this.dragScrollTimer) clearTimeout(this.dragScrollTimer);
+    this.dragScrollTimer = setTimeout(() => this.dragScrollTick(), DRAG_SCROLL_MS);
+  }
+
+  private stopDragScroll(): void {
+    if (this.dragScrollTimer) {
+      clearTimeout(this.dragScrollTimer);
+      this.dragScrollTimer = null;
+    }
+    this.dragScrollDir = 0;
+    this.dragScrollTicks = 0;
+  }
+
+  /** Drop everything remembered about a drag; a new gesture starts clean. */
+  private resetDragTracking(): void {
+    this.stopDragScroll();
+    this.dragScrolled = false;
+    this.anchorInLog = false;
+    this.selOffset = null;
+    this.selRows.clear();
   }
 
   private scheduleSelectionRender(): void {
@@ -317,6 +561,9 @@ export class App {
   private handleMouse(ev: MouseEvent): void {
     if (ev.type === "click") {
       this.wakeCursor();
+      // A new gesture starts clean: no auto-scroll left over from the previous
+      // drag, and no rows remembered from it.
+      this.resetDragTracking();
       // A left-press on the scrollbar starts a thumb drag rather than a text
       // selection or a click on the screen behind it.
       if (ev.button === 0) {
@@ -340,6 +587,13 @@ export class App {
       }
       this.pressed = true;
       this.pressStart = { x: ev.x, y: ev.y };
+      this.pointer = { x: ev.x, y: ev.y };
+      // A press inside the log starts a selection whose top is log content, so
+      // it may scroll away with the text (see dragScrollTick). Its offset is the
+      // baseline the anchor is reconciled against on every later frame.
+      const bar = this.top?.scrollbar();
+      this.anchorInLog = !!bar && ev.y >= bar.top && ev.y <= bar.bottom;
+      this.selOffset = bar ? bar.offset : null;
       if (this.state.selection) {
         this.state.selection = null;
         this.render();
@@ -351,6 +605,7 @@ export class App {
     }
 
     if (ev.type === "move") {
+      this.pointer = { x: ev.x, y: ev.y };
       // A release can be lost (the pointer left the window, the terminal did
       // not report button-up, …). Motion with no button held means the gesture
       // is over, so drop any stale press/drag instead of letting a bare hover
@@ -359,6 +614,7 @@ export class App {
         this.pressed = false;
         this.pressStart = null;
         this.barDrag = null;
+        this.resetDragTracking();
       }
       if (this.barDrag) {
         const bar = this.top?.scrollbar();
@@ -372,13 +628,20 @@ export class App {
       if (this.pressed && this.pressStart) {
         const s = this.pressStart;
         const sel = this.state.selection;
-        if ((ev.x !== s.x || ev.y !== s.y || sel)
-          && (!sel || ev.x !== sel.cursor.x || ev.y !== sel.cursor.y)) {
+        // A drag that already scrolled the log keeps the anchor it has: it has
+        // moved into content coordinates and no longer equals the press cell.
+        const anchor = this.dragScrolled && sel ? sel.anchor : s;
+        const cursor = this.cursorAt(ev.x, ev.y);
+        if ((cursor.x !== anchor.x || cursor.y !== anchor.y || sel)
+          && (!sel || cursor.x !== sel.cursor.x || cursor.y !== sel.cursor.y)) {
           // The pointer left the press cell, so this is a drag: grow/shrink the
           // selection instead of forwarding a hover to the screen.
-          this.state.selection = { anchor: s, cursor: { x: ev.x, y: ev.y } };
+          this.state.selection = { anchor, cursor };
           this.scheduleSelectionRender();
         }
+        // Sitting on the first/last row of the log scrolls it, so a selection
+        // can run past the visible screen.
+        this.updateDragScroll();
         return;
       }
       this.top?.onMouse(ev);
@@ -386,9 +649,15 @@ export class App {
     }
 
     if (ev.type === "release") {
+      this.pointer = { x: ev.x, y: ev.y };
+      this.stopDragScroll();
       // A release can arrive before the queued frame (or the final move).
       if (this.pressed && this.pressStart && this.state.selection) {
-        this.state.selection = { anchor: this.pressStart, cursor: { x: ev.x, y: ev.y } };
+        // The anchor goes back to the press cell — unless the drag scrolled the
+        // log, in which case it belongs to the line it was dropped on and has
+        // drifted away from that cell on purpose.
+        const anchor = this.dragScrolled ? this.state.selection.anchor : this.pressStart;
+        this.state.selection = { anchor, cursor: this.cursorAt(ev.x, ev.y) };
       }
       if (this.selectionTimer) this.render(true);
       const sel = this.state.selection;
@@ -397,10 +666,11 @@ export class App {
       this.barDrag = null;
       if (sel) {
         if (this.lastBuffer) {
-          const text = selectionText(this.lastBuffer, sel);
+          const text = this.selectionToText();
           if (text.trim().length > 0) {
             copyToClipboard(text);
             this.showToast(`Copied ${text.length} char${text.length === 1 ? "" : "s"}`);
+            this.selRows.clear();
             return;
           }
         }
@@ -410,6 +680,7 @@ export class App {
     }
 
     if (ev.type === "wheel") {
+      this.resetDragTracking();
       if (this.state.selection) this.state.selection = null;
       this.top?.onMouse(ev);
     }
@@ -419,6 +690,7 @@ export class App {
     this.pressed = false;
     this.pressStart = null;
     this.barDrag = null;
+    this.resetDragTracking();
   }
 
   private handleInterrupt(): void {
@@ -557,6 +829,9 @@ export class App {
       clearTimeout(this.selectionTimer);
       this.selectionTimer = null;
     }
+    // An auto-scroll timer outliving the app would keep firing into a disposed
+    // renderer.
+    this.stopDragScroll();
     // Disable mouse reporting before input returns to cooked/echo mode.
     this.renderer.dispose();
     try {

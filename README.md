@@ -6,7 +6,7 @@ A CLI coding agent that lives in your terminal. Neutrino gives you an interactiv
 
 - **Interactive terminal UI** — logo screen, chat, model select, history, and settings screens.
 - **Full mouse support** — hover to highlight, click to select/open/position the cursor, wheel to scroll, right-click to go back (like OpenCode).
-- **Select & copy** — drag the mouse over any text (agent output, the input box, menus, …) to select it; releasing the button copies the selection to the clipboard (via OSC 52, with a native fallback).
+- **Select & copy** — drag the mouse over any text (agent output, the input box, menus, …) to select it; releasing the button copies the selection to the clipboard (via OSC 52, with a native fallback). Holding the drag against the top or bottom edge of the log scrolls it, so one selection can run for as long as the whole conversation.
 - **Paste-friendly input** — like OpenCode, a pasted block has its newlines turned into spaces so it stays one line, and only a manually typed `Enter` submits the message.
 - **Faithful log rendering** — text in the chat log keeps its indentation, blank lines and column alignment; when a long tool-output line wraps, continuation lines stay indented instead of snapping back to the left margin.
 - **Scrollable context log** — a vertical scrollbar is drawn on the right edge of the chat (and the agent-conversation viewer) whenever the conversation is taller than the view. Scroll with the wheel, `PgUp`/`PgDn` or `↑`/`↓`, or grab the scrollbar with the mouse and drag it like in a GUI.
@@ -81,6 +81,7 @@ Type a message on the start screen and press `Enter` to begin a new chat.
 | Click a folded turn | Expand the complete round, or fold it again |
 | Click `⚙ tool` | Expand or collapse a tool call's output |
 | Click and drag | Select text under the rectangle; releasing copies it to the clipboard |
+| Drag onto the first/last row of the log | Scroll the log a line at a time (faster the longer you hold it) and keep growing the selection past the screen |
 | Click the header (left of `ⓘ`) | Open the model selector |
 | Click `ⓘ` (chat header) | Toggle token usage stats |
 | Drag the scrollbar | Grab the thumb on the right edge of the chat/log and drag it to scroll |
@@ -88,6 +89,12 @@ Type a message on the start screen and press `Enter` to begin a new chat.
 | Right-click | Go back (like `Esc`) |
 
 The selection highlight is drawn over whatever is on screen, so it works uniformly on the chat log, the input box and every menu. Selected text is copied with trailing whitespace trimmed per line (shell-style), so it can be pasted straight back into a terminal. UI chrome (such as the scrollbar) is skipped when copying and highlighting, so a copy never picks up the bar or the padding in front of it.
+
+A drag that scrolls keeps its starting point anchored to the line it began on,
+not to the row it began on: the mark stays on the edge that is scrolling, the
+highlight stops at the log's edge instead of spilling into the header or the
+input box, and the copy includes the lines that scrolled out of view. Scroll back
+and the selection shrinks again; press `Esc` to drop it.
 
 ## Configuration
 
@@ -315,6 +322,7 @@ node scripts/test-paste.mjs      # verify pasted newlines are flattened to space
 node scripts/test-mouse.mjs      # verify mouse escape-sequence parsing
 node scripts/test-cursor.mjs     # verify click-to-position-cursor math
 node scripts/test-selection.mjs  # verify selection highlighting & text extraction
+node scripts/test-drag-scroll.mjs # verify drag-select auto-scroll: edge scrolling, cross-screen copy
 node scripts/test-copy.mjs       # verify a copy never includes the scrollbar or trailing padding
 node scripts/test-scrollbar.mjs  # verify the conversation scrollbar size/position and drag maths
 node scripts/test-markdown.mjs   # verify markdown/table rendering (incl. ragged rows)
