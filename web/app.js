@@ -1,5 +1,5 @@
 import { createSettingsUI } from "./settings.js";
-import { turnFolds, turnPreview, turnRanges } from "./turns.js";
+import { turnAnswerIndex, turnFolds, turnPreview, turnRanges } from "./turns.js";
 
 // Neutrino web UI — a dependency-free single page app.
 //
@@ -886,10 +886,10 @@ function renderMessageList(messages, streaming, options) {
     });
     el.messages.appendChild(details);
   }
-  // Render the tail one turn at a time: a turn the agent has finished folds into
-  // a summary line, a running one stays open. The turn in flight is the last one,
-  // so `active` decides its state; a turn cut in half by the compressed prefix is
-  // rendered as plain messages instead.
+  // Render the tail one turn at a time: a finished turn folds its work behind a
+  // summary line and keeps its reply; a running one stays fully open. The turn in
+  // flight is the last one, so `active` decides its state; a turn cut in half by
+  // the compressed prefix is rendered as plain messages instead.
   const turns = turnRanges(original);
   const running = options?.active && turns.length > 0 ? turns[turns.length - 1].start : -1;
   for (const turn of turns) {
@@ -958,17 +958,24 @@ function renderMessage(message, index) {
 }
 
 /**
- * A finished turn, folded to one summary line. The messages are rendered on
- * first open and dropped again on close, so a long transcript costs nothing
- * until the reader asks for it. Nothing is lost either way: this is presentation
- * only, and the saved transcript always holds every message.
+ * A finished turn: its work folded behind one control line, its reply always on
+ * screen below it. The folded messages are rendered on first open and dropped
+ * again on close, so a long transcript costs nothing until the reader asks for
+ * it. Nothing is lost either way: this is presentation only, and the saved
+ * transcript always holds every message.
  */
 function renderTurnFold(start, messages) {
+  // The reply is never folded away, so a turn renders as a group: the fold (the
+  // prompt line plus the work it hides) and, right below it, the answer itself.
+  const reply = turnAnswerIndex(messages);
+  const group = document.createElement("div");
+  group.className = "turn-group";
+
   const details = document.createElement("details");
   details.className = "turn";
   details.open = state.openTurns.has(start);
 
-  const count = messages.length;
+  const hidden = reply < 0 ? messages.length : messages.length - 1;
   const summary = document.createElement("summary");
   const chevron = document.createElement("span");
   chevron.className = "turn-chevron";
@@ -978,9 +985,7 @@ function renderTurnFold(start, messages) {
   you.textContent = `You: ${truncate(turnPreview(messages, "user"), 110)}`;
   const meta = document.createElement("span");
   meta.className = "turn-meta";
-  meta.textContent =
-    `${count} message${count === 1 ? "" : "s"} · ` +
-    truncate(turnPreview(messages, "assistant", true), 90);
+  meta.textContent = `${hidden} of ${messages.length} message${messages.length === 1 ? "" : "s"} folded`;
   // The hint cannot live in the static text: it says the opposite once open.
   const hint = document.createElement("span");
   hint.className = "turn-hint";
@@ -989,6 +994,7 @@ function renderTurnFold(start, messages) {
   summary.appendChild(you);
   summary.appendChild(meta);
   details.appendChild(summary);
+  group.appendChild(details);
 
   const syncHint = () => {
     hint.textContent = details.open ? " — click to collapse" : " — click to expand";
@@ -1000,7 +1006,10 @@ function renderTurnFold(start, messages) {
   details.appendChild(body);
   const populate = () => {
     if (body.childNodes.length) return;
-    messages.forEach((message, offset) => body.appendChild(renderMessage(message, start + offset)));
+    messages.forEach((message, offset) => {
+      if (offset === reply) return; // the answer is never inside the fold
+      body.appendChild(renderMessage(message, start + offset));
+    });
   };
   if (details.open) populate();
   details.addEventListener("toggle", () => {
@@ -1015,7 +1024,10 @@ function renderTurnFold(start, messages) {
     }
     syncHint();
   });
-  return details;
+  // The answer comes with the fold, so a finished exchange ends on its reply
+  // even while the work that produced it stays hidden.
+  if (reply >= 0) group.appendChild(renderMessage(messages[reply], start + reply));
+  return group;
 }
 
 function firstUserMessage(messages) {

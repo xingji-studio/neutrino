@@ -597,12 +597,17 @@ button {
   margin-bottom: 18px;
 }
 
-/* A finished turn: one summary line, the whole round one click away. */
+/* A finished turn: its work behind one control line, its reply always below. */
+.turn-group {
+  display: flex;
+  flex-direction: column;
+}
+
 .turn {
   border: 1px dashed var(--border-soft);
   border-radius: var(--radius);
   padding: 8px 12px;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 }
 
 .turn > summary {

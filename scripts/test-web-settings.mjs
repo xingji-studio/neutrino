@@ -16,7 +16,7 @@ const { App } = await import("../dist/app.js");
 const { defaultState } = await import("../dist/state.js");
 const { hub } = await import("../dist/web/hub.js");
 const { createSettingsUI } = await import("../web/settings.js");
-const { turnFolds, turnPreview, turnRanges } = await import("../web/turns.js");
+const { turnAnswerIndex, turnFolds, turnPreview, turnRanges } = await import("../web/turns.js");
 
 const models = [
   { name: "Provider A", models: [{ name: "same", url: "https://a.invalid/v1", api_key: "secret-a", supports_streaming: true }] },
@@ -241,7 +241,7 @@ try {
   const browserRequests = [];
   let snapshot = { ...a, key: "browser-live", messages: [], busy: false, tokens: { prompt: 0, completion: 0 } };
   const browser = vm.createContext({
-    createSettingsUI, turnFolds, turnPreview, turnRanges, document: globalThis.document,
+    createSettingsUI, turnAnswerIndex, turnFolds, turnPreview, turnRanges, document: globalThis.document,
     localStorage: { removeItem() {} }, location: { search: "" },
     window: { addEventListener() {} }, URLSearchParams, setInterval() {},
     console: { error: error => browserErrors.push(error) },

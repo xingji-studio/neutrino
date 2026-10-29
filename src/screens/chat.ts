@@ -63,10 +63,12 @@ type Msg =
 const TOOLS = getToolDefinitions();
 
 /**
- * A finished turn only folds into a one-line summary when hiding it saves real
- * space: four or more visible blocks, or roughly six wrapped lines of text.
- * Short exchanges stay readable without a click. `web/turns.js` applies the
- * same rule in the browser, so both UIs fold exactly the same turns.
+ * A finished turn folds its *work* away — the prompt body, the thinking and the
+ * tool calls — and never its final reply, which always stays on screen. Doing
+ * that is only worth a click when the work is substantial: four or more blocks,
+ * or roughly six wrapped lines of text. Short exchanges stay readable without a
+ * click. `web/turns.js` applies the same rule in the browser, so both UIs fold
+ * exactly the same turns.
  */
 export const TURN_FOLD_MIN_BLOCKS = 4;
 export const TURN_FOLD_MIN_CHARS = 600;
@@ -1044,14 +1046,19 @@ export class ChatScreen extends Screen implements LiveAgent {
   }
 
   /**
-   * A finished turn is only worth folding when it hides something substantial.
-   * Whether it is folded right now is a separate question (`expandedTurns`).
+   * A finished turn is only worth folding when the work it hides is substantial.
+   * Whether it is folded right now is a separate question (`expandedTurns`), and
+   * its reply is never part of what it hides.
    */
   private turnHides(start: number, end: number): boolean {
     if (!this.finishedTurns.has(start)) return false;
+    const answer = this.turnAnswer(start, end);
     let blocks = 0;
     let chars = 0;
     for (let i = start; i < end; i++) {
+      // The reply stays on screen, so it is neither hidden content nor a reason
+      // to fold: a long answer alone must never collapse its own turn.
+      if (i === answer) continue;
       const m = this.messages[i];
       if (m.role === "user" || m.role === "assistant") {
         blocks++;
@@ -1059,6 +1066,40 @@ export class ChatScreen extends Screen implements LiveAgent {
       }
     }
     return blocks >= TURN_FOLD_MIN_BLOCKS || chars >= TURN_FOLD_MIN_CHARS;
+  }
+
+  /**
+   * The index of the turn's reply: its last assistant message. A fold hides the
+   * work that led to the answer, so this message is always rendered.
+   */
+  private turnAnswer(start: number, end: number): number {
+    for (let i = end - 1; i > start; i--) {
+      if (this.messages[i].role === "assistant") return i;
+    }
+    return -1;
+  }
+
+  /** For every message, the reply of the turn it belongs to (-1 = none). */
+  private turnAnswers(): number[] {
+    const answers = new Array<number>(this.messages.length).fill(-1);
+    let start = -1;
+    let answer = -1;
+    const close = (end: number): void => {
+      if (start < 0 || answer < 0) return;
+      for (let i = start; i < end; i++) answers[i] = answer;
+    };
+    for (let i = 0; i < this.messages.length; i++) {
+      const role = this.messages[i].role;
+      if (role === "user") {
+        close(i);
+        start = i;
+        answer = -1;
+      } else if (role === "assistant") {
+        answer = i;
+      }
+    }
+    close(this.messages.length);
+    return answers;
   }
 
   /** For every message, the first index of the turn folding it (-1 = none). */
@@ -1073,12 +1114,11 @@ export class ChatScreen extends Screen implements LiveAgent {
   }
 
   /**
-   * The first line of the first message in `role` (the last one with `last`).
-   * Only one line: the preview is a signpost, and the full text is a click away.
+   * The first line of the first message in `role`. Only one line: the header is
+   * a signpost, and the full text is one click away.
    */
-  private turnPreview(start: number, end: number, role: "user" | "assistant", last = false): string {
-    const slice = this.messages.slice(start, end);
-    for (const m of last ? slice.reverse() : slice) {
+  private turnPreview(start: number, end: number, role: "user" | "assistant"): string {
+    for (const m of this.messages.slice(start, end)) {
       if (m.role !== role) continue;
       const line = sanitizeText(m.content)
         .split("\n")
@@ -1116,20 +1156,11 @@ export class ChatScreen extends Screen implements LiveAgent {
     }
     const you = `You: ${this.turnPreview(start, end, "user") || "(no text)"}`;
     add({ spans: [{ text: ellipsize(`▸ ${you}`, width), style: { fg: C.amber, bold: true } }] }, -1, start);
-    const reply = this.turnPreview(start, end, "assistant", true);
-    const meta = `${count} message${count === 1 ? "" : "s"} folded`;
-    add(
-      {
-        spans: [
-          {
-            text: ellipsize(`  ${meta}${reply ? ` · Neutrino: ${reply}` : ""} — click to expand`, width),
-            style: { fg: C.dim },
-          },
-        ],
-      },
-      -1,
-      start,
-    );
+    // The prompt and the reply sit either side of the work this fold hides, so
+    // the control line goes between them and the answer stays on screen below.
+    const hidden = this.turnAnswer(start, end) < 0 ? count : count - 1;
+    const meta = `${hidden} of ${count} message${count === 1 ? "" : "s"} folded`;
+    add({ spans: [{ text: ellipsize(`  ${meta} — click to expand`, width), style: { fg: C.dim } }] }, -1, start);
   }
 
   /** Fold or unfold one turn. */
@@ -1312,6 +1343,8 @@ export class ChatScreen extends Screen implements LiveAgent {
     const context = normalizeContext(this.context, this.messages.filter((m) => m.role !== "system").length);
     // Which turn owns each message: [] -> first index of that turn, -1 = none.
     const turns = this.turnMap();
+    // Per message, the reply of its turn: a folded turn always renders that one.
+    const answers = this.turnAnswers();
     this.contextLines.clear();
     let recordIndex = 0;
     for (let mi = 0; mi < this.messages.length; mi++) {
@@ -1326,17 +1359,20 @@ export class ChatScreen extends Screen implements LiveAgent {
         archived = context !== null && recordIndex < context.end;
         recordIndex++;
       }
-      // A foldable turn always shows its control line first; its messages then
-      // render normally when the reader has opened it.
+      // A foldable turn always shows its control lines first; its work then
+      // renders when the reader has opened it, and its reply always does.
       if (m.role !== "system" && turn === mi && !(archived && !this.expandedContext)) {
         this.pushTurnHeader(mi, this.turnEnd(mi), width, add);
       }
+      const folded = turn >= 0 && !this.expandedTurns.has(turn);
+      const reply = folded && answers[mi] === mi;
       if (m.role === "system") {
         pushText(sanitizeText(m.content), { fg: C.dim });
-      } else if ((archived && !this.expandedContext) || (turn >= 0 && !this.expandedTurns.has(turn))) {
-        // Hidden, by the collapsed "Earlier conversation" fold or by the turn's
-        // own fold. Either way the message stays in the transcript, on disk and
-        // in the request; the header above says how to get it back on screen.
+      } else if ((archived && !this.expandedContext) || (folded && !reply)) {
+        // Hidden: by the collapsed "Earlier conversation" fold, or by the turn's
+        // own fold, which hides the prompt body and the work but never the
+        // reply. Either way the message stays in the transcript, on disk and in
+        // the request; the header above says how to get it back on screen.
       } else if (m.role === "user") {
         add({ spans: [{ text: "You:", style: { fg: C.accent, bold: true } }] });
         pushMarkdown(sanitizeText(m.content), { fg: C.user });
