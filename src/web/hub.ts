@@ -48,6 +48,16 @@ export type LiveWireMessage =
   | { role: "tool"; name: string; arguments: Record<string, unknown>; result: string }
   | { role: "summary"; content: string; count: number };
 
+/** A model request that failed and is being retried. */
+export interface LiveRetryNotice {
+  /** The attempt about to be made (2 = the first retry). */
+  attempt: number;
+  /** Total attempts allowed. */
+  attempts: number;
+  /** How long this attempt waits before going out. */
+  delayMs: number;
+}
+
 /** The small, frequently-changing part of a live session. */
 export interface LiveMeta {
   /** On-disk session id, or null until the conversation is first saved. */
@@ -62,6 +72,8 @@ export interface LiveMeta {
   compressing: boolean;
   /** A failed history write, cleared after the next successful checkpoint. */
   saveError?: string | null;
+  /** A retried model request, so the browser can explain the silence. */
+  retrying?: LiveRetryNotice | null;
   tokens: { prompt: number; completion: number };
   /** Tool call waiting for a human decision, or null. */
   approval?: LiveApprovalRequest | null;

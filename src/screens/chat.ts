@@ -21,6 +21,7 @@ import { drawSpans, renderMarkdownText, type Line, type Span } from "../markdown
 import { ellipsize, displayWidth } from "../width.js";
 import { sanitizeText } from "../sanitize.js";
 import { LLMClient, describeError } from "../llm/client.js";
+import { formatDelay } from "../llm/retry.js";
 import { executeTool, getToolDefinitions } from "../llm/tools.js";
 import { assessToolCall, type RiskAssessment } from "../llm/risk.js";
 import { ApprovalGate, captureApprovalContext, describeApprovalIntent, statedReason, type ApprovalDecision, type ApprovalContext } from "../llm/approval.js";
@@ -106,6 +107,8 @@ export class ChatScreen extends Screen implements LiveAgent {
   private messages: Msg[] = [];
   private streamingContent: string | null = null;
   private saveError: string | null = null;
+  /** Why a busy turn is silent: a transient network failure being retried. */
+  private retryNotice: string | null = null;
   private checkpoint = new SessionCheckpoint(() => {
     const saved = this.writeSession();
     this.publishLive();
@@ -756,7 +759,19 @@ export class ChatScreen extends Screen implements LiveAgent {
         let hasContent = false;
         let aborted = false;
 
-        for await (const chunk of client.streamTurn(apiMessages, TOOLS)) {
+        for await (const chunk of client.streamTurn(apiMessages, TOOLS, {
+          // A retried request can go quiet for up to 160s, so the status line
+          // says why instead of looking hung. The moment the user pauses or a
+          // newer turn takes over, the backoff is dropped instead of waited out.
+          onRetry: (notice) => {
+            this.retryNotice =
+              `Network hiccup — retrying in ${formatDelay(notice.delayMs)} ` +
+              `(attempt ${notice.attempt}/${notice.attempts}): ${notice.reason}`;
+            this.app.render();
+          },
+          cancelled: () => token !== this.turnToken || this.paused,
+        })) {
+          this.retryNotice = null;
           if (token !== this.turnToken || this.paused) {
             aborted = true;
             break;
@@ -768,6 +783,8 @@ export class ChatScreen extends Screen implements LiveAgent {
           this.app.render();
           this.publishLive();
         }
+
+        this.retryNotice = null;
 
         if (token !== this.turnToken) {
           // Pause already retained the partial reply. A stale stream must not
@@ -1211,7 +1228,7 @@ export class ChatScreen extends Screen implements LiveAgent {
     const snapshotLen = this.messages.length;
     let summary = "";
     try {
-      summary = await this.summarizeTranscript(transcript);
+      summary = await this.summarizeTranscript(transcript, () => token !== this.turnToken);
     } catch {
       summary = "";
     }
@@ -1240,9 +1257,11 @@ export class ChatScreen extends Screen implements LiveAgent {
    * Summarise a transcript produced by `transcriptFor`. Split out so tests can
    * stub it without touching the network.
    */
-  protected async summarizeTranscript(transcript: string): Promise<string> {
+  protected async summarizeTranscript(transcript: string, cancelled?: () => boolean): Promise<string> {
     const client = new LLMClient(this.model, this.modelProvider, this.intensity);
-    const text = await client.summarize(transcript);
+    // Compression runs before the turn proper: a pause or a newer message must
+    // be able to abandon it instead of waiting out the retry backoff.
+    const text = await client.summarize(transcript, { cancelled });
     if (client.usage) {
       this.tokens.prompt += client.usage.prompt;
       this.tokens.completion += client.usage.completion;
@@ -1466,6 +1485,9 @@ export class ChatScreen extends Screen implements LiveAgent {
       statusStyle = { fg: C.amber };
     } else if (this.paused) {
       status = "PAUSED — press ESC ESC to resume";
+      statusStyle = { fg: C.amber, bold: true };
+    } else if (this.retryNotice) {
+      status = this.retryNotice;
       statusStyle = { fg: C.amber, bold: true };
     } else if (this.busy) {
       status = "Streaming... press Ctrl+C or ESC ESC to pause";

@@ -800,12 +800,17 @@ function renderControls(snapshot) {
   const badge = document.createElement("span");
   const mode = snapshot.paused ? "paused" : snapshot.busy ? "busy" : "idle";
   badge.className = `badge ${mode}`;
+  // A retried request leaves the session busy but silent: name the retry so the
+  // badge does not just say "working" for minutes.
+  const retrying = snapshot.retrying;
   badge.textContent = snapshot.paused
     ? "paused"
     : snapshot.busy
       ? snapshot.compressing
         ? "compressing"
-        : "working"
+        : retrying
+          ? `retrying ${retrying.attempt}/${retrying.attempts}`
+          : "working"
       : "idle";
   el.controls.appendChild(badge);
 

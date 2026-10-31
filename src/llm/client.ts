@@ -1,5 +1,20 @@
 import { INTENSITY_PARAMS, type ModelInfo } from "../config.js";
 import type { ToolDefinition } from "./tools.js";
+import {
+  HttpStatusError,
+  describeError,
+  isRetriableFailure,
+  retryDelayMs,
+  retryPolicy,
+  waitBeforeRetry,
+  type RetryNotice,
+  type RetryPolicy,
+} from "./retry.js";
+
+// Callers import `describeError` from this module; it lives next to the
+// classification helpers that share the same "is this a dropped connection?"
+// knowledge, so it is re-exported rather than duplicated.
+export { describeError } from "./retry.js";
 
 export interface ToolCall {
   id: string;
@@ -21,10 +36,23 @@ interface ApiMessage {
   name?: string;
 }
 
-/** How many extra times a request is retried when the connection drops. */
-const NETWORK_RETRIES = 2;
 /** Give up if the server has not started to respond within this window. */
 const CONNECT_TIMEOUT_MS = 120_000;
+
+export interface StreamOptions {
+  /**
+   * Reported before each wait so the UI can explain why the stream went quiet
+   * for up to 160s instead of looking hung.
+   */
+  onRetry?: (notice: RetryNotice) => void;
+  /**
+   * Polled during the waits: a paused turn, a newer message or a quit has no
+   * interest in the reply any more, and must not be held up by a long backoff.
+   */
+  cancelled?: () => boolean;
+  /** Override the policy (tests, or a caller with its own budget). */
+  retry?: Partial<RetryPolicy>;
+}
 
 /**
  * System prompt used when compressing a long conversation. The instruction
@@ -39,122 +67,43 @@ const SUMMARY_SYSTEM_PROMPT =
   "instructions and redundant tool output. Output only the summary, with no preface.";
 
 /**
- * Terse transport messages that all mean "the connection dropped mid-flight".
- * The \b keeps "terminated" from matching unrelated text such as
- * "Unterminated string constant".
- */
-const DROP_HINT_RE = /\bterminated\b|other side closed|socket hang up|premature close/i;
-
-/**
- * Flatten an error and its `cause` chain into one readable line.
+ * One POST, bounded by a connect timeout.
  *
- * `fetch` reports almost every transport problem as a bare
- * `TypeError: fetch failed`; the actual reason (`ECONNRESET`, `EMFILE`,
- * `ENOTFOUND`, `UND_ERR_…`) is tucked away in `error.cause`. Without walking
- * that chain a failure is impossible to diagnose, so this always reports it.
+ * Retrying deliberately does *not* happen here: only the caller knows whether a
+ * token already reached the user, and nesting two retry loops would multiply
+ * both the request count and the total wait by the attempt budget.
  */
-export function describeError(e: unknown): string {
-  if (!(e instanceof Error)) return String(e);
-  const parts: string[] = [];
-  const push = (msg: string, code?: string): void => {
-    const text = code && !msg.includes(code) ? `${msg} (${code})` : msg;
-    if (text && !parts.includes(text)) parts.push(text);
-  };
-
-  let cur: unknown = e;
-  const seen = new Set<unknown>();
-  while (cur != null && !seen.has(cur)) {
-    if (typeof cur === "string") {
-      // fetch/undici sometimes stash the real reason in a plain string
-      // (`cause: "other side closed"`), which an object-only walk would miss.
-      push(cur);
-      break;
-    }
-    if (typeof cur !== "object") break;
-    seen.add(cur);
-    const err = cur as { message?: unknown; name?: unknown; code?: unknown; cause?: unknown };
-    const message = typeof err.message === "string" && err.message ? err.message : String(err.name ?? "Error");
-    const code = typeof err.code === "string" ? err.code : undefined;
-    push(message, code);
-    cur = err.cause;
+async function postStream(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(new Error(`request timed out after ${CONNECT_TIMEOUT_MS / 1000}s`)),
+    CONNECT_TIMEOUT_MS,
+  );
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
   }
-  const text = parts.join(": ") || e.message;
-  // A dropped mid-stream connection surfaces as a bare `TypeError: terminated`,
-  // which on its own tells the user nothing worth reading.
-  return DROP_HINT_RE.test(text) ? `${text} — the connection was closed before the response finished` : text;
+}
+
+/** The policy a stream will actually use, with any per-call override applied. */
+function resolvePolicy(options: StreamOptions): RetryPolicy {
+  return { ...retryPolicy(), ...options.retry };
 }
 
 /**
- * Whether a failed request is worth retrying: a transient connection problem
- * (reset / refused / DNS / timeout) rather than a real response from the API.
+ * Wait before the next attempt, telling the caller why the stream went quiet.
+ * Returns false when the caller stopped caring during the wait.
  */
-function isRetriableNetworkError(e: unknown): boolean {
-  const transient = new Set([
-    "ECONNRESET",
-    "ECONNREFUSED",
-    "ECONNABORTED",
-    "EPIPE",
-    "ETIMEDOUT",
-    "ENETUNREACH",
-    "ENETDOWN",
-    "EAI_AGAIN",
-    "ERR_STREAM_PREMATURE_CLOSE",
-    "UND_ERR_SOCKET",
-    "UND_ERR_CONNECT_TIMEOUT",
-  ]);
-  let cur: unknown = e;
-  const seen = new Set<unknown>();
-  while (cur != null && !seen.has(cur)) {
-    if (typeof cur === "string") {
-      if (DROP_HINT_RE.test(cur)) return true;
-      break;
-    }
-    if (typeof cur !== "object") break;
-    seen.add(cur);
-    const err = cur as { name?: unknown; code?: unknown; message?: unknown; cause?: unknown };
-    if (typeof err.code === "string" && transient.has(err.code)) return true;
-    // Our own connect timeout aborts with a plain AbortError; undici wraps a
-    // dropped socket in a SocketError.
-    if (err.name === "AbortError" || err.name === "SocketError") return true;
-    // A stream that dies mid-flight: "terminated", "socket hang up", …
-    if (typeof err.message === "string" && DROP_HINT_RE.test(err.message)) return true;
-    cur = err.cause;
-  }
-  // Undici's generic wrapper: assume the socket dropped and try again.
-  return e instanceof Error && /fetch failed/i.test(e.message);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Issue a streaming request, retrying a few times on transient network errors
- * and giving up with a clear error if the server never starts responding.
- *
- * Retries are safe here because they only ever happen *before* a response is
- * returned; once bytes start flowing the caller is responsible for the stream.
- */
-async function requestStream(url: string, init: RequestInit): Promise<Response> {
-  let lastErr: unknown;
-  for (let attempt = 0; attempt <= NETWORK_RETRIES; attempt++) {
-    const controller = new AbortController();
-    const timer = setTimeout(
-      () => controller.abort(new Error(`request timed out after ${CONNECT_TIMEOUT_MS / 1000}s`)),
-      CONNECT_TIMEOUT_MS,
-    );
-    try {
-      const resp = await fetch(url, { ...init, signal: controller.signal });
-      clearTimeout(timer);
-      return resp;
-    } catch (e) {
-      clearTimeout(timer);
-      lastErr = e;
-      if (attempt === NETWORK_RETRIES || !isRetriableNetworkError(e)) throw e;
-      await sleep(300 * (attempt + 1));
-    }
-  }
-  throw lastErr;
+async function pauseForRetry(
+  attempt: number,
+  policy: RetryPolicy,
+  error: unknown,
+  options: StreamOptions,
+): Promise<boolean> {
+  const delayMs = retryDelayMs(attempt - 1, policy);
+  options.onRetry?.({ attempt: attempt + 1, attempts: policy.attempts, delayMs, reason: describeError(error) });
+  return waitBeforeRetry(attempt - 1, policy, options.cancelled);
 }
 
 export class LLMClient {
@@ -181,13 +130,13 @@ export class LLMClient {
    * the old messages. Uses a throw-away request (no tools) via the normal
    * streaming path, so provider differences are handled for free.
    */
-  async summarize(transcript: string): Promise<string> {
+  async summarize(transcript: string, options: StreamOptions = {}): Promise<string> {
     const messages: ApiMessage[] = [
       { role: "system", content: SUMMARY_SYSTEM_PROMPT },
       { role: "user", content: transcript },
     ];
     let out = "";
-    for await (const chunk of this.streamTurn(messages)) out += chunk;
+    for await (const chunk of this.streamTurn(messages, undefined, options)) out += chunk;
     const text = out.trim();
     if (!text || text.startsWith("[Error")) return "";
     return text;
@@ -197,42 +146,58 @@ export class LLMClient {
    * One-shot completion with its own system prompt. The approval reviewers use
    * this so they never share context with the conversation they are judging.
    */
-  async complete(system: string, user: string): Promise<string> {
+  async complete(system: string, user: string, options: StreamOptions = {}): Promise<string> {
     let out = "";
-    for await (const chunk of this.streamTurn([
-      { role: "system", content: system },
-      { role: "user", content: user },
-    ])) {
+    for await (const chunk of this.streamTurn(
+      [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      undefined,
+      options,
+    )) {
       out += chunk;
     }
     return out.trim();
   }
 
-  async *streamTurn(messages: ApiMessage[], tools?: ToolDefinition[]): AsyncGenerator<string> {
+  async *streamTurn(
+    messages: ApiMessage[],
+    tools?: ToolDefinition[],
+    options: StreamOptions = {},
+  ): AsyncGenerator<string> {
     this.toolCalls = [];
     this.usage = null;
     try {
       if (this.provider === "Anthropic") {
-        yield* this.streamAnthropic(messages);
+        yield* this.streamAnthropic(messages, options);
         return;
       }
-      yield* this.streamOpenAI(messages, tools);
+      yield* this.streamOpenAI(messages, tools, options);
     } catch (e) {
       yield `\n[Error: ${describeError(e)}]`;
     }
   }
 
   /**
-   * Drive one request, retrying if the stream dies before it produced anything.
+   * Drive one request, retrying while the failure is transient.
    *
    * A response can be cut off on the very first read — "terminated" when a
-   * proxy or the server closes the connection mid-flight. Nothing has reached
-   * the user yet, so re-issuing the request is invisible (and cannot duplicate
-   * text). Once a token has been emitted a retry is unsafe, so the error is
-   * surfaced instead.
+   * proxy or the server closes the connection mid-flight — or the request can
+   * never leave at all. Nothing has reached the user yet, so re-issuing is
+   * invisible and cannot duplicate text; the attempts and the 5s/10s/20s/…
+   * backoff live in `retry.ts`.
+   *
+   * Once a token has been emitted a retry would replay the reply from its
+   * beginning, so the error is surfaced instead and the partial text is kept.
    */
-  private async *streamOpenAI(messages: ApiMessage[], tools?: ToolDefinition[]): AsyncGenerator<string> {
-    for (let attempt = 0; ; attempt++) {
+  private async *streamOpenAI(
+    messages: ApiMessage[],
+    tools: ToolDefinition[] | undefined,
+    options: StreamOptions,
+  ): AsyncGenerator<string> {
+    const policy = resolvePolicy(options);
+    for (let attempt = 1; ; attempt++) {
       this.toolCalls = [];
       let produced = false;
       try {
@@ -242,8 +207,8 @@ export class LLMClient {
         }
         return;
       } catch (e) {
-        if (produced || attempt >= NETWORK_RETRIES || !isRetriableNetworkError(e)) throw e;
-        await sleep(400 * (attempt + 1));
+        if (produced || attempt >= policy.attempts || !isRetriableFailure(e)) throw e;
+        if (!(await pauseForRetry(attempt, policy, e, options))) return;
       }
     }
   }
@@ -265,16 +230,18 @@ export class LLMClient {
     };
     if (tools && tools.length) payload.tools = tools;
 
-    const resp = await requestStream(url, {
+    const resp = await postStream(url, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
     });
 
     if (!resp.ok) {
-      const text = await resp.text().catch(() => "");
-      yield `\n[Error: HTTP ${resp.status}${text ? " - " + text.slice(0, 500) : ""}]`;
-      return;
+      // Thrown rather than printed: a 502/503/504/429 is as transient as a
+      // reset and deserves the same retries, while a 400/401 must surface at
+      // once. `streamTurn` renders the final failure into the transcript.
+      const body = await resp.text().catch(() => "");
+      throw new HttpStatusError(resp.status, body.slice(0, 500));
     }
     if (!resp.body) {
       yield "\n[Error: empty response body]";
@@ -357,8 +324,9 @@ export class LLMClient {
   }
 
   /** Anthropic counterpart of `streamOpenAI`, with the same retry policy. */
-  private async *streamAnthropic(messages: ApiMessage[]): AsyncGenerator<string> {
-    for (let attempt = 0; ; attempt++) {
+  private async *streamAnthropic(messages: ApiMessage[], options: StreamOptions): AsyncGenerator<string> {
+    const policy = resolvePolicy(options);
+    for (let attempt = 1; ; attempt++) {
       this.toolCalls = [];
       let produced = false;
       try {
@@ -368,8 +336,8 @@ export class LLMClient {
         }
         return;
       } catch (e) {
-        if (produced || attempt >= NETWORK_RETRIES || !isRetriableNetworkError(e)) throw e;
-        await sleep(400 * (attempt + 1));
+        if (produced || attempt >= policy.attempts || !isRetriableFailure(e)) throw e;
+        if (!(await pauseForRetry(attempt, policy, e, options))) return;
       }
     }
   }
@@ -399,15 +367,17 @@ export class LLMClient {
     };
     if (systemMsg) payload.system = systemMsg;
 
-    const resp = await requestStream(url, {
+    const resp = await postStream(url, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
     });
     if (!resp.ok) {
-      const text = await resp.text().catch(() => "");
-      yield `\n[Error: HTTP ${resp.status}${text ? " - " + text.slice(0, 500) : ""}]`;
-      return;
+      // Thrown rather than printed: a 502/503/504/429 is as transient as a
+      // reset and deserves the same retries, while a 400/401 must surface at
+      // once. `streamTurn` renders the final failure into the transcript.
+      const body = await resp.text().catch(() => "");
+      throw new HttpStatusError(resp.status, body.slice(0, 500));
     }
     if (!resp.body) {
       yield "\n[Error: empty response body]";

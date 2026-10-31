@@ -174,6 +174,42 @@ try {
     process.stdout.removeListener("resize", signalApp.resizeHandler);
   }
 
+  // A retry backoff must never hold a paused turn hostage: ESC has to take
+  // effect at once, not after the current 3s/5s/… wait expires.
+  {
+    const savedDelay = process.env.NEUTRINO_RETRY_DELAY_MS;
+    const savedFetch = globalThis.fetch;
+    process.env.NEUTRINO_RETRY_DELAY_MS = "3000";
+    globalThis.fetch = async () => {
+      throw new TypeError("terminated");
+    };
+    try {
+      const { chat } = fixture(true);
+      chat.model = { name: "test", url: "http://127.0.0.1:1/v1", api_key: "k", supports_streaming: true };
+      chat.modelProvider = "OpenAI";
+      chat.intensity = "High";
+      const token = ++chat.turnToken;
+      const started = process.hrtime.bigint();
+      const turn = chat.agentLoop([{ role: "user", content: "hi" }], token, {});
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.match(
+        chat.retryNotice,
+        /retrying in 3s \(attempt 2\/7\)/,
+        "a busy turn says why it is silent",
+      );
+      chat.togglePause();
+      await turn;
+      const waited = Number(process.hrtime.bigint() - started) / 1e6;
+      assert.ok(waited < 1500, `pausing must cut the backoff short, waited ${Math.round(waited)}ms`);
+      assert.equal(chat.retryNotice, null, "the notice is cleared once the turn ends");
+      assert.equal(chat.paused, true);
+    } finally {
+      globalThis.fetch = savedFetch;
+      if (savedDelay === undefined) delete process.env.NEUTRINO_RETRY_DELAY_MS;
+      else process.env.NEUTRINO_RETRY_DELAY_MS = savedDelay;
+    }
+  }
+
   let output = "";
   const renderer = new Renderer();
   renderer.out = { write(chunk) { output += chunk; } };

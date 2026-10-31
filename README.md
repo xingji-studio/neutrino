@@ -113,6 +113,8 @@ A few environment variables override flags:
 | --- | --- |
 | `NEUTRINO_WEB_PORT` | Web UI port: like `--web-port` in TUI mode, and the port in `neutrino web`. |
 | `NEUTRINO_WEB_HOST` | Interface to bind, like `--host`. |
+| `NEUTRINO_NETWORK_ATTEMPTS` | Total tries for a model request that keeps dropping (default 7). |
+| `NEUTRINO_RETRY_DELAY_MS` | Wait before the first retry in ms; each retry doubles it (default 5000). |
 
 ### Approvals
 
@@ -332,7 +334,7 @@ node scripts/test-render.mjs     # fuzz the diff renderer + render the chat scre
                                  # asserting no stale/residual cells are left behind
 node scripts/test-sanitize.mjs   # verify ANSI/control codes never reach the screen
 node scripts/test-drift.mjs      # verify the input area self-heals after terminal drift
-node scripts/test-fetch.mjs      # verify streamed requests release aborts and retry drops
+node scripts/test-fetch.mjs      # verify streamed requests release aborts, retry drops and the 7-attempt backoff
 node scripts/test-compact.mjs    # verify context-compression planning
 node scripts/test-history-fold.mjs # verify full-history retention, folding and resume
 node scripts/test-web-history.mjs  # verify browser history disclosures and streaming state
@@ -359,11 +361,28 @@ A cell's glyph is copied straight into the output stream, so a cell holding a *c
 
 ### Network resilience
 
-Model responses arrive over a streamed connection that can drop at any point. A single blip should not end the session, so three cases are handled:
+Model responses arrive over a streamed connection that can drop at any point. A single blip must not end the session — a turn is minutes of work, and a proxy that resets an idle socket says nothing about the user's task — so a failed request is retried before anything is given up:
 
-- **The request never goes out** (`fetch` rejects) — retried a couple of times with a short backoff, bounded by a connect timeout.
-- **The stream dies before the first byte** — the server or a proxy closed the connection mid-flight (`TypeError: terminated`, `other side closed`, …). Nothing has reached the user, so the request is simply re-issued.
-- **The stream dies after output has started** — retrying would duplicate text, so the error is surfaced instead, with the real reason expanded out of the `error.cause` chain (`fetch failed` alone says nothing useful).
+| Attempt | Wait before it |
+| --- | --- |
+| 1 | — |
+| 2 | 5s |
+| 3 | 10s |
+| 4 | 20s |
+| 5 | 40s |
+| 6 | 80s |
+| 7 | 2m 40s |
+
+That is seven tries and roughly five minutes in total, doubling every time: a link that is merely flaky recovers long before the budget is spent, while a link that is genuinely down is not hammered. `NEUTRINO_NETWORK_ATTEMPTS` and `NEUTRINO_RETRY_DELAY_MS` tune both numbers. The policy lives in `src/llm/retry.ts`.
+
+What counts as worth retrying:
+
+- **Connection failures** — a reset (`ECONNRESET`), a refused or unreachable socket, `EPIPE`, DNS (`EAI_AGAIN`), a connect timeout, and undici's `UND_ERR_*` codes.
+- **A stream that dies before the first byte** — the server or a proxy closed the connection mid-flight (`TypeError: terminated`, `other side closed`, `socket hang up`, …). Nothing has reached the user, so the request is simply re-issued.
+- **A transient HTTP status** — 408/425, 429 and 5xx (502/503/504 from a load balancer, 529 "overloaded"). A bad request is different: 400/401/403/404/422 surface on the first answer, because re-sending them only delays the real message.
+- **A stream that dies after output has started** is *not* retried: replaying it would duplicate the reply, so the error is surfaced with the real reason expanded out of the `error.cause` chain (`fetch failed` alone says nothing useful) and the partial text is kept.
+
+A retry can leave the stream silent for up to 160s, so it is never silent *about* being silent: the terminal status line and the web badge name the attempt and the delay ("Network hiccup — retrying in 40s (attempt 4/7)"). The wait is also polled, so pausing the turn, sending a newer message or quitting drops it immediately instead of sitting out the backoff.
 
 Any stream the consumer walks away from (pause, or a newer turn taking over) always has its body cancelled, so sockets are not leaked.
 

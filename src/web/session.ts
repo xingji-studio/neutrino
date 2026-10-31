@@ -38,6 +38,7 @@ import {
   type ConversationContext,
 } from "../compact.js";
 import { LLMClient, describeError } from "../llm/client.js";
+import type { RetryNotice } from "../llm/retry.js";
 import { executeTool, getToolDefinitions } from "../llm/tools.js";
 import { assessToolCall, type RiskAssessment } from "../llm/risk.js";
 import { ApprovalGate, captureApprovalContext, describeApprovalIntent, type ApprovalDecision, type ApprovalContext } from "../llm/approval.js";
@@ -142,6 +143,8 @@ export class WebSession implements LiveAgent {
   private context: ConversationContext | null = null;
   private streamingContent: string | null = null;
   private saveError: string | null = null;
+  /** A retried request, so the browser can explain why the stream is quiet. */
+  private retrying: RetryNotice | null = null;
   private checkpoint = new SessionCheckpoint(() => {
     const saved = this.writeSession();
     this.publishLive();
@@ -235,6 +238,9 @@ export class WebSession implements LiveAgent {
       queued: this.queued,
       compressing: this.compressing,
       saveError: this.saveError,
+      retrying: this.retrying
+        ? { attempt: this.retrying.attempt, attempts: this.retrying.attempts, delayMs: this.retrying.delayMs }
+        : null,
       tokens: { prompt: this.tokens.prompt, completion: this.tokens.completion },
       approval: this.pendingApproval
         ? liveApprovalDetails(this.pendingApproval.tool, this.pendingApproval.args, this.pendingApproval.risk, this.dir)
@@ -393,7 +399,14 @@ export class WebSession implements LiveAgent {
         let text = "";
         this.streamingContent = "";
         this.publishLive();
-        for await (const chunk of client.streamTurn(apiMessages, tools)) {
+        for await (const chunk of client.streamTurn(apiMessages, tools, {
+          onRetry: (notice) => {
+            this.retrying = notice;
+            this.publishLive();
+          },
+          cancelled: () => token !== this.turnToken || this.paused,
+        })) {
+          this.retrying = null;
           if (token !== this.turnToken || this.paused) return;
           text += chunk;
           this.streamingContent = text;
@@ -482,6 +495,7 @@ export class WebSession implements LiveAgent {
   }
 
   private onTurnFinished(): void {
+    this.retrying = null;
     this.busy = false;
     this.paused = false;
     this.streamingContent = null;
@@ -564,9 +578,9 @@ export class WebSession implements LiveAgent {
     this.publishLive();
     let summary = "";
     try {
-      summary = await new LLMClient(this.model, this.provider, this.intensity).summarize(
-        transcript,
-      );
+      summary = await new LLMClient(this.model, this.provider, this.intensity).summarize(transcript, {
+        cancelled: () => token !== this.turnToken || this.paused,
+      });
     } catch {
       summary = "";
     }
