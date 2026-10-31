@@ -29,7 +29,50 @@ export interface ToolDefinition {
   };
 }
 
-export function getToolDefinitions(): ToolDefinition[] {
+/** The tool a parent agent calls to hand work to a sub-agent. */
+export const DELEGATE_TOOL = "delegate";
+
+const DELEGATE_TOOL_DEFINITION: ToolDefinition = {
+  type: "function",
+  function: {
+    name: DELEGATE_TOOL,
+    description:
+      "Hand one self-contained sub-task to a sub-agent that works in its own context, then receive its " +
+      "report as the result of this call. Use it when the work is independent and the exploration it " +
+      "needs (reading many files, running probes, checking how something behaves) would crowd this " +
+      "conversation: the sub-agent's messages never enter this transcript, only its final report does. " +
+      "The sub-agent has the same tools, the same working directory and the same approval gate - its " +
+      "risky calls still wait for the user - and it cannot delegate further. " +
+      "The task must stand on its own: the sub-agent cannot see this conversation and cannot ask questions.",
+    parameters: {
+      type: "object",
+      properties: {
+        task: {
+          type: "string",
+          description:
+            "The complete sub-task, written as if to someone who cannot see this conversation: what to " +
+            "do, which files or references to use, and what 'done' looks like. One job, not a list.",
+        },
+        context: {
+          type: "string",
+          description:
+            "Optional: only the facts the sub-agent cannot find in the project itself (a decision already " +
+            "made, a constraint from the user). Keep it short - it does not replace reading the code.",
+        },
+        reason: REASON_PROPERTY,
+      },
+      required: ["task", "reason"],
+    },
+  },
+};
+
+/**
+ * The toolset a sub-agent runs with: the same tools as its parent, minus
+ * `delegate` - one level of delegation, never a tree of agents that nobody can
+ * follow (or stop). The sub-agent prompt says so as well; removing the tool
+ * makes it true.
+ */
+export function getSubAgentToolDefinitions(): ToolDefinition[] {
   return [
     {
       type: "function",
@@ -94,6 +137,11 @@ export function getToolDefinitions(): ToolDefinition[] {
       },
     },
   ];
+}
+
+/** Every tool a top-level agent can call: the base set plus delegation. */
+export function getToolDefinitions(): ToolDefinition[] {
+  return [...getSubAgentToolDefinitions(), DELEGATE_TOOL_DEFINITION];
 }
 
 export async function executeTool(

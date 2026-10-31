@@ -7,6 +7,7 @@ import vm from "node:vm";
 const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "neutrino-web-settings-"));
 process.env.HOME = testHome;
 process.env.USERPROFILE = testHome;
+process.env.NEUTRINO_PLAN = "off";
 const { saveModels, saveConfig, loadConfig, loadSession, resolveModelSelection } = await import("../dist/config.js");
 const { getWebSettings, updateWebSettings } = await import("../dist/web/settings.js");
 const { ChatScreen } = await import("../dist/screens/chat.js");

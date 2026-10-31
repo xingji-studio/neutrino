@@ -61,6 +61,13 @@ async function apiFetch(path, init = {}) {
   return response;
 }
 
+// The orbit mark is shared by the sidebar, the favicon and the login card, so
+// the console never falls back to a typed glyph for its own identity.
+const LOGO_MARK =
+  '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+  '<ellipse cx="12" cy="12" rx="9.4" ry="3.8" transform="rotate(-30 12 12)" stroke="currentColor" stroke-width="1.7"/>' +
+  '<circle cx="12" cy="12" r="3.1" stroke="currentColor" stroke-width="1.7"/></svg>';
+
 let gateShown = false;
 
 function showGate(message = "") {
@@ -76,8 +83,9 @@ function showGate(message = "") {
   gate.setAttribute("aria-labelledby", "login-title");
   gate.innerHTML =
     '<form class="gate-card">' +
-    '<h2 id="login-title">Sign in to Neutrino</h2>' +
-    '<p>Enter your Web password. The default password is 114514.</p>' +
+    '<div class="gate-brand"><span class="logo">' + LOGO_MARK + "</span><strong>Neutrino</strong></div>" +
+    '<h2 id="login-title">Sign in</h2>' +
+    '<p>Enter your Web password to open this console. The default password is 114514.</p>' +
     '<label for="login-password">Password</label>' +
     '<input id="login-password" name="password" type="password" autocomplete="current-password" maxlength="256" required autofocus>' +
     '<p class="form-feedback error" role="alert"></p>' +
@@ -240,6 +248,16 @@ function truncate(value, max) {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
+// Sidebar paths are identifiers, not navigation: keep the project end of a long
+// path so two checkouts under different parents stay tellable apart.
+function shortenPath(value, depth = 2) {
+  const text = String(value ?? "");
+  const separator = text.includes("\\") ? "\\" : "/";
+  const parts = text.split(/[\\/]+/).filter(Boolean);
+  if (parts.length <= depth + 1) return text;
+  return `…${separator}${parts.slice(-depth).join(separator)}`;
+}
+
 function safeJson(value) {
   try {
     return JSON.stringify(value ?? {});
@@ -364,8 +382,10 @@ function renderGroup(group) {
   const header = document.createElement("button");
   header.className = "group-header";
   header.innerHTML =
-    `<span class="chevron">${collapsed ? "▸" : "▾"}</span>` +
-    `<span class="path" title="${escapeHtml(group.cwd)}">${escapeHtml(group.cwd)}</span>` +
+    `<span class="chevron${collapsed ? " collapsed" : ""}">` +
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>' +
+    "</span>" +
+    `<span class="path" title="${escapeHtml(group.cwd)}">${escapeHtml(shortenPath(group.cwd))}</span>` +
     `<span class="count">${group.sessions.length}</span>`;
   header.addEventListener("click", () => {
     if (state.collapsed.has(group.key)) state.collapsed.delete(group.key);
@@ -413,12 +433,14 @@ function renderSession(session) {
   if (session.live) item.classList.add("live");
 
   const title = session.title || "New conversation";
+  const count = Number(session.message_count ?? 0);
+  item.title = title;
   item.innerHTML =
     `<div class="session-top"><span class="session-title">${escapeHtml(title)}</span>` +
     `${session.live ? '<span class="dot" title="Live"></span>' : ""}</div>` +
     `<div class="session-meta"><span class="model">${escapeHtml(session.model || "?")}</span>` +
     `<span class="time">${escapeHtml(formatTime(session.updated_at))}</span>` +
-    `<span class="count">${Number(session.message_count ?? 0)} msg</span></div>`;
+    `<span class="count">${count} message${count === 1 ? "" : "s"}</span></div>`;
 
   item.addEventListener("click", () => {
     if (session.liveKey) selectLive(session.liveKey);
@@ -459,6 +481,7 @@ async function selectLive(key) {
   state.openContext = null;
   renderSidebar();
   el.controls.innerHTML = "";
+  renderApproval(null);
   el.title.textContent = "Connecting…";
   el.sub.textContent = "";
   setComposerMode("live");
@@ -516,6 +539,7 @@ async function selectFile(id) {
   state.openContext = null;
   renderSidebar();
   el.controls.innerHTML = "";
+  renderApproval(null);
   setComposerMode("resume");
   el.title.textContent = "Loading…";
   el.sub.textContent = "";
@@ -552,12 +576,12 @@ function renderFileControls(data) {
 
   const badge = document.createElement("span");
   badge.className = "badge readonly";
-  badge.textContent = "read-only";
+  badge.textContent = "Read-only";
   el.controls.appendChild(badge);
 
   const button = document.createElement("button");
   button.className = "control primary";
-  button.textContent = "✎ Continue here";
+  button.textContent = "Continue here";
   button.title = "Resume this conversation in the browser and keep chatting";
   button.addEventListener("click", async () => {
     button.disabled = true;
@@ -567,7 +591,7 @@ function renderFileControls(data) {
       el.input.focus();
     } catch (error) {
       button.disabled = false;
-      button.textContent = "✎ Continue here";
+      button.textContent = "Continue here";
       el.sub.textContent = `Could not continue this conversation: ${error.message}`;
     }
   });
@@ -595,8 +619,8 @@ function setComposerMode(mode) {
   el.composer.classList.remove("hidden");
   el.input.placeholder =
     mode === "resume"
-      ? "Continue this conversation… (Enter to send)"
-      : "Message the agent… (Enter to send, Shift+Enter for a new line)";
+      ? "Continue this conversation…"
+      : "Message Neutrino…";
 }
 
 function hideComposer() {
@@ -709,7 +733,7 @@ function renderApproval(snapshot) {
   const head = document.createElement("div");
   head.className = "approval-head";
   const title = document.createElement("strong");
-  title.textContent = "Request Approval";
+  title.textContent = "Approval required";
   const risk = document.createElement("span");
   risk.className = "approval-risk";
   risk.textContent = extreme ? "EXTREME RISK" : "HIGH RISK";
@@ -801,8 +825,10 @@ function renderControls(snapshot) {
   const mode = snapshot.paused ? "paused" : snapshot.busy ? "busy" : "idle";
   badge.className = `badge ${mode}`;
   // A retried request leaves the session busy but silent: name the retry so the
-  // badge does not just say "working" for minutes.
+  // badge does not just say "working" for minutes. The same goes for a
+  // sub-agent, whose own messages never reach this transcript.
   const retrying = snapshot.retrying;
+  const subagent = snapshot.subagent;
   badge.textContent = snapshot.paused
     ? "paused"
     : snapshot.busy
@@ -810,7 +836,9 @@ function renderControls(snapshot) {
         ? "compressing"
         : retrying
           ? `retrying ${retrying.attempt}/${retrying.attempts}`
-          : "working"
+          : subagent
+            ? `sub-agent: ${subagent}`
+            : "working"
       : "idle";
   el.controls.appendChild(badge);
 
@@ -824,7 +852,7 @@ function renderControls(snapshot) {
   if (snapshot.busy || snapshot.paused) {
     const button = document.createElement("button");
     button.className = "control";
-    button.textContent = snapshot.paused ? "▶ Resume" : "❚❚ Pause";
+    button.textContent = snapshot.paused ? "Resume" : "Pause";
     button.addEventListener("click", () => {
       postAction(snapshot.key, snapshot.paused ? "resume" : "pause");
     });
@@ -857,7 +885,7 @@ function renderMessageList(messages, streaming, options) {
   if (messages.length === 0 && !streaming) {
     const empty = document.createElement("div");
     empty.className = "empty";
-    empty.textContent = options?.readOnly ? "This conversation is empty." : "Say something to get started.";
+    empty.textContent = options?.readOnly ? "This conversation is empty." : "Send a message to get started.";
     el.messages.appendChild(empty);
     return;
   }
@@ -936,7 +964,9 @@ function renderMessage(message, index) {
 
     const summary = document.createElement("summary");
     summary.innerHTML =
-      `<span class="tool-name">⚙ ${escapeHtml(message.name || "tool")}</span>` +
+      '<span class="tool-name">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></svg>' +
+      `${escapeHtml(message.name || "tool")}</span>` +
       `<span class="tool-args">${escapeHtml(truncate(safeJson(message.arguments), 120))}</span>`;
     details.appendChild(summary);
 
@@ -984,7 +1014,8 @@ function renderTurnFold(start, messages) {
   const summary = document.createElement("summary");
   const chevron = document.createElement("span");
   chevron.className = "turn-chevron";
-  chevron.textContent = "▸";
+  chevron.innerHTML =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>';
   const you = document.createElement("span");
   you.className = "turn-you";
   you.textContent = `You: ${truncate(turnPreview(messages, "user"), 110)}`;

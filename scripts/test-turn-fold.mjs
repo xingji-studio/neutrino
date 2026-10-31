@@ -18,6 +18,8 @@ import vm from "node:vm";
 const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "neutrino-turn-fold-"));
 process.env.HOME = testHome;
 process.env.USERPROFILE = testHome;
+// The turn machinery, not planning, is what this test covers.
+process.env.NEUTRINO_PLAN = "off";
 
 const { ChatScreen, TURN_FOLD_MIN_BLOCKS, TURN_FOLD_MIN_CHARS } = await import("../dist/screens/chat.js");
 const { WebSession } = await import("../dist/web/session.js");

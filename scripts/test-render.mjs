@@ -138,6 +138,26 @@ function chatRender(w, h) {
   screen.showInfo = false;
   step("info-closed");
 
+  // The plan card: a running plan, then a finished one. Wide CJK titles, a
+  // highlighted bar and the connector column are exactly the mix a diff
+  // renderer can leave residue from.
+  screen.plan = {
+    goal: "按参考图建模并做镜头动画",
+    steps: [
+      { title: "按照 box.png 对机箱进行建模", status: "done" },
+      { title: "按照 vision.jpg 对显示器进行建模", status: "active" },
+      { title: "做一段动画：镜头先推近，接着环绕，最后拉远", status: "pending" },
+      { title: "运行项目并检查没有报错", status: "pending" },
+    ],
+  };
+  screen.showInfo = true;
+  step("plan-running");
+  for (const step of screen.plan.steps) step.status = "done";
+  step("plan-done");
+  screen.plan = null;
+  screen.showInfo = false;
+  step("plan-closed");
+
   // A pending approval: orange header plus the floating card. Both must fit and
   // must not leave residue once the decision is in.
   screen.pendingApproval = {

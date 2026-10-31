@@ -14,6 +14,8 @@ export interface AppState {
   cursorOn: boolean;
   /** Pending human approval; while set the top bar turns orange. */
   approval: { tool: string; level: "high" | "extreme" } | null;
+  /** URL of the running browser UI, or null when it is not mounted. */
+  webUrl: string | null;
   /** Active mouse text selection, or null when nothing is selected. */
   selection: Selection | null;
 }
@@ -30,6 +32,7 @@ export function defaultState(): AppState {
     blinkOn: false,
     cursorOn: true,
     approval: null,
+    webUrl: null,
     selection: null,
   };
 }

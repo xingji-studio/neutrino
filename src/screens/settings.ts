@@ -19,7 +19,7 @@ import { centerVertically, drawHint } from "../ui.js";
 import { hashWebPassword } from "../web/auth.js";
 
 /** The settings that can be changed here, top to bottom. */
-const ROWS = ["intensity", "compress", "approval_model", "extreme_approval", "sound", "web_password"] as const;
+const ROWS = ["intensity", "compress", "approval_model", "extreme_approval", "sound", "web_console", "web_password"] as const;
 type RowId = (typeof ROWS)[number];
 
 export class SettingsScreen extends Screen {
@@ -32,6 +32,10 @@ export class SettingsScreen extends Screen {
   private extremeIdx = 0;
   /** 0 = silent, 1 = audible cue on turn end and on approval requests. */
   private soundIdx = 1;
+  /** 0 = web UI off, 1 = mounted alongside the terminal. */
+  private webIdx = 1;
+  /** Only a row the user actually touched rewrites the saved default. */
+  private webChanged = false;
   private models: string[] = [];
   private rowIdx = 0;
   private lastHoverX = -1;
@@ -57,6 +61,10 @@ export class SettingsScreen extends Screen {
     this.approvalModelIdx = approvalAt >= 0 ? approvalAt + 1 : 0;
     this.extremeIdx = config.auto_approve_extreme_risk === true ? 1 : 0;
     this.soundIdx = config.sound_alerts === false ? 0 : 1;
+    // A console started by an explicit flag is on even if the saved default is
+    // off, so reflect what is actually running first.
+    this.webIdx = (this.app.state.webUrl || config.web_console !== false) ? 1 : 0;
+    this.webChanged = false;
   }
 
   /** Change the value of a row by `delta` steps and persist it immediately. */
@@ -78,6 +86,14 @@ export class SettingsScreen extends Screen {
       this.extremeIdx = this.extremeIdx === 1 ? 0 : 1;
     } else if (row === "sound") {
       this.soundIdx = this.soundIdx === 1 ? 0 : 1;
+    } else if (row === "web_console") {
+      this.webIdx = this.webIdx === 1 ? 0 : 1;
+      this.webChanged = true;
+      this.save();
+      // Mount or unmount immediately; a failed bind is shown as a toast and
+      // the saved preference stays on so the next launch tries again.
+      void this.app.setWebConsole(this.webIdx === 1);
+      return;
     } else {
       const options = [...new Set([...CONTEXT_WINDOW_OPTIONS, this.contextTokens])].sort((a, b) => a - b);
       const i = options.indexOf(this.contextTokens);
@@ -217,6 +233,14 @@ export class SettingsScreen extends Screen {
         value: this.soundIdx === 1 ? "On (turn end, approvals)" : "Off",
       },
       {
+        label: "Web console",
+        value: this.webIdx === 0
+          ? "Off"
+          : this.app.state.webUrl
+            ? `On · ${this.app.state.webUrl}`
+            : "On (not running)",
+      },
+      {
         label: "Web password",
         value: this.editingPassword ? "*".repeat(Math.min(this.passwordDraft.length, 24)) || "Type new password" : this.passwordMessage,
       },
@@ -252,6 +276,10 @@ export class SettingsScreen extends Screen {
     config.approval_model = this.approvalModelIdx === 0 ? "" : this.models[this.approvalModelIdx - 1] ?? "";
     config.auto_approve_extreme_risk = this.extremeIdx === 1;
     config.sound_alerts = this.soundIdx === 1;
+    if (this.webChanged) {
+      config.web_console = this.webIdx === 1;
+      this.webChanged = false;
+    }
     saveConfig(config);
   }
 

@@ -29,6 +29,11 @@ export function drawHeader(buf: Buffer, state: AppState): void {
 
   buf.fillRect(0, 0, w, 1, { bg: C.highlightBg });
   let text: string = `${state.selectedProvider}/${state.selectedModelName} | ${state.selectedIntensity}`;
+  if (state.webUrl) {
+    // A short reminder that the browser console is live; the startup message
+    // prints the full addresses when more than one works.
+    text += `  ·  web ${state.webUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")}`;
+  }
   text = truncateByWidth(text, w);
   buf.centerText(0, text, { fg: C.accent, bg: C.highlightBg, bold: true });
 }

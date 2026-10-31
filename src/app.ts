@@ -103,6 +103,8 @@ export class App {
   private selOffset: number | null = null;
   private resizeHandler = () => this.onResize();
   private webHandle: WebServerHandle | null = null;
+  /** Where the web UI lives; kept even while it is switched off. */
+  private webOptions: { port: number; host?: string; auth: boolean } = { port: 8765, auth: true };
 
   constructor() {
     this.width = process.stdout.columns || 80;
@@ -138,13 +140,52 @@ export class App {
   }
 
   /**
+   * Remember where the browser UI should listen. Called at startup even when
+   * the console is disabled, so Settings can mount it later without guessing.
+   */
+  configureWeb(port: number, host: string | undefined, auth: boolean): void {
+    this.webOptions = { port, host, auth };
+  }
+
+  /**
    * Mount the browser UI on the given port. Safe to call once; subsequent calls
    * return the already-running server.
    */
   async enableWeb(port: number, host?: string, auth = true): Promise<WebServerHandle> {
     if (this.webHandle) return this.webHandle;
-    this.webHandle = await startWebServer({ port, host, auth });
-    return this.webHandle;
+    this.webOptions = { port, host, auth };
+    const handle = await startWebServer({ port, host, auth });
+    this.webHandle = handle;
+    this.state.webUrl = handle.url;
+    return handle;
+  }
+
+  /**
+   * Start or stop the browser UI while the terminal keeps running. Returns a
+   * result instead of throwing so a failed bind (usually a port already in use)
+   * can be reported inline without an unhandled rejection.
+   */
+  async setWebConsole(enabled: boolean): Promise<{ ok: boolean; error?: string }> {
+    if (enabled) {
+      if (this.webHandle) return { ok: true };
+      try {
+        await this.enableWeb(this.webOptions.port, this.webOptions.host, this.webOptions.auth);
+        this.showToast(`Web console: ${this.state.webUrl}`);
+        return { ok: true };
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        this.state.webUrl = null;
+        this.showToast(`Web console failed: ${error}`, "top");
+        return { ok: false, error };
+      }
+    }
+    const handle = this.webHandle;
+    this.webHandle = null;
+    this.state.webUrl = null;
+    this.render();
+    await handle?.close();
+    this.showToast("Web console stopped");
+    return { ok: true };
   }
 
   async start(): Promise<void> {
@@ -779,6 +820,7 @@ export class App {
     screen.loadedTokens = data.tokens ?? null;
     screen.loadedContext = data.context ?? null;
     screen.loadedApprovalMode = data.approval_mode ?? null;
+    screen.loadedPlan = data.plan ?? null;
     if (data.provider) this.state.selectedProvider = data.provider;
     if (data.model) this.state.selectedModelName = data.model;
     if (data.intensity) this.state.selectedIntensity = data.intensity;

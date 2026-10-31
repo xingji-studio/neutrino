@@ -6,7 +6,11 @@ import {
   findModel,
   contextCompressionThreshold,
   loadConfig,
+  loadPlannerPrompt,
+  loadStepPrompt,
+  loadSubAgentPrompt,
   normalizeApprovalMode,
+  planFirstEnabled,
   loadPrompt,
   saveSession,
   type ModelInfo,
@@ -22,7 +26,29 @@ import { ellipsize, displayWidth } from "../width.js";
 import { sanitizeText } from "../sanitize.js";
 import { LLMClient, describeError } from "../llm/client.js";
 import { formatDelay } from "../llm/retry.js";
-import { executeTool, getToolDefinitions } from "../llm/tools.js";
+import {
+  advancePlan,
+  buildPlannerInput,
+  lastRequestText,
+  parsePlan,
+  planCardRows,
+  planMessage,
+  planRowsWidth,
+  planTranscript,
+  renderStepDirective,
+  resumePlan,
+  stopPlan,
+  type PlanRow,
+  type PlanRowKind,
+  type PlanState,
+  type PlanStepStatus,
+} from "../llm/plan.js";
+import { DELEGATE_TOOL, executeTool, getSubAgentToolDefinitions, getToolDefinitions } from "../llm/tools.js";
+import {
+  buildSubAgentTask,
+  formatSubAgentResult,
+  runSubAgent as runSubAgentTask,
+} from "../llm/subagent.js";
 import { assessToolCall, type RiskAssessment } from "../llm/risk.js";
 import { ApprovalGate, captureApprovalContext, describeApprovalIntent, statedReason, type ApprovalDecision, type ApprovalContext } from "../llm/approval.js";
 import {
@@ -62,6 +88,8 @@ type Msg =
   | ToolMsg;
 
 const TOOLS = getToolDefinitions();
+/** A sub-agent gets the same tools minus delegation: one level, never a tree. */
+const SUB_AGENT_TOOLS = getSubAgentToolDefinitions();
 
 /**
  * A finished turn folds its *work* away — the prompt body, the thinking and the
@@ -84,6 +112,34 @@ function parseArgs(s: string): Record<string, unknown> {
   }
 }
 
+
+/**
+ * How each kind of info-card row is drawn.
+ *
+ * The three step states are deliberately distinct: the step being worked on is a
+ * lit bar, steps still to come are normal text, and finished steps recede into
+ * the dark so the eye lands on what is happening now.
+ */
+function planRowStyle(kind: PlanRowKind): Style {
+  switch (kind) {
+    case "header":
+      return { fg: C.accent, bg: C.black, bold: true };
+    case "step-active":
+      return { fg: C.accent, bg: C.highlightBg, bold: true };
+    case "step-done":
+      return { fg: C.dim, bg: C.black };
+    case "step-pending":
+      return { fg: C.assistant, bg: C.black };
+    case "step-failed":
+      return { fg: C.red, bg: C.black, bold: true };
+    case "connector":
+    case "more":
+      return { fg: C.dim, bg: C.black };
+    default:
+      return { fg: C.assistant, bg: C.black };
+  }
+}
+
 export class ChatScreen extends Screen implements LiveAgent {
   initialMessage: string;
   loadedMessages: SessionMessage[] | null = null;
@@ -95,6 +151,7 @@ export class ChatScreen extends Screen implements LiveAgent {
   loadedTokens: TokenUsage | null = null;
   loadedContext: ConversationContext | null = null;
   loadedApprovalMode: ApprovalMode | null = null;
+  loadedPlan: PlanState | null = null;
   private approvalMode: ApprovalMode = "request";
 
   modelProvider = "DeepSeek";
@@ -103,6 +160,14 @@ export class ChatScreen extends Screen implements LiveAgent {
 
   private tokens: TokenUsage = { prompt: 0, completion: 0 };
   private showInfo = false;
+
+  // ---- plan-first turns ----
+  /** The plan of the turn being worked on, or the last one. */
+  private plan: PlanState | null = null;
+  /** True while the planner agent is writing the steps. */
+  private planning = false;
+  /** What the sub-agent is doing, or null when none is running. */
+  private subagent: string | null = null;
 
   private messages: Msg[] = [];
   private streamingContent: string | null = null;
@@ -213,6 +278,7 @@ export class ChatScreen extends Screen implements LiveAgent {
     }
     // Everything already on disk was answered, so history opens compact.
     for (const start of this.userMessageIndexes()) this.finishedTurns.add(start);
+    this.plan = resumePlan(this.loadedPlan);
     this.context = normalizeContext(this.loadedContext, this.messages.filter((m) => m.role !== "system").length);
     this.liveDir = this.loadedCwd ?? process.cwd();
     this.checkpoint.register();
@@ -276,6 +342,7 @@ export class ChatScreen extends Screen implements LiveAgent {
       compressing: this.compressing,
       saveError: this.saveError,
       tokens: { prompt: this.tokens.prompt, completion: this.tokens.completion },
+      subagent: this.subagent,
       approval: this.pendingApproval
         ? liveApprovalDetails(this.pendingApproval.tool, this.pendingApproval.args, this.pendingApproval.risk, this.liveDir)
         : null,
@@ -302,6 +369,7 @@ export class ChatScreen extends Screen implements LiveAgent {
       messages,
       streamingContent: this.streamingContent,
       context: this.context,
+      plan: this.plan,
     };
   }
 
@@ -314,6 +382,7 @@ export class ChatScreen extends Screen implements LiveAgent {
     this.busy = false;
     this.app.state.isThinking = false;
     this.retainStreamingContent();
+    this.haltPlan();
     this.save();
     this.app.render();
     this.publishLive();
@@ -406,6 +475,12 @@ export class ChatScreen extends Screen implements LiveAgent {
       const name = key.name.toLowerCase();
       if (name === "y" || name === "return") this.settleApproval(true);
       else if (name === "n" || name === "escape") this.settleApproval(false);
+      return;
+    }
+    // The card is the plan: Ctrl+P shows it even when the pointer is elsewhere.
+    if (key.ctrl && key.name === "p") {
+      this.showInfo = !this.showInfo;
+      this.app.render();
       return;
     }
 
@@ -512,6 +587,9 @@ export class ChatScreen extends Screen implements LiveAgent {
       this.sessionId = null;
       this.context = null;
       this.expandedContext = false;
+      this.plan = null;
+      this.planning = false;
+      this.subagent = null;
       const sysText = this.messages[0] && this.messages[0].role === "system" ? this.messages[0].content : "";
       this.messages = [{ role: "system", content: sysText }];
       this.expandedTools.clear();
@@ -645,6 +723,8 @@ export class ChatScreen extends Screen implements LiveAgent {
       this.busy = false;
       this.app.state.isThinking = false;
       this.retainStreamingContent();
+      // The loop that ran the plan is gone with the paused turn.
+      this.haltPlan();
       this.save();
     }
     this.app.render();
@@ -657,6 +737,142 @@ export class ChatScreen extends Screen implements LiveAgent {
       this.queued = null;
       this.startTurn();
     }
+  }
+
+  // ---- plan-first turns -------------------------------------------------
+
+  /**
+   * Run the planner agent over the current request.
+   *
+   * Returns null rather than throwing in every case where there is no usable
+   * plan — planning switched off, a one-step request, a provider that fails, an
+   * answer that is not a plan. The turn then runs exactly as it did before
+   * plan-first existed; a plan is an improvement, never a new way to fail.
+   */
+  private async makePlan(token: number): Promise<PlanState | null> {
+    if (!planFirstEnabled()) return null;
+    const request = lastRequestText(this.messages);
+    if (!request.trim()) return null;
+    this.planning = true;
+    this.app.render();
+    this.publishLive();
+    try {
+      const client = new LLMClient(this.model, this.modelProvider, this.intensity);
+      const answer = await client.complete(
+        loadPlannerPrompt(),
+        buildPlannerInput({ request, cwd: this.liveDir, transcript: planTranscript(this.messages) }),
+        {
+          onRetry: (notice) => {
+            this.retryNotice =
+              `Planning — network hiccup, retrying in ${formatDelay(notice.delayMs)} ` +
+              `(attempt ${notice.attempt}/${notice.attempts})`;
+            this.app.render();
+          },
+          cancelled: () => token !== this.turnToken || this.paused,
+        },
+      );
+      if (client.usage) {
+        this.tokens.prompt += client.usage.prompt;
+        this.tokens.completion += client.usage.completion;
+        this.lastPromptTokens = client.usage.prompt;
+      }
+      if (token !== this.turnToken) return null;
+      return parsePlan(answer);
+    } catch {
+      return null;
+    } finally {
+      this.planning = false;
+      this.retryNotice = null;
+      if (token === this.turnToken) {
+        this.app.render();
+        this.publishLive();
+      }
+    }
+  }
+
+  /** Move the plan to one step and show it: the card follows every transition. */
+  private setStep(index: number, status: PlanStepStatus): void {
+    if (!advancePlan(this.plan, index, status)) return;
+    this.save();
+    this.publishLive();
+    this.app.render();
+  }
+
+  /** A turn that can no longer continue must not leave a step looking alive. */
+  private haltPlan(): void {
+    stopPlan(this.plan);
+  }
+
+  /**
+   * One user turn.
+   *
+   * A planned turn is answered in two passes: the planner writes the steps, then
+   * the worker executes them one at a time, top to bottom, each with the whole
+   * plan in its system prompt and the instruction to do only its own step. That
+   * keeps the work of a long request explicit — the card shows exactly which
+   * step is running and which are done — and keeps every step verifiable on its
+   * own. Without a plan the turn runs in one pass, as before.
+   */
+  private async runTurn(token: number, turnMessages: Msg[], approvalContext: ApprovalContext): Promise<void> {
+    // Shrink the history before building the request when it has outgrown the
+    // configured budget.
+    await this.autoCompress(token);
+    if (token !== this.turnToken) return;
+
+    const plan = await this.makePlan(token);
+    if (token !== this.turnToken) return;
+
+    if (plan) {
+      this.plan = plan;
+      // The plan is an ordinary assistant message: it is saved, folded, replayed
+      // and sent back to the model exactly like any other answer, so later turns
+      // (and the user) still know what was agreed.
+      this.messages.push({ role: "assistant", content: planMessage(plan) });
+      // Opening the card is the point of planning: the steps were asked for up
+      // front, so they are shown up front. A click or Esc closes it again.
+      this.showInfo = true;
+      this.save();
+      this.publishLive();
+      this.app.render();
+
+      const template = loadStepPrompt();
+      for (let i = 0; i < plan.steps.length; i++) {
+        if (token !== this.turnToken) return;
+        this.setStep(i, "active");
+        const directive = renderStepDirective(template, plan, i);
+        const finished = await this.agentLoop(
+          this.buildApiMessages(this.turnView(turnMessages), directive),
+          token,
+          approvalContext,
+        );
+        if (token !== this.turnToken) return;
+        this.setStep(i, finished ? "done" : "failed");
+        // A step that failed stops the plan: the remaining steps assumed this one
+        // succeeded, and the user has to see the failure before anything runs on
+        // top of it.
+        if (!finished) break;
+      }
+    } else {
+      await this.agentLoop(this.buildApiMessages(this.turnView(turnMessages)), token, approvalContext);
+      if (token !== this.turnToken) return;
+    }
+    this.onTurnFinished();
+  }
+
+  /**
+   * The transcript this turn may see: the messages it started with plus what it
+   * has added since — the plan message, replies, tool calls and results.
+   *
+   * A user message that arrives while the turn runs is queued for the *next*
+   * turn, so it is deliberately not part of this one: the model and the approval
+   * reviewers must always judge the same request.
+   */
+  private turnView(snapshot: Msg[]): Msg[] {
+    const view = snapshot.slice();
+    for (let i = snapshot.length; i < this.messages.length; i++) {
+      if (this.messages[i].role !== "user") view.push(this.messages[i]);
+    }
+    return view;
   }
 
   private send(text: string): void {
@@ -695,14 +911,7 @@ export class ChatScreen extends Screen implements LiveAgent {
     this.streamingContent = "";
     this.app.render();
     this.publishLive();
-    void (async () => {
-      // Shrink the history before building the request when it has outgrown the
-      // configured budget.
-      await this.autoCompress(token);
-      if (token !== this.turnToken) return;
-      const apiMessages = this.buildApiMessages(turnMessages);
-      await this.agentLoop(apiMessages, token, approvalContext);
-    })().catch((err) => {
+    void this.runTurn(token, turnMessages, approvalContext).catch((err) => {
       if (token === this.turnToken) this.failTurn(err);
     });
   }
@@ -719,6 +928,9 @@ export class ChatScreen extends Screen implements LiveAgent {
     this.retainStreamingContent();
     this.messages.push({ role: "assistant", content: `[Error: ${describeError(err)}]` });
     this.streamingContent = null;
+    // The turn died outside the loop, so the step it was on never reported back.
+    const active = this.plan?.steps.findIndex((step) => step.status === "active") ?? -1;
+    if (active >= 0) advancePlan(this.plan, active, "failed");
     try {
       this.onTurnFinished();
     } catch {
@@ -734,8 +946,11 @@ export class ChatScreen extends Screen implements LiveAgent {
     }
   }
 
-  private buildApiMessages(messages = this.messages): ApiMessage[] {
-    const api: ApiMessage[] = [{ role: "system", content: loadPrompt() }];
+  private buildApiMessages(messages = this.messages, directive = ""): ApiMessage[] {
+    // A step directive extends the system prompt rather than adding a user
+    // message: the plan is an instruction, not something the user just said.
+    const system = directive ? `${loadPrompt()}\n\n${directive}` : loadPrompt();
+    const api: ApiMessage[] = [{ role: "system", content: system }];
     for (const m of modelHistory(messages, this.context)) {
       if (m.role === "user" || m.role === "assistant") {
         api.push({ role: m.role, content: m.content });
@@ -747,10 +962,18 @@ export class ChatScreen extends Screen implements LiveAgent {
     return api;
   }
 
-  private async agentLoop(apiMessages: ApiMessage[], token: number, approvalContext: ApprovalContext): Promise<void> {
+  /**
+   * One agent conversation: request, tool calls, request again, until the model
+   * answers without asking for a tool.
+   *
+   * Returns true when the model finished on its own and false when the turn was
+   * cut short (paused, superseded, or failed). The caller owns the turn's end,
+   * because a planned turn runs this once per step.
+   */
+  private async agentLoop(apiMessages: ApiMessage[], token: number, approvalContext: ApprovalContext): Promise<boolean> {
     try {
       while (true) {
-        if (token !== this.turnToken) return;
+        if (token !== this.turnToken) return false;
         // Keep the payload inside budget during a long single turn: once the
         // context is too large, drop the body of older tool results.
         apiMessages = this.trimApiMessages(apiMessages);
@@ -789,7 +1012,7 @@ export class ChatScreen extends Screen implements LiveAgent {
         if (token !== this.turnToken) {
           // Pause already retained the partial reply. A stale stream must not
           // overwrite the buffer belonging to a newer turn.
-          return;
+          return false;
         }
 
         if (client.usage) {
@@ -804,8 +1027,7 @@ export class ChatScreen extends Screen implements LiveAgent {
           if (content) this.messages.push({ role: "assistant", content });
           this.streamingContent = null;
           this.app.render();
-          this.onTurnFinished(false);
-          return;
+          return false;
         }
 
         const toolCalls = client.toolCalls;
@@ -830,7 +1052,7 @@ export class ChatScreen extends Screen implements LiveAgent {
         });
 
         for (const tc of toolCalls) {
-          if (token !== this.turnToken || this.paused) return;
+          if (token !== this.turnToken || this.paused) return false;
           const args = parseArgs(tc.arguments);
           const toolMsg: ToolMsg = { role: "tool", name: tc.name, arguments: args, result: "" };
           this.messages.push(toolMsg);
@@ -844,7 +1066,7 @@ export class ChatScreen extends Screen implements LiveAgent {
             ...approvalContext,
             context: captureApprovalContext(apiMessages).context,
           });
-          if (token !== this.turnToken || this.paused) return;
+          if (token !== this.turnToken || this.paused) return false;
           if (decision.source !== "prompt" && decision.source !== "input") {
             this.approvals.set(toolMsg, decision);
           }
@@ -864,24 +1086,24 @@ export class ChatScreen extends Screen implements LiveAgent {
             continue;
           }
 
-          const result = await executeTool(tc.name, args, this.liveDir);
+          const result = await this.runTool(tc.name, args, toolMsg, token, apiMessages, approvalContext);
           // A clear starts a different transcript while an old tool may finish.
-          if (!this.messages.includes(toolMsg)) return;
+          if (!this.messages.includes(toolMsg)) return false;
           toolMsg.result = result;
           this.save();
-          if (token !== this.turnToken || this.paused) return;
+          if (token !== this.turnToken || this.paused) return false;
           apiMessages.push({ role: "tool", tool_call_id: tc.id, content: result });
           this.publishLive();
           this.app.render();
         }
       }
-      this.onTurnFinished();
+      return true;
     } catch (e) {
-      if (token !== this.turnToken) return;
+      if (token !== this.turnToken) return false;
       const err = describeError(e);
       this.messages.push({ role: "assistant", content: (this.streamingContent ?? "") + `\n[Error: ${err}]` });
       this.streamingContent = null;
-      this.onTurnFinished();
+      return false;
     }
   }
 
@@ -950,6 +1172,10 @@ export class ChatScreen extends Screen implements LiveAgent {
     return new Promise<boolean | null>((resolve) => {
       this.pendingApproval = { tool, args, risk, resolve };
       this.app.state.approval = { tool, level: risk.level };
+      // The card floats over the same corner the approval card needs on a short
+      // terminal, and a decision the user cannot see is not a decision. The plan
+      // stays open one click away.
+      this.showInfo = false;
       this.app.bell?.("approval");
       this.app.render();
       this.publishLive();
@@ -1041,6 +1267,84 @@ export class ChatScreen extends Screen implements LiveAgent {
       approve: { x: boxX + 2, y: by, w: approve.length },
       deny: { x: denyX, y: by, w: deny.length },
     };
+  }
+
+  // ---- sub-agents ------------------------------------------------------
+
+  /**
+   * Run one approved tool call. `delegate` is handled here rather than inside
+   * tools.ts: a sub-agent has to share this turn's model, approval gate, working
+   * directory and abort signal, and only the session knows about those.
+   */
+  private async runTool(
+    name: string,
+    args: Record<string, unknown>,
+    toolMsg: ToolMsg,
+    token: number,
+    apiMessages: ApiMessage[],
+    approvalContext: ApprovalContext,
+  ): Promise<string> {
+    if (name !== DELEGATE_TOOL) return executeTool(name, args, this.liveDir);
+    return this.delegate(args, toolMsg, token, apiMessages, approvalContext);
+  }
+
+  /**
+   * Run a sub-agent for one `delegate` call and return its report.
+   *
+   * The child gets its own conversation, the parent's tools (minus delegation)
+   * and the parent's approval gate; what it does in between is deliberately not
+   * part of this transcript. While it runs, its current phase is shown in the
+   * status line and in the tool block, so a quiet log still has an explanation.
+   */
+  private async delegate(
+    args: Record<string, unknown>,
+    toolMsg: ToolMsg,
+    token: number,
+    apiMessages: ApiMessage[],
+    approvalContext: ApprovalContext,
+  ): Promise<string> {
+    const task = String(args.task ?? "").trim();
+    if (!task) return "[Error: delegate needs a task: what should the sub-agent do?]";
+    const context = typeof args.context === "string" ? args.context.trim() : "";
+    const approval = { ...approvalContext, context: captureApprovalContext(apiMessages).context };
+    const run = await runSubAgentTask({
+      createClient: () => new LLMClient(this.model, this.modelProvider, this.intensity),
+      system: loadSubAgentPrompt(),
+      task: buildSubAgentTask({ task, context, cwd: this.liveDir }),
+      tools: SUB_AGENT_TOOLS,
+      approve: (name, callArgs) => this.requestApproval(name, callArgs, approval),
+      execute: (name, callArgs) =>
+        name === DELEGATE_TOOL
+          ? Promise.resolve("[Error: sub-agents cannot delegate further]")
+          : executeTool(name, callArgs, this.liveDir),
+      onProgress: (label) => {
+        this.subagent = label;
+        // The tool block is what a reader of the transcript sees while the child
+        // works; the status line says the same thing at the top of the screen.
+        toolMsg.result = `… ${label}`;
+        this.app.render();
+        this.publishLive();
+      },
+      onUsage: (usage) => {
+        this.tokens.prompt += usage.prompt;
+        this.tokens.completion += usage.completion;
+      },
+      onRetry: (notice) => {
+        this.retryNotice =
+          `Sub-agent — network hiccup, retrying in ${formatDelay(notice.delayMs)} ` +
+          `(attempt ${notice.attempt}/${notice.attempts})`;
+        this.app.render();
+      },
+      cancelled: () => token !== this.turnToken || this.paused,
+    });
+    // The final report replaces the live marker, and the status line goes back
+    // to the parent's own state.
+    this.subagent = null;
+    this.retryNotice = null;
+    toolMsg.result = "";
+    this.app.render();
+    this.publishLive();
+    return formatSubAgentResult(run);
   }
 
   // ---- turn folding ----------------------------------------------------
@@ -1328,6 +1632,7 @@ export class ChatScreen extends Screen implements LiveAgent {
         this.tokens,
         this.context,
         this.approvalMode,
+        this.plan,
       );
       this.saveError = null;
       return true;
@@ -1415,8 +1720,10 @@ export class ChatScreen extends Screen implements LiveAgent {
         // Header + the command/path always show; the (often huge) output body is
         // collapsed by default and toggled by clicking the block.
         add({ spans: [{ text: `⚙ ${m.name}`, style: { fg: C.toolHeader, bold: true } }] }, mi);
+        // The line under the tool name is the call's own material: a command, a
+        // path, or — for `delegate` — the task handed to the sub-agent.
         const argText = sanitizeText(
-          (m.arguments.command as string) ?? (m.arguments.path as string) ?? "",
+          (m.arguments.command as string) ?? (m.arguments.path as string) ?? (m.arguments.task as string) ?? "",
           { singleLine: true },
         );
         if (argText) add({ spans: [{ text: "  " + argText, style: { fg: C.dim } }] }, mi);
@@ -1480,6 +1787,9 @@ export class ChatScreen extends Screen implements LiveAgent {
     } else if (this.compressing) {
       status = "Compressing context…";
       statusStyle = { fg: C.amber, bold: true };
+    } else if (this.planning) {
+      status = "Planning the steps…";
+      statusStyle = { fg: C.accent, bold: true };
     } else if (this.queued) {
       status = "Will send when paused or idle...";
       statusStyle = { fg: C.amber };
@@ -1489,6 +1799,9 @@ export class ChatScreen extends Screen implements LiveAgent {
     } else if (this.retryNotice) {
       status = this.retryNotice;
       statusStyle = { fg: C.amber, bold: true };
+    } else if (this.subagent) {
+      status = `Sub-agent — ${this.subagent}`;
+      statusStyle = { fg: C.green, bold: true };
     } else if (this.busy) {
       status = "Streaming... press Ctrl+C or ESC ESC to pause";
       statusStyle = { fg: C.dim };
@@ -1549,7 +1862,7 @@ export class ChatScreen extends Screen implements LiveAgent {
     });
 
     const hintY = h - 1;
-    const hints = "Enter send · Ctrl+C pause · ESC ESC pause · Ctrl+A approval · Ctrl+B menu · Ctrl+L clear · drag to copy";
+    const hints = "Enter send · Ctrl+P plan · Ctrl+C pause · ESC ESC pause · Ctrl+A approval · Ctrl+B menu · Ctrl+L clear · drag to copy";
     const hintW = displayWidth(hints);
     const hintX = Math.max(0, w - 1 - hintW);
     const pathAvail = Math.max(0, hintX - 2);
@@ -1561,29 +1874,58 @@ export class ChatScreen extends Screen implements LiveAgent {
 
   private renderInfoOverlay(buf: Buffer): void {
     const w = buf.width;
-    buf.set(w - 2, 0, "ⓘ", { fg: C.accent, bg: C.highlightBg, bold: true });
+    const h = buf.height;
+    // A plan in flight tints the corner marker, so the card stays findable once
+    // the user has closed it.
+    const running = this.plan?.steps.some((step) => step.status === "active") ?? false;
+    buf.set(w - 2, 0, "ⓘ", running
+      ? { fg: C.black, bg: C.accent, bold: true }
+      : { fg: C.accent, bg: C.highlightBg, bold: true });
     if (!this.showInfo) return;
 
-    const total = this.tokens.prompt + this.tokens.completion;
-    const lines = [
-      "Tokens",
-      `Prompt: ${this.tokens.prompt}`,
-      `Completion: ${this.tokens.completion}`,
-      `Total: ${total}`,
-    ];
-    let contentW = 8;
-    for (const l of lines) contentW = Math.max(contentW, displayWidth(l));
-    let boxW = contentW + 4;
-    if (boxW > w - 2) boxW = Math.max(6, w - 2);
-    const boxX = w - 1 - boxW;
+    // The card floats in the top-right corner of the log. It is never wider than
+    // the conversation and never taller than the space above the input box, so a
+    // long step title or a short terminal cannot push it over the composer.
+    const contentW = Math.max(18, Math.min(56, w - 6));
+    const maxRows = Math.max(1, h - 8);
+    const rows = this.infoCardRows(contentW, maxRows);
+    const boxW = Math.min(Math.max(6, w - 2), Math.max(14, planRowsWidth(rows) + 4));
+    const boxH = Math.min(rows.length + 2, Math.max(3, h - 6));
+    const boxX = Math.max(0, w - 1 - boxW);
     const boxY = 1;
-    const boxH = lines.length + 2;
 
     buf.fillRect(boxX, boxY, boxW, boxH, { bg: C.black });
     buf.drawBox(boxX, boxY, boxW, boxH, { fg: C.accent });
-    for (let i = 0; i < lines.length; i++) {
-      const style = i === 0 ? { fg: C.accent, bg: C.black, bold: true } : { fg: C.assistant, bg: C.black };
-      buf.writeText(boxX + 2, boxY + 1 + i, lines[i].slice(0, boxW - 4), style);
+    for (let i = 0; i < rows.length; i++) {
+      const y = boxY + 1 + i;
+      if (y >= boxY + boxH - 1) break;
+      if (rows[i].kind === "step-active") {
+        // The running step is a full-width bar rather than coloured text: it is
+        // the one row the reader should find without reading the list.
+        buf.fillRect(boxX + 1, y, boxW - 2, 1, { bg: C.highlightBg });
+      }
+      buf.writeText(boxX + 2, y, ellipsize(rows[i].text, Math.max(1, boxW - 4)), planRowStyle(rows[i].kind));
     }
+  }
+
+  /**
+   * What the card shows: the plan as a vertical timeline, then the token counts.
+   * Without a plan it is exactly the token card it has always been. One row is
+   * kept for the counts, so a long plan cannot push them out of the card.
+   */
+  private infoCardRows(width: number, maxRows: number): PlanRow[] {
+    const plan = this.plan;
+    if (!plan) {
+      const total = this.tokens.prompt + this.tokens.completion;
+      return [
+        { kind: "header", text: "Tokens" },
+        { kind: "line", text: `Prompt: ${this.tokens.prompt}` },
+        { kind: "line", text: `Completion: ${this.tokens.completion}` },
+        { kind: "line", text: `Total: ${total}` },
+      ];
+    }
+    const rows = planCardRows(plan, { width, maxRows: Math.max(1, maxRows - 1) });
+    rows.push({ kind: "line", text: `Tokens ${this.tokens.prompt} → ${this.tokens.completion}` });
+    return rows;
   }
 }

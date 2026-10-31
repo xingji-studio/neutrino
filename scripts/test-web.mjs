@@ -11,6 +11,10 @@ import { WebSession } from "../dist/web/session.js";
 import path from "node:path";
 import { SESSION_DIR } from "../dist/config.js";
 
+// This test drives a resumed turn end to end; the planner would add requests it
+// does not expect.
+process.env.NEUTRINO_PLAN = "off";
+
 let failures = 0;
 function fail(message) {
   failures += 1;

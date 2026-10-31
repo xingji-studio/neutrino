@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { sameCwd } from "./cwd.js";
 import { normalizeContext, type ConversationContext } from "./compact.js";
+import type { PlanState } from "./llm/plan.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(__dirname, "..");
@@ -96,6 +97,9 @@ export const DEFAULT_CONFIG: Record<string, unknown> = {
   language: "en",
   theme: "default",
   default_intensity: "High",
+  // Plan a request into steps before answering it: the planner agent writes the
+  // plan, the worker executes one step per turn. Off = answer in one pass.
+  plan_first: true,
   // Default for new conversations; each conversation can override it.
   approval_mode: "request",
   // Delete-class commands need a human unless this and Auto Approval are on.
@@ -104,6 +108,9 @@ export const DEFAULT_CONFIG: Record<string, unknown> = {
   sound_alerts: true,
   // Model that reviews approval requests. Empty = same model as the chat.
   approval_model: "",
+  // Mount the browser UI alongside the terminal UI unless it is turned off
+  // here or on the command line.
+  web_console: true,
   // Initialized as a salted hash of the default Web password on first use.
   web_password_hash: "",
 };
@@ -163,6 +170,8 @@ export interface SessionData {
   /** Model context is separate from messages, which always retain the originals. */
   context?: ConversationContext;
   approval_mode?: ApprovalMode;
+  /** The plan of the turn being worked on, so reopening shows the same steps. */
+  plan?: PlanState | null;
 }
 
 export type ApprovalMode = "request" | "auto";
@@ -264,6 +273,7 @@ export function saveSession(
   tokens?: TokenUsage,
   context?: ConversationContext | null,
   approvalMode?: ApprovalMode,
+  plan?: PlanState | null,
 ): string {
   ensureDirs();
   const now = new Date();
@@ -294,6 +304,9 @@ export function saveSession(
   };
   const validContext = normalizeContext(context, messages.filter((m) => m.role !== "system").length);
   if (validContext) session.context = validContext;
+  // A plan outlives the turn that produced it: reopening a conversation shows
+  // how far it got, and a stopped plan is still the record of what was agreed.
+  if (plan && plan.steps.length) session.plan = plan;
 
   const filePath = path.join(SESSION_DIR, `${id}.json`);
   // Keep the last complete transcript intact if writing or replacing fails.
@@ -403,6 +416,48 @@ export function loadPrompt(): string {
     readAsset(path.join(PKG_ROOT, "assets", "prompt.txt"), path.join(PKG_ROOT, "prompt.txt")) ??
     "You are Neutrino, a helpful AI coding assistant."
   );
+}
+
+/** The planning agent's system prompt. */
+export function loadPlannerPrompt(): string {
+  return (
+    readAsset(path.join(PKG_ROOT, "assets", "planner.txt"), path.join(PKG_ROOT, "planner.txt")) ??
+    "Split the user's request into ordered, independent steps a coding agent can execute one at a " +
+      "time. Answer with JSON only: {\"goal\": \"...\", \"steps\": [{\"title\": \"...\"}]}."
+  );
+}
+
+/** Template for the per-step system text; `{{index}}`, `{{plan}}`, … are filled in. */
+export function loadStepPrompt(): string {
+  return (
+    readAsset(path.join(PKG_ROOT, "assets", "step.txt"), path.join(PKG_ROOT, "step.txt")) ??
+    "You are executing step {{index}} of {{total}} of this plan:\n{{plan}}\n\nDo only: {{step}}\n" +
+      "Verify it, then stop and report what you did."
+  );
+}
+
+/** The system prompt a delegated sub-agent works from. */
+export function loadSubAgentPrompt(): string {
+  return (
+    readAsset(path.join(PKG_ROOT, "assets", "subagent.txt"), path.join(PKG_ROOT, "subagent.txt")) ??
+    "You are a sub-agent working on one task delegated by another agent. You cannot ask the user " +
+      "anything and you cannot delegate further. Do the task with the tools you have, verify it, and " +
+      "report what you did and what you found in your final message."
+  );
+}
+
+/**
+ * Whether a turn is planned before it is executed. Unset means on: the plan is
+ * the default workflow, and only an explicit `false` turns it off.
+ *
+ * `NEUTRINO_PLAN=off` overrides both ways for a single run, the way the other
+ * environment variables override the saved configuration.
+ */
+export function planFirstEnabled(): boolean {
+  const override = String(process.env.NEUTRINO_PLAN ?? "").trim().toLowerCase();
+  if (override === "off" || override === "0" || override === "false" || override === "no") return false;
+  if (override === "on" || override === "1" || override === "true" || override === "yes") return true;
+  return loadConfig().plan_first !== false;
 }
 
 let cachedVersion: string | null = null;

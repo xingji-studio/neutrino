@@ -8,6 +8,8 @@ import path from "node:path";
 const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "neutrino-approval-context-"));
 const originalHomedir = os.homedir;
 os.homedir = () => testHome;
+// The reviewer prompts are under test, not the planner.
+process.env.NEUTRINO_PLAN = "off";
 const { saveConfig, loadSession } = await import("../dist/config.js");
 const { defaultState } = await import("../dist/state.js");
 const { ChatScreen } = await import("../dist/screens/chat.js");

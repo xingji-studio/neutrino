@@ -97,7 +97,7 @@ try {
   screen.onActivate();
   const key = name => screen.onKey({ name, char: "", ctrl: false, meta: false, shift: false, sequence: "" });
   // web_password is the last row; the list wraps, so walk it exactly.
-  for (let i = 0; i < 5; i++) key("down");
+  for (let i = 0; i < 6; i++) key("down");
   key("enter");
   screen.onPaste("terminal-password");
   const buf = new ScreenBuffer(80, 24);

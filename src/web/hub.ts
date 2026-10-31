@@ -16,6 +16,7 @@
 import type { ConversationContext } from "../compact.js";
 import type { ResolvedModelSelection, ApprovalMode } from "../config.js";
 import type { RiskAssessment } from "../llm/risk.js";
+import type { PlanState } from "../llm/plan.js";
 
 export type ModelChangeResult = { ok: true } | { ok: false; error: string };
 
@@ -79,6 +80,8 @@ export interface LiveMeta {
   approval?: LiveApprovalRequest | null;
   /** Reviewer count while an automated approval review is running. */
   reviewing?: LiveReviewProgress | null;
+  /** What a running sub-agent is doing right now, or null when none is running. */
+  subagent?: string | null;
   approvalMode?: ApprovalMode;
 }
 
@@ -89,6 +92,11 @@ export interface LiveSnapshot extends LiveMeta {
   messages: LiveWireMessage[];
   context?: ConversationContext | null;
   streamingContent: string | null;
+  /**
+   * The plan of the current turn. The terminal draws it in the info card; a
+   * browser client can render the same steps from here without parsing text.
+   */
+  plan?: PlanState | null;
 }
 
 /** A screen that can be observed and driven through the web UI. */

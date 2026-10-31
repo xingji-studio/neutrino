@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import process from "node:process";
 import { App } from "./app.js";
+import { loadConfig } from "./config.js";
 import { installCrashGuard } from "./terminal/restore.js";
 import { startWebServer, type WebServerHandle } from "./web/server.js";
 
@@ -31,25 +32,28 @@ function printHelp(): void {
     `Neutrino
 
 Usage:
-  neutrino                     Start the terminal UI.
-  neutrino --web-port <port>   Start the terminal UI and mount the web UI.
+  neutrino                     Start the terminal UI (with the web UI).
+  neutrino --lan               Start both, reachable from other devices.
   neutrino web [--port <port>] Start only the web UI (serves saved history).
 
 Options:
-  -p, --port <port>   Web server port (web mode). Default: ${DEFAULT_WEB_PORT}
+  -p, --port <port>   Web UI port. Default: ${DEFAULT_WEB_PORT}
       --host <host>   Interface to bind. Default: 127.0.0.1
       --lan           Short for --host ${WILDCARD_HOST}: reachable from other
                       devices on your LAN or VPN.
+      --no-web        Do not start the web UI with the terminal UI.
       --no-auth       Serve without password login.
-      --web-port <n>  Also mount the web UI while the TUI runs.
+      --web-port <n>  Deprecated alias for --port while the TUI runs.
   -h, --help          Show this help.
 
 Environment:
-  NEUTRINO_WEB_PORT   Same as --web-port for the TUI, or the port in web mode.
+  NEUTRINO_WEB_PORT   Same as --port in either mode.
   NEUTRINO_WEB_HOST   Same as --host.
 
-The web UI can read every saved conversation and drive an agent with shell
-access, so it binds to loopback by default. Log in with the permanent password
+The web UI starts by default alongside the terminal UI on loopback. Turn it
+off for one run with --no-web, or permanently in Settings → Web console. It can
+read every saved conversation and drive an agent with shell access, so it binds
+to loopback unless you ask for --host/--lan. Log in with the permanent password
 (default: 114514). Change it in Settings. --no-auth disables password login.
 `,
   );
@@ -69,11 +73,12 @@ interface Options {
   port: number | null;
   host?: string;
   lan: boolean;
+  noWeb: boolean;
   noAuth: boolean;
 }
 
 function parseArgs(argv: string[]): Options {
-  const options: Options = { mode: "tui", port: null, lan: false, noAuth: false };
+  const options: Options = { mode: "tui", port: null, lan: false, noWeb: false, noAuth: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "web") {
@@ -92,6 +97,8 @@ function parseArgs(argv: string[]): Options {
       options.host = arg.slice("--host=".length);
     } else if (arg === "--lan") {
       options.lan = true;
+    } else if (arg === "--no-web") {
+      options.noWeb = true;
     } else if (arg === "--no-auth") {
       options.noAuth = true;
     } else if (arg === "--help" || arg === "-h") {
@@ -103,6 +110,12 @@ function parseArgs(argv: string[]): Options {
   }
   if (options.lan && options.host) {
     throw new Error("use either --lan or --host, not both");
+  }
+  if (options.noWeb && options.mode === "web") {
+    throw new Error("--no-web cannot be used with the 'web' command");
+  }
+  if (options.noWeb && (options.port !== null || options.host !== undefined || options.lan)) {
+    throw new Error("use either --no-web or web UI options, not both");
   }
   return options;
 }
@@ -144,11 +157,12 @@ installCrashGuard();
 
 const host = options.lan ? WILDCARD_HOST : options.host || process.env.NEUTRINO_WEB_HOST || undefined;
 const auth = !options.noAuth;
+const portFromEnv = envPort();
 
 if (options.mode === "web") {
   // Headless: serve the saved history (and any live sessions in this process,
   // which for a standalone server is none).
-  const port = options.port ?? envPort() ?? DEFAULT_WEB_PORT;
+  const port = options.port ?? portFromEnv ?? DEFAULT_WEB_PORT;
   try {
     const handle = await startWebServer({ port, host, auth });
     reportAccess(handle);
@@ -170,14 +184,26 @@ if (options.mode === "web") {
   }
 
   const app = new App();
-  const webPort = options.port ?? envPort();
-  if (webPort !== null) {
+  const webPort = options.port ?? portFromEnv ?? DEFAULT_WEB_PORT;
+  // Remember where the UI should live even when it is off right now, so the
+  // Settings toggle can mount it without restarting the terminal.
+  app.configureWeb(webPort, host, auth);
+
+  // Explicit web settings win over the saved preference; otherwise the web UI
+  // is part of a normal launch unless the user turned it off in Settings.
+  const requested = options.port !== null || options.host !== undefined || options.lan
+    || options.noAuth || portFromEnv !== null || Boolean(process.env.NEUTRINO_WEB_HOST);
+  const enabledByDefault = loadConfig().web_console !== false;
+  if (!options.noWeb && (requested || enabledByDefault)) {
     try {
       const handle = await app.enableWeb(webPort, host, auth);
       reportAccess(handle);
     } catch (err) {
-      process.stderr.write(`neutrino: failed to start web server: ${err instanceof Error ? err.message : String(err)}\n`);
-      process.exit(1);
+      // A console that cannot bind (usually a second instance on 8765) must
+      // never take the terminal down with it.
+      const detail = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`neutrino: web UI not started: ${detail}\n`);
+      process.stderr.write("The terminal UI will keep running. Pass --port <port> to use another port, or --no-web to skip the web UI.\n");
     }
   }
   await app.start();

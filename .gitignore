@@ -5,3 +5,4 @@ dist/
 # local smoke-test artefacts
 smoke.txt
 tmp-*
+.shots/

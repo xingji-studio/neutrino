@@ -8,6 +8,8 @@ import path from "node:path";
 const home = fs.mkdtempSync(path.join(os.tmpdir(), "neutrino-persistence-"));
 process.env.HOME = home;
 process.env.USERPROFILE = home;
+// Persistence and interruption, not planning, are under test here.
+process.env.NEUTRINO_PLAN = "off";
 
 const { ChatScreen } = await import("../dist/screens/chat.js");
 const { WebSession } = await import("../dist/web/session.js");

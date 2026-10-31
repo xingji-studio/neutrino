@@ -1,7 +1,7 @@
 # Neutrino Web UI
 
-A small, dependency-free single page app that is served by the Neutrino CLI on
-a port you choose. It lets you:
+A small, dependency-free single page app that is served by the Neutrino CLI at
+<http://127.0.0.1:8765> whenever the terminal UI runs. It lets you:
 
 - browse every saved conversation grouped by working directory (like Codex),
   with only the five latest transcripts per path shown and the rest collapsed;
@@ -19,11 +19,14 @@ Nothing needs to be built — these are plain `.html`, `.css` and `.js` files.
 
 ## Running it
 
-While using the terminal UI, mount the website on a port:
+The terminal UI starts the website by default:
 
 ```sh
-neutrino --web-port 8765
+neutrino
 ```
+
+Use `--port` to move it, `--no-web` to skip it for that run, or turn it off
+permanently in the terminal's **Settings → Web console**.
 
 Or serve only the saved history, without a terminal:
 
@@ -41,8 +44,9 @@ The server binds to loopback by default. To open it from your phone or another
 machine, bind an interface others can reach:
 
 ```sh
-neutrino web --port 8765 --lan               # every interface (0.0.0.0)
-neutrino web --port 8765 --host 100.64.0.7   # one specific address
+neutrino --lan                               # TUI + web UI, every interface (0.0.0.0)
+neutrino --host 100.64.0.7                   # TUI + web UI, one specific address
+neutrino web --port 8765 --lan               # headless web UI, every interface
 ```
 
 Startup prints the addresses to open:
@@ -97,7 +101,7 @@ disables password login.
 
 ## Models and settings
 
-Open a conversation to see the **Provider**, **Model** and **Thinking intensity**
+Open a conversation to see the **Provider**, **Model** and **Thinking**
 selectors. Choose a configured model and press **Apply to conversation**. The
 next turn uses that selection, and it is saved with the transcript. The same
 controls also update a conversation running in the terminal. Pause an active
@@ -108,7 +112,7 @@ selection. Changing the selectors and then using **Continue here** or sending a
 message also uses the draft selection, so a transcript whose old model was
 removed can still be continued.
 
-The **⚙ Settings** button in the sidebar opens defaults for new conversations,
+The **Settings** (gear) button in the sidebar opens defaults for new conversations,
 the context compression threshold, the approval reviewer model, and the
 extreme-risk automatic approval option. Save settings explicitly; cancelling
 leaves the saved values intact. Conversation model changes are separate from
@@ -119,12 +123,12 @@ Intensity uses the same Low–Ultra sampling settings as the terminal.
 ## History vs. live sessions
 
 A saved transcript on disk is a finished record: nothing is running, so the
-page shows it read-only (dashed `read-only` badge) and there is nothing to
+page shows it read-only (a neutral `read-only` badge) and there is nothing to
 pause.
 
 To continue one, either
 
-- press **✎ Continue here** in the header, or
+- press **Continue here** in the header, or
 - just start typing in the composer and press Enter.
 
 Both create a *browser-owned session*: the server resumes the transcript from
@@ -139,6 +143,38 @@ resumed it), the page attaches to that session instead of starting a second one.
 Browser-owned sessions are dropped after 30 idle minutes, or immediately through
 `POST /api/live/:key/close`. Sessions owned by the terminal cannot be closed from
 the web.
+
+## Plan-first turns
+
+A browser-owned turn is planned before it runs, exactly like a turn in the
+terminal: the planner agent writes the ordered steps, then each step is executed
+one at a time. The plan is written into the transcript as an assistant message,
+so it shows up in the conversation with everything else, and it is saved with the
+session (`plan` in the session file) so a resumed transcript still knows its
+steps.
+
+The plan travels in every live snapshot as a structured field — no text parsing
+needed by a client:
+
+```json
+"plan": {
+  "goal": "build and animate the scene",
+  "steps": [
+    { "title": "Model the case from box.png", "detail": "match the reference", "status": "done" },
+    { "title": "Model the monitor from vision.jpg", "status": "active" },
+    { "title": "Animate the camera", "status": "pending" }
+  ]
+}
+```
+
+`status` is `pending`, `active`, `done` or `failed`; `stopped: true` marks a plan
+whose turn was paused before the last step. The terminal draws this in its `ⓘ`
+card; a browser client can render the same timeline from the snapshot. The page
+itself currently shows the plan as the message it already is.
+
+Planning is the default for both loops. It can be turned off with
+`"plan_first": false` in `~/.neutrino/config.json` or `NEUTRINO_PLAN=off`; a
+request that produces no usable plan then runs in one pass.
 
 ## How real-time works
 

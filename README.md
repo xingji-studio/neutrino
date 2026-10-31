@@ -17,10 +17,12 @@ A CLI coding agent that lives in your terminal. Neutrino gives you an interactiv
 - **Session history** — messages are saved before a turn starts, streamed replies are checkpointed every second, and tool calls/results are saved immediately. The history screen lists conversations started in the current working directory. Failed saves are shown in the terminal and browser UI.
 - **Auto-folding turns** — once a turn finishes, the work behind the reply (the thinking and the tool calls) folds into one summary line in both the terminal and the browser, while the answer itself always stays on screen. Click the line to read the whole round again; a turn with little to hide, or a long answer on its own, stays open. A turn stopped with `ESC ESC` is paused, not finished, so it stays open. Nothing is dropped: the transcript, the saved session and the model's context keep every message.
 - **Complete conversation history** — context compression keeps every original message and tool result on disk. The earlier portion starts collapsed in the terminal and browser; click **Earlier conversation** to expand it, including in reopened history. Model requests use a separate summary plus recent messages.
-- **Token usage stats** — click the `ⓘ` in the chat header to see prompt/completion/total token counts for the current session.
+- **Plan-first turns** — before a request is answered, a planner agent splits it into ordered, independent steps ("model the case from box.png", "animate the camera: push in, orbit, pull back"), and the worker then executes those steps one at a time, top to bottom. Every step is a concrete deliverable, so later work is explicit instead of one vague instruction. See [Plan-first turns](#plan-first-turns).
+- **The step card** — click `ⓘ` in the chat header (or press `Ctrl+P`) to open the info card in the top-right corner. It lists the plan as a vertical timeline of nodes: the step being worked on is highlighted, steps still to come are lit, and finished steps are drawn dark with a tick. The same card shows prompt/completion/total token counts when no plan is running.
+- **Sub-agents** — independent work can be handed to a sub-agent: a second agent loop with its own context, its own tool calls and the same approval gate. Only its report comes back, so a survey that reads thirty files does not fill the conversation with thirty files. See [Sub-agents](#sub-agents).
 - **Agent history browser** — view past sessions from other CLI agents (Claude Code, Codex, OpenCode) directly from the history screen.
 - **Approval gate** — risky commands and paths outside the working directory need your sign-off. The header turns orange and reads **Request Approval**; press `Y` or `N`. Delete-class commands always ask, unless you explicitly granted full trust, and there is an opt-in reviewer agent for automatic decisions.
-- **Browser UI on any port** — mount a local website that lists every saved conversation grouped by working directory, streams the running one in real time, and lets you pause/resume it, send messages, switch provider/model/intensity, and edit settings from the browser.
+- **Browser UI on by default** — every `neutrino` launch also mounts a local website at <http://127.0.0.1:8765> that lists every saved conversation grouped by working directory, streams the running one in real time, and lets you pause/resume it, send messages, switch provider/model/intensity, and edit settings from the browser. Use `--port`/`--host` to move it, `--lan` to share it, or `--no-web` to keep the terminal only.
 
 ## Requirements
 
@@ -50,6 +52,8 @@ neutrino
 ```
 
 Type a message on the start screen and press `Enter` to begin a new chat.
+The browser UI is mounted at <http://127.0.0.1:8765> at the same time; see
+[Web UI](#web-ui) below for `--port`, `--lan` and `--no-web`.
 
 ### Keys
 
@@ -67,6 +71,7 @@ Type a message on the start screen and press `Enter` to begin a new chat.
 | `Ctrl+C` × 3 | Quit after three consecutive presses, no more than 1.5 seconds apart (another key, paste, click or scroll resets the count) |
 | `Ctrl+Shift+C` | Quit immediately (requires the terminal to forward the shortcut) |
 | `Ctrl+A` | Toggle Request Approval / Auto Approval in a conversation |
+| `Ctrl+P` | Toggle the plan / token info card in the top-right corner |
 | `Y` | Approve the pending request (while the approval card is up) |
 | `N` / `Esc` | Deny the pending request |
 | `Ctrl+Q` | Quit |
@@ -83,7 +88,7 @@ Type a message on the start screen and press `Enter` to begin a new chat.
 | Click and drag | Select text under the rectangle; releasing copies it to the clipboard |
 | Drag onto the first/last row of the log | Scroll the log a line at a time (faster the longer you hold it) and keep growing the selection past the screen |
 | Click the header (left of `ⓘ`) | Open the model selector |
-| Click `ⓘ` (chat header) | Toggle token usage stats |
+| Click `ⓘ` (chat header) | Toggle the plan / token info card |
 | Drag the scrollbar | Grab the thumb on the right edge of the chat/log and drag it to scroll |
 | Scroll wheel | Scroll the chat/log, or move through lists |
 | Right-click | Go back (like `Esc`) |
@@ -96,13 +101,78 @@ highlight stops at the log's edge instead of spilling into the header or the
 input box, and the copy includes the lines that scrolled out of view. Scroll back
 and the selection shrinks again; press `Esc` to drop it.
 
+## Plan-first turns
+
+A request is answered in two passes. A **planner agent** first turns the message
+into an ordered list of independent steps; a **worker agent** then executes
+exactly one step per pass, from the top down. Each step names one deliverable, so
+a long request stops being a single vague instruction and becomes a sequence of
+concrete, verifiable ones. The plan is written into the conversation as a
+message and saved with the session, so the steps of a reopened conversation are
+still there.
+
+The steps are also listed in the `ⓘ` card in the top-right corner of the chat —
+click it, or press `Ctrl+P`:
+
+- nodes run top to bottom in execution order, joined by a connector,
+- the step being worked on is the highlighted row,
+- steps still to come are lit, and
+- finished steps are drawn dark with a tick; a failed one is marked in red.
+
+The card opens by itself as soon as a plan is written, and closing it loses
+nothing: `Ctrl+P` brings it back. On a short terminal the card shows a window
+around the running step and counts the steps above and below it.
+
+A step that fails stops the plan: the remaining steps stay pending and the next
+message can re-plan them. A turn paused with `Esc Esc` stops the plan and marks
+it **stopped**, so no step keeps looking live. When no usable plan comes back —
+a single-action request, a provider error, an answer that is not a plan — the
+turn runs in one pass exactly as before, so planning is never a new way to fail.
+
+The prompts are files, not code: [`assets/planner.txt`](./assets/planner.txt)
+says how steps are written, [`assets/step.txt`](./assets/step.txt) is the
+instruction for each step, and [`assets/prompt.txt`](./assets/prompt.txt) is the
+worker's base system prompt. Turn planning off for one run with
+`NEUTRINO_PLAN=off`, or permanently with `"plan_first": false` in `config.json`.
+
+## Sub-agents
+
+The agent can hand one self-contained sub-task to a **sub-agent**: a second agent
+loop with its own transcript, its own tool calls and the same working directory.
+Only its final report comes back — the files it read and the commands it ran
+never enter the main conversation. That is the point: surveying a large codebase
+or probing how a command behaves costs many messages, and the parent needs the
+conclusion, not the transcript. The child's tokens still count in the
+conversation's usage.
+
+- The parent calls the `delegate` tool with a complete task and, optionally, a
+  little context. The sub-agent cannot see the conversation and cannot ask the
+  user, so a task that refers to "the file above" fails; the system prompt tells
+  the model to write a brief that stands alone.
+- Its tool calls go through the **same approval gate**: a risky call parks the
+  turn and shows the usual card (the header turns orange, the browser shows its
+  banner). Denying it tells the sub-agent not to retry unchanged, and the parent
+  receives the refusal in the report.
+- Delegation is one level deep — `delegate` is not in a sub-agent's toolset — so
+  the work always has one owner and one pause button.
+- While it runs, the terminal status line and the browser badge name the current
+  phase (`Sub-agent — read_file`), and the `delegate` tool block shows the task
+  it was given. The report replaces that marker when it arrives, as the result of
+  the tool call.
+- The round limit (12) bounds a child that never finishes; the parent then gets
+  the partial report, clearly marked as partial. A paused turn aborts the
+  sub-agent and says so in the tool result.
+
+The sub-agent's prompt is a file too: [`assets/subagent.txt`](./assets/subagent.txt).
+
 ## Configuration
 
 Settings are stored under `~/.neutrino/`:
 
 - `model.json` — provider and model definitions (edit to add your own endpoints).
 - `config.json` — app configuration (selected provider/model/intensity, theme,
-  language, approval mode, `auto_approve_extreme_risk`, `sound_alerts`).
+  language, approval mode, `auto_approve_extreme_risk`, `sound_alerts`,
+  `web_console`).
 - `session/` — saved conversation sessions, one JSON file per session.
 
 Set your API key in the model select screen or directly in `model.json`.
@@ -111,10 +181,11 @@ A few environment variables override flags:
 
 | Variable | Effect |
 | --- | --- |
-| `NEUTRINO_WEB_PORT` | Web UI port: like `--web-port` in TUI mode, and the port in `neutrino web`. |
-| `NEUTRINO_WEB_HOST` | Interface to bind, like `--host`. |
+| `NEUTRINO_WEB_PORT` | Web UI port: like `--port` in either mode, and it mounts the UI even when `web_console` is off. |
+| `NEUTRINO_WEB_HOST` | Interface to bind, like `--host`; also mounts the UI when `web_console` is off. |
 | `NEUTRINO_NETWORK_ATTEMPTS` | Total tries for a model request that keeps dropping (default 7). |
 | `NEUTRINO_RETRY_DELAY_MS` | Wait before the first retry in ms; each retry doubles it (default 5000). |
+| `NEUTRINO_PLAN` | `off` answers a request in one pass without planning it (overrides `plan_first`); `on` forces planning. |
 
 ### Approvals
 
@@ -212,11 +283,11 @@ Only sessions that were started in the current working directory are listed, so 
 
 ## Web UI
 
-Neutrino can mount a small website on a port of your choice. It groups every
-saved conversation by working directory (showing the five newest per path with
-the rest collapsed), folds the work of every finished turn into one summary line
-that opens on a click while the reply stays on screen, streams a running
-conversation live, and lets you pause or
+Neutrino mounts a small website at <http://127.0.0.1:8765> whenever the
+terminal UI starts. It groups every saved conversation by working directory
+(showing the five newest per path with the rest collapsed), folds the work of
+every finished turn into one summary line that opens on a click while the reply
+stays on screen, streams a running conversation live, and lets you pause or
 resume it and send new messages from the browser.
 
 A saved transcript opens read-only, because nothing is running for it. Press
@@ -227,7 +298,7 @@ the same session file.
 
 Use the selectors above a conversation to change its provider, model or
 intensity, then press **Apply to conversation** (pause an active turn first).
-The **⚙ Settings** button in the sidebar edits defaults for new conversations,
+The **Settings** (gear) button in the sidebar edits defaults for new conversations,
 context compression and approval settings. Conversation choices are saved with
 the transcript and do not overwrite the defaults. Configured models and keys
 are shared with the terminal; keys stay on the server.
@@ -240,8 +311,12 @@ to future turns in active conversations. The legacy fixed
 `context_compress_threshold` setting is no longer used.
 
 ```sh
-# Mount the web UI while the terminal UI runs
-neutrino --web-port 8765
+# The terminal UI now brings the web UI up with it
+neutrino
+
+# Pick a different port or interface
+neutrino --port 9000
+neutrino --host 100.64.0.7
 
 # Or serve only the saved history, with no terminal
 neutrino web --port 8765
@@ -250,6 +325,12 @@ neutrino web --port 8765
 Then open <http://127.0.0.1:8765>. The site itself lives in [`web/`](./web) and
 needs no build step; see [`web/README.md`](./web/README.md) for the API.
 
+The console is on by default; turn it off for one run with `--no-web`, or
+permanently in the terminal's **Settings → Web console**. The `--web-port` flag
+is still accepted as an alias for `--port`. If the default port is already taken
+(usually by another Neutrino instance), the terminal UI starts anyway and prints
+how to choose another port.
+
 ### Reaching it from another device
 
 The server binds to loopback, so only this machine can open it. To use it from a
@@ -257,10 +338,12 @@ phone, a tablet or another box on your LAN or VPN, bind an interface others can
 see:
 
 ```sh
-neutrino web --port 8765 --lan          # every interface (0.0.0.0)
-neutrino --web-port 8765 --lan          # same, while the TUI runs
-neutrino web --port 8765 --host 100.64.0.7   # one specific address
+neutrino --lan                          # TUI + web UI on every interface (0.0.0.0)
+neutrino --host 100.64.0.7              # TUI + web UI on one specific address
+neutrino web --port 8765 --lan          # headless web UI on every interface
 ```
+
+`--lan` is shorthand for `--host 0.0.0.0`; the two cannot be combined.
 
 Startup prints every address that works, so you can copy the one matching the
 device you are on:
@@ -276,7 +359,9 @@ Open the address that matches your device:
 Open the address and sign in with your permanent Web password. The initial
 password is **`114514`**. Change it in the browser's **Settings → Web access**
 or in the terminal's **Settings → Web password**. It is saved as a salted hash
-in `~/.neutrino/config.json` and survives restarts.
+in `~/.neutrino/config.json` and survives restarts. While the site is running,
+its address is also shown in the terminal header and in the terminal's
+**Settings → Web console** row, which can start or stop it without a restart.
 
 For automatic login, open `http://<host>:8765/?pwd=114514`. The page checks the
 password, remembers the login, and removes `pwd` from the address bar. If it is
@@ -294,8 +379,8 @@ and startup output never contain your password or session credentials.
 - **Firewall:** the first bind to `0.0.0.0` triggers an allow prompt on Windows
   and macOS. Allow it for private networks, and check that your WLAN is not
   marked "public", where incoming connections are blocked anyway.
-- **`127.0.0.1` remains the default** because the zero-config case should not be
-  a network service.
+- **`127.0.0.1` is still the default interface.** The console starts with the
+  terminal UI, but it is not a network service until you pass `--host`/`--lan`.
 
 ## Built-in tools
 
@@ -305,6 +390,7 @@ The agent can call the following tools during a conversation:
 - `read_file` — read a text file (capped at 200KB).
 - `write_file` — write content to a file.
 - `list_files` — list directory contents.
+- `delegate` — hand one self-contained sub-task to a sub-agent and return its report.
 
 Every tool takes an additional `reason` argument: one sentence saying what the
 call is for and why it is needed now. It is what the approval card shows and what
@@ -338,7 +424,10 @@ node scripts/test-fetch.mjs      # verify streamed requests release aborts, retr
 node scripts/test-compact.mjs    # verify context-compression planning
 node scripts/test-history-fold.mjs # verify full-history retention, folding and resume
 node scripts/test-web-history.mjs  # verify browser history disclosures and streaming state
+node scripts/test-web-default.mjs  # verify the web console starts and toggles by default
 node scripts/test-turn-fold.mjs    # verify folded turns keep their reply and every message
+node scripts/test-plan.mjs         # verify plan-first turns, step order, the step card and the fallback
+node scripts/test-subagent.mjs     # verify delegation: isolation, approvals, abort, round limits
 node scripts/test-tools.mjs      # verify tool-output folding
 node scripts/test-web.mjs        # verify the web server, API, SSE stream and path-traversal guards
 node scripts/test-web-settings.mjs # verify model switching, persistence, browser controls and defaults

@@ -13,6 +13,7 @@ import path from "node:path";
 const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "neutrino-approval-flow-"));
 process.env.HOME = testHome;
 process.env.USERPROFILE = testHome;
+process.env.NEUTRINO_PLAN = "off";
 const { SESSION_DIR } = await import("../dist/config.js");
 const { WebSession } = await import("../dist/web/session.js");
 const { hub } = await import("../dist/web/hub.js");

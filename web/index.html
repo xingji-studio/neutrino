@@ -4,28 +4,44 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#151517" />
     <title>Neutrino</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f9fafb' stroke-width='1.7'%3E%3Cellipse cx='12' cy='12' rx='9.4' ry='3.8' transform='rotate(-30 12 12)'/%3E%3Ccircle cx='12' cy='12' r='3.1'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
     <div id="app">
       <aside id="sidebar">
         <header class="brand">
-          <div class="logo" aria-hidden="true">◈</div>
+          <div class="logo" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <ellipse cx="12" cy="12" rx="9.4" ry="3.8" transform="rotate(-30 12 12)" stroke="currentColor" stroke-width="1.7" />
+              <circle cx="12" cy="12" r="3.1" stroke="currentColor" stroke-width="1.7" />
+            </svg>
+          </div>
           <div class="brand-text">
             <strong>Neutrino</strong>
             <span id="status" class="status">connecting…</span>
           </div>
-          <button id="refresh" class="icon-btn" title="Refresh conversations" aria-label="Refresh">⟳</button>
-          <button id="settings-open" class="icon-btn" title="Settings" aria-label="Settings">⚙</button>
+          <div class="brand-actions">
+            <button id="refresh" class="icon-btn" type="button" title="Refresh conversations" aria-label="Refresh conversations">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" /></svg>
+            </button>
+            <button id="settings-open" class="icon-btn" type="button" title="Settings" aria-label="Settings">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg>
+            </button>
+          </div>
         </header>
         <div id="sessions" class="sessions"></div>
+        <footer class="sidebar-foot">
+          <span>Local agent console</span>
+        </footer>
       </aside>
 
       <main id="main">
         <header id="main-header" class="main-header">
           <button id="back-to-menu" class="icon-btn back-to-menu" type="button" title="Back to conversations" aria-label="Back to conversations" aria-controls="sidebar">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 5-7 7 7 7M5 12h14" /></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 5-7 7 7 7M5 12h14" /></svg>
           </button>
           <div class="main-title">
             <h1 id="session-title">Select a conversation</h1>
@@ -37,19 +53,36 @@
         <form id="model-picker" class="model-picker hidden" aria-label="Conversation model">
           <label>Provider<select id="model-provider"></select></label>
           <label>Model<select id="model-name"></select></label>
-          <label>Thinking intensity<select id="model-intensity"></select></label>
-          <button id="model-apply" class="control" type="submit">Apply to conversation</button>
+          <label>Thinking<select id="model-intensity"></select></label>
+          <button id="model-apply" class="control" type="submit">Apply</button>
           <p id="model-feedback" class="form-feedback" role="status" aria-live="polite"></p>
         </form>
 
         <section id="messages" class="messages">
-          <div class="empty">Choose a conversation from the sidebar to view it.</div>
+          <div class="empty">
+            <span class="empty-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <ellipse cx="12" cy="12" rx="9.4" ry="3.8" transform="rotate(-30 12 12)" stroke="currentColor" stroke-width="1.7" />
+                <circle cx="12" cy="12" r="3.1" stroke="currentColor" stroke-width="1.7" />
+              </svg>
+            </span>
+            <strong>No conversation open</strong>
+            <span>Choose a conversation from the sidebar to view it.</span>
+          </div>
         </section>
 
         <div id="approval" class="approval hidden" role="alert" aria-live="assertive"></div>
+
         <footer id="composer" class="composer hidden">
-          <textarea id="input" rows="2" placeholder="Send a message…  (Enter to send, Shift+Enter for newline)"></textarea>
-          <button id="send" class="primary">Send</button>
+          <div class="composer-inner">
+            <div class="composer-card">
+              <textarea id="input" rows="1" placeholder="Message Neutrino…" aria-label="Message"></textarea>
+              <button id="send" class="primary" type="button" title="Send message" aria-label="Send message">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
+              </button>
+            </div>
+            <div class="composer-hint"><kbd>Enter</kbd> to send · <kbd>Shift</kbd> + <kbd>Enter</kbd> for a new line</div>
+          </div>
         </footer>
       </main>
     </div>
@@ -57,8 +90,13 @@
     <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
       <form id="settings-form">
         <header class="settings-header">
-          <h2 id="settings-title">Settings</h2>
-          <button id="settings-close" class="icon-btn" type="button" aria-label="Close settings">×</button>
+          <div>
+            <h2 id="settings-title">Settings</h2>
+            <p class="settings-sub">Models, approvals, and console access.</p>
+          </div>
+          <button id="settings-close" class="icon-btn" type="button" aria-label="Close settings">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
         </header>
         <div class="settings-fields">
           <h3>Defaults for new conversations</h3>
@@ -66,21 +104,21 @@
           <label>Model<select id="default-model"></select></label>
           <label>Thinking intensity<select id="default-intensity"></select></label>
           <h3>Conversation and approvals</h3>
-          <label>Model context window (tokens)<input id="settings-context" type="number" min="1" max="9007199254740991" step="1" required></label>
+          <label>Model context window (tokens)<input id="settings-context" type="number" min="1" max="9007199254740991" step="1" required /></label>
           <p id="settings-compress-note" class="settings-note">Auto-compress at 80% of this model's context window. Default: 1,000,000 tokens.</p>
           <label>Approval reviewer model<select id="settings-reviewer"></select></label>
-          <label class="checkbox-label"><input id="settings-extreme" type="checkbox"> Extreme-risk auto-approval (del class, 3 separate review rounds)</label>
-          <label class="checkbox-label"><input id="settings-sound" type="checkbox"> Sound alerts (turn finished, approval waiting)</label>
+          <label class="checkbox-label"><input id="settings-extreme" type="checkbox" /> Extreme-risk auto-approval (del class, 3 separate review rounds)</label>
+          <label class="checkbox-label"><input id="settings-sound" type="checkbox" /> Sound alerts (turn finished, approval waiting)</label>
           <p class="settings-note">Safety determines automatic approval; task relevance only blocks unanimously confirmed, extreme mismatches. Delete-class automatic approval also requires this setting.</p>
           <h3>Web access</h3>
-          <label>New Web password<input id="settings-password" type="password" autocomplete="new-password" maxlength="256" placeholder="Leave blank to keep current password"></label>
-          <label>Confirm password<input id="settings-password-confirm" type="password" autocomplete="new-password" maxlength="256" placeholder="Repeat new password"></label>
+          <label>New Web password<input id="settings-password" type="password" autocomplete="new-password" maxlength="256" placeholder="Leave blank to keep current password" /></label>
+          <label>Confirm password<input id="settings-password-confirm" type="password" autocomplete="new-password" maxlength="256" placeholder="Repeat new password" /></label>
           <p class="settings-note">The password is permanent and survives restarts. Default: 114514. Saving a new password signs out other browsers.</p>
           <p id="settings-feedback" class="form-feedback" role="status" aria-live="polite"></p>
         </div>
         <footer class="settings-actions">
           <button id="settings-cancel" class="control" type="button">Cancel</button>
-          <button id="settings-save" class="primary" type="submit">Save settings</button>
+          <button id="settings-save" class="primary" type="submit">Save changes</button>
         </footer>
       </form>
     </dialog>

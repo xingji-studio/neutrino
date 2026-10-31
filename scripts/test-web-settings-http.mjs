@@ -8,6 +8,8 @@ import path from "node:path";
 const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "neutrino-settings-http-"));
 process.env.HOME = testHome;
 process.env.USERPROFILE = testHome;
+// This test drives one resumed turn; planning would add requests it does not expect.
+process.env.NEUTRINO_PLAN = "off";
 const { saveModels, saveConfig, loadConfig, saveSession, loadSession } = await import("../dist/config.js");
 const { startWebServer } = await import("../dist/web/server.js");
 const { LLMClient } = await import("../dist/llm/client.js");

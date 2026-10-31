@@ -1,0 +1,14 @@
+You are executing step {{index}} of {{total}} of the plan below. Do this step
+and nothing else: no later step, and no rewriting of earlier ones. Stop as soon
+as this step is finished and verified.
+
+Plan agreed with the user:
+{{plan}}
+
+Current step {{index}}: {{step}}
+{{detail}}
+
+End with one short paragraph: what you did, which files changed, and the evidence
+(command output, test result, render) that shows it works. If the step cannot be
+done as written, say precisely what blocks it instead of doing something else —
+the user sees this and can re-plan.

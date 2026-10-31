@@ -15,7 +15,11 @@ import {
   findModel,
   contextCompressionThreshold,
   loadConfig,
+  loadPlannerPrompt,
+  loadStepPrompt,
+  loadSubAgentPrompt,
   normalizeApprovalMode,
+  planFirstEnabled,
   loadModels,
   loadPrompt,
   saveSession,
@@ -39,7 +43,25 @@ import {
 } from "../compact.js";
 import { LLMClient, describeError } from "../llm/client.js";
 import type { RetryNotice } from "../llm/retry.js";
-import { executeTool, getToolDefinitions } from "../llm/tools.js";
+import {
+  advancePlan,
+  buildPlannerInput,
+  lastRequestText,
+  parsePlan,
+  planMessage,
+  planTranscript,
+  renderStepDirective,
+  resumePlan,
+  stopPlan,
+  type PlanState,
+  type PlanStepStatus,
+} from "../llm/plan.js";
+import { DELEGATE_TOOL, executeTool, getSubAgentToolDefinitions, getToolDefinitions } from "../llm/tools.js";
+import {
+  buildSubAgentTask,
+  formatSubAgentResult,
+  runSubAgent as runSubAgentTask,
+} from "../llm/subagent.js";
 import { assessToolCall, type RiskAssessment } from "../llm/risk.js";
 import { ApprovalGate, captureApprovalContext, describeApprovalIntent, type ApprovalDecision, type ApprovalContext } from "../llm/approval.js";
 import { SessionCheckpoint } from "../persistence.js";
@@ -75,6 +97,9 @@ const MAX_TOOL_ROUNDS = 24;
 
 /** Placeholder shown while a tool is still running. */
 const TOOL_PENDING = "…";
+
+/** A sub-agent gets the same tools minus delegation: one level, never a tree. */
+const SUB_AGENT_TOOLS = getSubAgentToolDefinitions();
 
 /** Marker for the model-only summary, separate from the original transcript. */
 const SUMMARY_PREFIX = "Context was compressed. Summary of the earlier part:";
@@ -142,6 +167,12 @@ export class WebSession implements LiveAgent {
   private compressing = false;
   private context: ConversationContext | null = null;
   private streamingContent: string | null = null;
+  /** The plan of the current turn, if this turn was planned. */
+  private plan: PlanState | null = null;
+  /** True while the planner agent is writing the steps. */
+  private planning = false;
+  /** What the sub-agent is doing, or null when none is running. */
+  private subagent: string | null = null;
   private saveError: string | null = null;
   /** A retried request, so the browser can explain why the stream is quiet. */
   private retrying: RetryNotice | null = null;
@@ -174,6 +205,7 @@ export class WebSession implements LiveAgent {
     this.sessionId = source.id;
     this.messages = (source.messages as Msg[]).slice();
     this.context = normalizeContext(source.context, this.messages.filter((m) => m.role !== "system").length);
+    this.plan = resumePlan(source.plan ?? null);
     this.tokens = {
       prompt: source.tokens?.prompt ?? 0,
       completion: source.tokens?.completion ?? 0,
@@ -242,6 +274,7 @@ export class WebSession implements LiveAgent {
         ? { attempt: this.retrying.attempt, attempts: this.retrying.attempts, delayMs: this.retrying.delayMs }
         : null,
       tokens: { prompt: this.tokens.prompt, completion: this.tokens.completion },
+      subagent: this.subagent,
       approval: this.pendingApproval
         ? liveApprovalDetails(this.pendingApproval.tool, this.pendingApproval.args, this.pendingApproval.risk, this.dir)
         : null,
@@ -272,6 +305,7 @@ export class WebSession implements LiveAgent {
       messages,
       streamingContent: this.streamingContent,
       context: this.context,
+      plan: this.plan,
     };
   }
 
@@ -287,6 +321,8 @@ export class WebSession implements LiveAgent {
     }
     this.busy = false;
     this.retainStreamingContent();
+    this.subagent = null;
+    stopPlan(this.plan);
     this.save();
     this.publishLive();
   }
@@ -357,12 +393,106 @@ export class WebSession implements LiveAgent {
     this.streamingContent = "";
     this.publishLive();
     void (async () => {
-      await this.autoCompress(token);
-      if (token !== this.turnToken || this.paused) return;
-      await this.agentLoop(this.buildApiMessages(turnMessages), token, approvalContext);
+      await this.runTurn(token, turnMessages, approvalContext);
     })().catch((err) => {
       if (token === this.turnToken) this.failTurn(err);
     });
+  }
+
+  /**
+   * One user turn, mirroring the terminal: plan first, then execute the steps in
+   * order, one agent loop per step. Without a usable plan the turn runs in one
+   * pass, exactly as it did before planning existed.
+   */
+  private async runTurn(token: number, turnMessages: Msg[], approvalContext: ApprovalContext): Promise<void> {
+    await this.autoCompress(token);
+    if (token !== this.turnToken || this.paused) return;
+
+    const plan = await this.makePlan(token);
+    if (token !== this.turnToken || this.paused) return;
+
+    if (plan) {
+      this.plan = plan;
+      this.messages.push({ role: "assistant", content: planMessage(plan) });
+      this.save();
+      this.publishLive();
+      const template = loadStepPrompt();
+      for (let i = 0; i < plan.steps.length; i++) {
+        if (token !== this.turnToken || this.paused) return;
+        this.setStep(i, "active");
+        const finished = await this.agentLoop(
+          this.buildApiMessages(this.turnView(turnMessages), renderStepDirective(template, plan, i)),
+          token,
+          approvalContext,
+        );
+        if (token !== this.turnToken || this.paused) return;
+        this.setStep(i, finished ? "done" : "failed");
+        if (!finished) break;
+      }
+    } else {
+      await this.agentLoop(this.buildApiMessages(this.turnView(turnMessages)), token, approvalContext);
+      if (token !== this.turnToken || this.paused) return;
+    }
+    this.onTurnFinished();
+  }
+
+  /**
+   * The transcript this turn may see: the messages it started with plus what it
+   * added since. A user message queued while the turn runs belongs to the next
+   * turn, so the model never sees it early.
+   */
+  private turnView(snapshot: Msg[]): Msg[] {
+    const view = snapshot.slice();
+    for (let i = snapshot.length; i < this.messages.length; i++) {
+      if (this.messages[i].role !== "user") view.push(this.messages[i]);
+    }
+    return view;
+  }
+
+  /** Move the plan to one step and publish it. */
+  private setStep(index: number, status: PlanStepStatus): void {
+    if (!advancePlan(this.plan, index, status)) return;
+    this.save();
+    this.publishLive();
+  }
+
+  /**
+   * Run the planner agent over the current request. Null on every failure path:
+   * a plan must improve a turn, never be a new way for one to fail.
+   */
+  private async makePlan(token: number): Promise<PlanState | null> {
+    if (!planFirstEnabled()) return null;
+    const request = lastRequestText(this.messages);
+    if (!request.trim()) return null;
+    this.planning = true;
+    this.publishLive();
+    try {
+      const client = new LLMClient(this.model, this.provider, this.intensity);
+      const answer = await client.complete(
+        loadPlannerPrompt(),
+        buildPlannerInput({ request, cwd: this.dir, transcript: planTranscript(this.messages) }),
+        {
+          onRetry: (notice) => {
+            this.retrying = notice;
+            this.publishLive();
+          },
+          cancelled: () => token !== this.turnToken || this.paused,
+        },
+      );
+      if (client.usage) {
+        this.tokens.prompt += client.usage.prompt;
+        this.tokens.completion += client.usage.completion;
+        this.lastPromptTokens = client.usage.prompt;
+      }
+      if (token !== this.turnToken) return null;
+      return parsePlan(answer);
+    } catch {
+      return null;
+    } finally {
+      this.planning = false;
+      this.retrying = null;
+      if (token === this.turnToken) this.publishLive();
+    }
   }
 
   /** Ends a turn whose floating promise rejected, instead of crashing the app. */
@@ -370,6 +500,9 @@ export class WebSession implements LiveAgent {
     this.retainStreamingContent();
     this.messages.push({ role: "assistant", content: `[Error: ${describeError(err)}]` });
     this.streamingContent = null;
+    // The turn died outside the loop, so the step it was on never reported back.
+    const active = this.plan?.steps.findIndex((step) => step.status === "active") ?? -1;
+    if (active >= 0) advancePlan(this.plan, active, "failed");
     try {
       this.onTurnFinished();
     } catch {
@@ -378,8 +511,12 @@ export class WebSession implements LiveAgent {
     }
   }
 
-  private buildApiMessages(messages = this.messages): ApiMessage[] {
-    const api: ApiMessage[] = [{ role: "system", content: loadPrompt() }];
+  private buildApiMessages(messages = this.messages, directive = ""): ApiMessage[] {
+    // A step directive extends the system prompt: the plan is an instruction, not
+    // something the user just said.
+    const api: ApiMessage[] = [
+      { role: "system", content: directive ? `${loadPrompt()}\n\n${directive}` : loadPrompt() },
+    ];
     for (const m of modelHistory(messages, this.context)) {
       if (m.role === "user" || m.role === "assistant") {
         api.push({ role: m.role, content: m.content });
@@ -390,11 +527,16 @@ export class WebSession implements LiveAgent {
     return api;
   }
 
-  private async agentLoop(apiMessages: ApiMessage[], token: number, approvalContext: ApprovalContext): Promise<void> {
+  /**
+   * One agent conversation for a single request (or a single plan step). Returns
+   * true when the model finished on its own, false when the turn was cut short;
+   * the caller owns the turn's end because a planned turn runs this per step.
+   */
+  private async agentLoop(apiMessages: ApiMessage[], token: number, approvalContext: ApprovalContext): Promise<boolean> {
     const tools = getToolDefinitions();
     try {
       for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-        if (token !== this.turnToken || this.paused) return;
+        if (token !== this.turnToken || this.paused) return false;
         const client = new LLMClient(this.model, this.provider, this.intensity);
         let text = "";
         this.streamingContent = "";
@@ -407,13 +549,13 @@ export class WebSession implements LiveAgent {
           cancelled: () => token !== this.turnToken || this.paused,
         })) {
           this.retrying = null;
-          if (token !== this.turnToken || this.paused) return;
+          if (token !== this.turnToken || this.paused) return false;
           text += chunk;
           this.streamingContent = text;
           this.checkpoint.schedule();
           this.publishLive();
         }
-        if (token !== this.turnToken || this.paused) return;
+        if (token !== this.turnToken || this.paused) return false;
         this.streamingContent = null;
 
         if (client.usage) {
@@ -431,7 +573,7 @@ export class WebSession implements LiveAgent {
         const toolCalls = client.toolCalls;
         if (toolCalls.length === 0) break;
         for (const call of toolCalls) {
-          if (token !== this.turnToken || this.paused) return;
+          if (token !== this.turnToken || this.paused) return false;
           const args = parseArguments(call.arguments);
           const toolMsg: Msg & { role: "tool" } = {
             role: "tool",
@@ -447,7 +589,7 @@ export class WebSession implements LiveAgent {
             ...approvalContext,
             context: captureApprovalContext(apiMessages).context,
           });
-          if (token !== this.turnToken || this.paused) return;
+          if (token !== this.turnToken || this.paused) return false;
           if (!decision.approved) {
             // A malformed request was never shown to anyone, so there is no
             // verdict to respect and the right move is a corrected retry.
@@ -466,22 +608,22 @@ export class WebSession implements LiveAgent {
 
           let result: string;
           try {
-            result = await executeTool(call.name, args, this.dir);
+            result = await this.runTool(call.name, args, toolMsg, token, apiMessages, approvalContext);
           } catch (err) {
             result = `Error: ${err instanceof Error ? err.message : String(err)}`;
           }
-          if (this.disposed) return;
+          if (this.disposed) return false;
           toolMsg.result = result;
           this.save();
-          if (token !== this.turnToken || this.paused) return;
+          if (token !== this.turnToken || this.paused) return false;
           apiMessages.push({ role: "tool", content: result, tool_call_id: call.id });
           this.publishLive();
         }
         this.save();
       }
-      this.onTurnFinished();
+      return true;
     } catch (err) {
-      if (token !== this.turnToken) return;
+      if (token !== this.turnToken) return false;
       if (this.streamingContent) {
         this.messages.push({ role: "assistant", content: this.streamingContent });
       }
@@ -490,7 +632,7 @@ export class WebSession implements LiveAgent {
         role: "assistant",
         content: `[Error: ${err instanceof Error ? err.message : String(err)}]`,
       });
-      this.onTurnFinished();
+      return false;
     }
   }
 
@@ -548,6 +690,73 @@ export class WebSession implements LiveAgent {
       }
     }
     return { model: this.model, provider: this.provider, intensity: this.intensity };
+  }
+
+  // ---- sub-agents ------------------------------------------------------
+
+  /**
+   * Run one approved tool call. `delegate` runs a child agent instead of
+   * touching the filesystem, so it is handled here, where the session's model,
+   * approval gate and abort signal live.
+   */
+  private async runTool(
+    name: string,
+    args: Record<string, unknown>,
+    toolMsg: Msg & { role: "tool" },
+    token: number,
+    apiMessages: ApiMessage[],
+    approvalContext: ApprovalContext,
+  ): Promise<string> {
+    if (name !== DELEGATE_TOOL) return executeTool(name, args, this.dir);
+    return this.delegate(args, toolMsg, token, apiMessages, approvalContext);
+  }
+
+  /**
+   * Run a sub-agent for one `delegate` call and return its report. The child
+   * works in its own transcript; only the report reaches this conversation, and
+   * its risky calls go through the same approval gate as the parent turn.
+   */
+  private async delegate(
+    args: Record<string, unknown>,
+    toolMsg: Msg & { role: "tool" },
+    token: number,
+    apiMessages: ApiMessage[],
+    approvalContext: ApprovalContext,
+  ): Promise<string> {
+    const task = String(args.task ?? "").trim();
+    if (!task) return "[Error: delegate needs a task: what should the sub-agent do?]";
+    const context = typeof args.context === "string" ? args.context.trim() : "";
+    const approval = { ...approvalContext, context: captureApprovalContext(apiMessages).context };
+    const run = await runSubAgentTask({
+      createClient: () => new LLMClient(this.model, this.provider, this.intensity),
+      system: loadSubAgentPrompt(),
+      task: buildSubAgentTask({ task, context, cwd: this.dir }),
+      tools: SUB_AGENT_TOOLS,
+      approve: (name, callArgs) => this.requestApproval(name, callArgs, approval),
+      execute: (name, callArgs) =>
+        name === DELEGATE_TOOL
+          ? Promise.resolve("[Error: sub-agents cannot delegate further]")
+          : executeTool(name, callArgs, this.dir),
+      onProgress: (label) => {
+        this.subagent = label;
+        toolMsg.result = `… ${label}`;
+        this.publishLive();
+      },
+      onUsage: (usage) => {
+        this.tokens.prompt += usage.prompt;
+        this.tokens.completion += usage.completion;
+      },
+      onRetry: (notice) => {
+        this.retrying = notice;
+        this.publishLive();
+      },
+      cancelled: () => token !== this.turnToken || this.paused || this.disposed,
+    });
+    this.subagent = null;
+    this.retrying = null;
+    toolMsg.result = TOOL_PENDING;
+    this.publishLive();
+    return formatSubAgentResult(run);
   }
 
   // ---- compression -----------------------------------------------------
@@ -641,6 +850,7 @@ export class WebSession implements LiveAgent {
         this.tokens,
         this.context,
         this.approvalMode,
+        this.plan,
       );
       this.saveError = null;
       return true;
