@@ -42,6 +42,58 @@ export const PLAN_MAX_STEPS = 10;
 export const PLAN_MAX_TITLE = 160;
 export const PLAN_MAX_DETAIL = 400;
 
+// -------------------------------------------------------------- when to plan
+
+/**
+ * A request longer than this many columns is treated as a brief and planned.
+ * In practice that is roughly eighty Chinese characters or one hundred and
+ * eighty ASCII ones — past that, "one action" is already unlikely.
+ */
+export const PLAN_LENGTH_LIMIT = 180;
+
+/** The user brought their own structure: numbered steps or bullets. */
+const LIST_LINE = /^\s*(?:[-*•]|\d+[.)、])\s+/m;
+
+/**
+ * Wording that means "more than one thing to do".
+ *
+ * Chinese has no spaces, so the weak conjunctions only count after punctuation
+ * ("，并且…") or as a clear pair ("先…再…"): otherwise 合并, 并发 and 再运行一次
+ * would all read as sequencing.
+ */
+const SEQUENCING =
+  /然后|接着|随后|之后再|并且|以及|[，,；;]\s*并|先[^。！？\n]{0,40}再|\b(?:then|after that|afterwards|finally|also|next|followed by)\b/iu;
+
+/** An explicit plan request: the user wants steps, however small the task. */
+const PLAN_REQUEST = /计划|规划|步骤|拆(?:分|解)|\bplan\b|\bsteps?\b/iu;
+
+/** Sentence terminators; an English full stop only counts before whitespace. */
+function sentenceMarks(text: string): number {
+  const cjk = text.match(/[。！？!?]/gu)?.length ?? 0;
+  const dots = text.match(/\.(?=\s|$)/gu)?.length ?? 0;
+  return cjk + dots;
+}
+
+/**
+ * Does this request need a plan at all?
+ *
+ * Planning costs a model round-trip before any work starts, and for "rename
+ * this variable" that round-trip is pure friction. A request is planned only
+ * when it shows a reason to be split into steps: it asks for more than one
+ * thing, brings its own structure (a list), reads as a brief (long), or asks
+ * for a plan. Everything else runs in one pass, where the system prompt still
+ * has the agent state the steps it is taking in its own answer.
+ */
+export function needsPlan(request: string): boolean {
+  const text = request.trim();
+  if (!text) return false;
+  if (PLAN_REQUEST.test(text)) return true;
+  if (LIST_LINE.test(text)) return true;
+  if (SEQUENCING.test(text)) return true;
+  if (sentenceMarks(text) >= 2) return true;
+  return displayWidth(text) > PLAN_LENGTH_LIMIT;
+}
+
 // ------------------------------------------------------------------ parsing
 
 function cleanText(value: unknown, max: number): string {

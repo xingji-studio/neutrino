@@ -22,6 +22,24 @@ export interface ModelInfo {
   supports_streaming: boolean;
   /** Context capacity in tokens; omitted models use 1M. */
   context_window?: number;
+  /**
+   * DeepSeek-style thinking mode: the endpoint rejects a request that offers
+   * tools while an assistant message in the history carries no
+   * `reasoning_content`. Defaults to true for DeepSeek endpoints; set it
+   * explicitly for a differently named endpoint (or to opt out).
+   */
+  reasoning?: boolean;
+}
+
+/**
+ * Whether assistant messages must be sent back with a `reasoning_content`
+ * field. DeepSeek's thinking mode requires one on *every* assistant message of
+ * a tools-bearing request (an empty string is accepted), and the plan message
+ * written by the planner is otherwise an assistant message without it.
+ */
+export function modelUsesReasoning(provider: string, model: ModelInfo): boolean {
+  if (typeof model.reasoning === "boolean") return model.reasoning;
+  return provider === "DeepSeek" || /deepseek|reasoner|thinking/i.test(model.name);
 }
 
 export const DEFAULT_CONTEXT_WINDOW = 1_000_000;
@@ -98,7 +116,9 @@ export const DEFAULT_CONFIG: Record<string, unknown> = {
   theme: "default",
   default_intensity: "High",
   // Plan a request into steps before answering it: the planner agent writes the
-  // plan, the worker executes one step per turn. Off = answer in one pass.
+  // plan, the worker executes one step per turn. Requests that look like a
+  // single action are never planned (see needsPlan), and false turns planning
+  // off for every request.
   plan_first: true,
   // Default for new conversations; each conversation can override it.
   approval_mode: "request",

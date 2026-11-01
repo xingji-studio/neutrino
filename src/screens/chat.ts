@@ -6,6 +6,7 @@ import {
   findModel,
   contextCompressionThreshold,
   loadConfig,
+  loadModels,
   loadPlannerPrompt,
   loadStepPrompt,
   loadSubAgentPrompt,
@@ -30,6 +31,7 @@ import {
   advancePlan,
   buildPlannerInput,
   lastRequestText,
+  needsPlan,
   parsePlan,
   planCardRows,
   planMessage,
@@ -67,6 +69,8 @@ import { writeCrashLog } from "../terminal/restore.js";
 interface ApiMessage {
   role: string;
   content?: string;
+  /** Thinking text echoed back on an assistant tool-call message. */
+  reasoning_content?: string;
   tool_calls?: Array<{
     id: string;
     type: "function";
@@ -265,6 +269,12 @@ export class ChatScreen extends Screen implements LiveAgent {
       api_key: st.selectedModelApiKey,
       supports_streaming: st.selectedModelStreaming,
     };
+    // The selected-state snapshot has no room for provider options; re-read the
+    // thinking-mode flag from model.json so a hand-configured endpoint keeps it.
+    const configured = loadModels().providers
+      .find((provider) => provider.name === this.modelProvider)?.models
+      .find((model) => model.name === this.model.name);
+    if (configured && typeof configured.reasoning === "boolean") this.model.reasoning = configured.reasoning;
     this.intensity = this.loadedIntensity ?? st.selectedIntensity;
     if (this.loadedTokens) {
       this.tokens = { prompt: this.loadedTokens.prompt, completion: this.loadedTokens.completion };
@@ -753,6 +763,10 @@ export class ChatScreen extends Screen implements LiveAgent {
     if (!planFirstEnabled()) return null;
     const request = lastRequestText(this.messages);
     if (!request.trim()) return null;
+    // A request that is one action is not planned: the planner round-trip would
+    // cost more than the steps are worth, and the worker states its steps in its
+    // own answer. The card then shows the token counts, not a one-line plan.
+    if (!needsPlan(request)) return null;
     this.planning = true;
     this.app.render();
     this.publishLive();
@@ -1044,6 +1058,9 @@ export class ChatScreen extends Screen implements LiveAgent {
         apiMessages.push({
           role: "assistant",
           content,
+          // DeepSeek's thinking mode needs the reasoning behind a tool call
+          // returned with it; without it the next request is a 400.
+          reasoning_content: client.reasoningContent ?? "",
           tool_calls: toolCalls.map((tc) => ({
             id: tc.id,
             type: "function" as const,

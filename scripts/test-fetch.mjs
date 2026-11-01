@@ -460,6 +460,136 @@ const tick = () => new Promise((r) => setImmediate(r));
   assert(text === "slow but alive", `the retried request succeeds, got ${JSON.stringify(text)}`);
 }
 
+// ---------------------------------------------------------------------------
+// 16. DeepSeek thinking mode: every assistant message of a tools-bearing
+//     request needs a `reasoning_content` string, and the thinking streamed
+//     alongside a reply is captured for the tool-call message. A missing or
+//     null field used to make the next request fail with
+//     "The reasoning_content in the thinking mode must be passed back to the API".
+// ---------------------------------------------------------------------------
+{
+  let body;
+  globalThis.fetch = async (_url, init) => {
+    body = JSON.parse(init.body);
+    const stream = new ReadableStream({
+      start(c) {
+        c.enqueue(
+          enc.encode(
+            sse(
+              { choices: [{ delta: { reasoning_content: "think " } }] },
+              { choices: [{ delta: { reasoning_content: "hard" } }] },
+              { choices: [{ delta: { content: "answer" } }] },
+            ),
+          ),
+        );
+        c.enqueue(enc.encode(DONE));
+        c.close();
+      },
+    });
+    return new Response(stream, { status: 200 });
+  };
+
+  const tools = [{
+    type: "function",
+    function: { name: "run_command", description: "run", parameters: { type: "object", properties: {} } },
+  }];
+  const client = new LLMClient(
+    { ...MODEL, name: "deepseek-flash", url: "https://api.deepseek.com/v1" },
+    "DeepSeek",
+    "High",
+  );
+  let text = "";
+  for await (const chunk of client.streamTurn(
+    [
+      { role: "system", content: "s" },
+      { role: "user", content: "u" },
+      { role: "assistant", content: "the plan" },
+      { role: "assistant", content: "a corrupt field", reasoning_content: null },
+    ],
+    tools,
+  )) {
+    text += chunk;
+  }
+
+  const assistants = body.messages.filter((message) => message.role === "assistant");
+  assert(assistants.length === 2, `both assistant messages are sent, got ${assistants.length}`);
+  assert(
+    assistants.every((message) => typeof message.reasoning_content === "string"),
+    `every assistant message carries reasoning_content, got ${JSON.stringify(assistants)}`,
+  );
+  assert(
+    assistants[0].reasoning_content === "",
+    `a message written outside thinking mode echoes an empty string, got ${JSON.stringify(assistants[0].reasoning_content)}`,
+  );
+  assert(
+    assistants[1].reasoning_content === "",
+    `a null field is repaired to an empty string, got ${JSON.stringify(assistants[1].reasoning_content)}`,
+  );
+  assert(client.reasoningContent === "think hard", `streamed thinking is captured, got ${JSON.stringify(client.reasoningContent)}`);
+  assert(text === "answer", `the visible reply excludes thinking, got ${JSON.stringify(text)}`);
+
+  // The opt-out wins over the provider-wide default.
+  let optedOutBody;
+  globalThis.fetch = async (_url, init) => {
+    optedOutBody = JSON.parse(init.body);
+    const stream = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode(sse({ choices: [{ delta: { content: "ok" } }] })));
+        c.enqueue(enc.encode(DONE));
+        c.close();
+      },
+    });
+    return new Response(stream, { status: 200 });
+  };
+  const plain = new LLMClient(
+    { ...MODEL, name: "deepseek-chat", url: "https://api.deepseek.com/v1", reasoning: false },
+    "DeepSeek",
+    "High",
+  );
+  for await (const _ of plain.streamTurn([
+    { role: "user", content: "u" },
+    { role: "assistant", content: "a", reasoning_content: "stale" },
+  ])) {
+    // drain
+  }
+  assert(
+    !("reasoning_content" in optedOutBody.messages[1]),
+    "an explicit reasoning:false model does not receive the field",
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 17. Endpoints outside thinking mode never see the field, even if a saved
+//     conversation still carries it from another provider.
+// ---------------------------------------------------------------------------
+{
+  let body;
+  globalThis.fetch = async (_url, init) => {
+    body = JSON.parse(init.body);
+    const stream = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode(sse({ choices: [{ delta: { content: "ok" } }] })));
+        c.enqueue(enc.encode(DONE));
+        c.close();
+      },
+    });
+    return new Response(stream, { status: 200 });
+  };
+
+  const client = makeClient(); // OpenAI / test-model
+  for await (const _ of client.streamTurn([
+    { role: "user", content: "u" },
+    { role: "assistant", content: "a", reasoning_content: "private thoughts" },
+  ], [])) {
+    // drain
+  }
+  assert(
+    body.messages.every((message) => !("reasoning_content" in message)),
+    `a non-thinking endpoint receives no reasoning_content, got ${JSON.stringify(body.messages)}`,
+  );
+  assert(client.reasoningContent === "", "no thinking is invented for a plain stream");
+}
+
 await tick();
 console.log(failures === 0 ? "\nFETCH TESTS PASSED" : `\n${failures} FAILURE(S)`);
 process.exit(failures ? 1 : 0);

@@ -7,8 +7,9 @@ is described.
 - Your work is planned before it starts. When a turn carries a plan you are given
   exactly one step of it: do that step, verify it, and stop. Never start a later
   step, and never redo an earlier one.
-- Without a plan, state the numbered steps you are about to take in your first
-  message, then take them in that order.
+- Without a plan, just do the work. A single action goes straight to the answer —
+  do not decorate it with a plan. When you are taking several steps, name them in
+  one short line each and then take them in that order.
 - Look before you change: read the files you are about to edit, list the
   directory, run the command that shows the current state. Anything about the
   code you have not read is a guess, and guesses are the main source of bad

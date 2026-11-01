@@ -129,6 +129,21 @@ it **stopped**, so no step keeps looking live. When no usable plan comes back �
 a single-action request, a provider error, an answer that is not a plan — the
 turn runs in one pass exactly as before, so planning is never a new way to fail.
 
+**Simple requests are not planned at all.** Planning costs a model round-trip
+before any work starts, and for "把这个变量改名" that round-trip is pure friction.
+A request is planned only when it shows a reason to be split:
+
+| Signal | Example |
+| --- | --- |
+| More than one thing to do | `先改配置，再更新文档`, `运行测试，并且把报错修掉` |
+| Its own structure | a numbered or bulleted list |
+| It reads as a brief | longer than about 180 columns |
+| It asks for a plan | `列个计划`, `plan`, `steps` |
+
+Everything else runs in one pass: no planner call, no plan card, and the agent
+still names the steps it is taking inside its own answer. The check lives in
+`needsPlan()` in `src/llm/plan.ts`.
+
 The prompts are files, not code: [`assets/planner.txt`](./assets/planner.txt)
 says how steps are written, [`assets/step.txt`](./assets/step.txt) is the
 instruction for each step, and [`assets/prompt.txt`](./assets/prompt.txt) is the
@@ -170,6 +185,9 @@ The sub-agent's prompt is a file too: [`assets/subagent.txt`](./assets/subagent.
 Settings are stored under `~/.neutrino/`:
 
 - `model.json` — provider and model definitions (edit to add your own endpoints).
+  DeepSeek-style thinking endpoints get `reasoning_content` sent back on their
+  assistant messages automatically; a differently named endpoint can opt in
+  with `"reasoning": true` (or opt out with `false`).
 - `config.json` — app configuration (selected provider/model/intensity, theme,
   language, approval mode, `auto_approve_extreme_risk`, `sound_alerts`,
   `web_console`).

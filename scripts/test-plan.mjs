@@ -86,6 +86,51 @@ function deferred() {
 }
 
 // ---------------------------------------------------------------------------
+// 1b. When a request is worth planning
+// ---------------------------------------------------------------------------
+{
+  const { needsPlan, PLAN_LENGTH_LIMIT } = plan;
+
+  // One action, short, nothing to split: no planner round-trip.
+  for (const simple of [
+    "Run the test suite.",
+    "给这个函数加个注释",
+    "修一下登录页的按钮样式",
+    "what does src/app.ts do?",
+    "把它改成 --port",
+    "解释一下这段代码",
+  ]) {
+    assert.equal(needsPlan(simple), false, `a simple request is not planned: ${simple}`);
+  }
+
+  // More than one thing, a brief, a list, or an explicit ask: plan it.
+  for (const planned of [
+    "Build the case from box.png, then model the monitor",
+    "运行测试，并且把报错修掉",
+    "先看一眼现在的实现，再决定怎么改",
+    "1. 改配置\n2. 更新文档",
+    "帮我列个计划",
+    "按步骤来：先改配置",
+    "Please plan this out before you start.",
+    "x".repeat(PLAN_LENGTH_LIMIT + 10),
+  ]) {
+    assert.equal(needsPlan(planned), true, `this request is worth planning: ${planned.slice(0, 30)}`);
+  }
+
+  // One trailing full stop is one sentence; two are two.
+  assert.equal(needsPlan("Fix the failing test."), false);
+  assert.equal(needsPlan("Fix the failing test. It times out."), true);
+  assert.equal(needsPlan("看一下这个报错。为什么？"), true);
+
+  // 并发 / 合并 / 再运行一次 are not sequencing words.
+  assert.equal(needsPlan("把并发数改成 4"), false);
+  assert.equal(needsPlan("合并这两个分支"), false);
+  assert.equal(needsPlan("再运行一次测试"), false);
+
+  console.log("ok plan: only requests that need steps are planned");
+}
+
+// ---------------------------------------------------------------------------
 // 2. Prompt text built from a plan
 // ---------------------------------------------------------------------------
 {
@@ -272,7 +317,7 @@ try {
       { text: "STEP-THREE-REPLY" },
     ];
 
-    screen.liveSend("Build the case, the monitor and a camera animation");
+    screen.liveSend("Build the case from box.png, then model the monitor and animate the camera");
     await waitFor(() => screen.plan?.steps[1]?.status === "active", "the second step to start");
 
     // The plan so far, straight from the state machine.
@@ -354,7 +399,7 @@ try {
     calls.length = 0;
     const screen = makeScreen();
     scripted = [{ text: "I would simply answer, but here is a paragraph." }];
-    screen.liveSend("say hello");
+    screen.liveSend("say hello, then say goodbye");
     await waitFor(() => !screen.busy, "the unplanned turn to finish");
     assert.equal(screen.plan, null, "no plan is invented");
     assert.equal(calls.length, 2, "the planner was asked once, then the worker answered directly");
@@ -389,6 +434,24 @@ try {
     console.log("ok tui: planning is on by default and can be switched off");
   }
 
+  // 5c-bis. A simple request never asks the planner at all.
+  {
+    calls.length = 0;
+    saveConfig({ plan_first: true });
+    delete process.env.NEUTRINO_PLAN;
+    const screen = makeScreen();
+    scripted = [{ text: "All 42 tests pass." }];
+    screen.liveSend("Run the test suite.");
+    await waitFor(() => !screen.busy, "the simple turn to finish");
+    assert.equal(calls.length, 1, "a one-action request costs one model call, not two");
+    assert.equal(screen.plan, null, "and no plan is invented for it");
+    const text = textOf(draw(screen));
+    assert.ok(!text.includes("Plan · "), "no plan rows are shown");
+    assert.ok(!text.includes("**Plan**"), "and no plan message is written");
+    assert.ok(text.includes("All 42 tests pass."), "the answer is there");
+    console.log("ok tui: a simple request runs in one pass, without the planner");
+  }
+
   // 5d. Pausing mid-plan leaves no step running.
   {
     calls.length = 0;
@@ -400,7 +463,7 @@ try {
       { text: "TWO", gate: gate.promise },
       { text: "THREE" },
     ];
-    screen.liveSend("build it");
+    screen.liveSend("build it, then verify it");
     await waitFor(() => screen.plan?.steps[1]?.status === "active", "the second step to start");
 
     // ESC closes the card, the next two presses pause the turn.
@@ -428,7 +491,7 @@ try {
       { text: "", throw: new Error("provider exploded") },
       { text: "SHOULD-NOT-RUN" },
     ];
-    screen.liveSend("build it");
+    screen.liveSend("build it, then verify it");
     await waitFor(() => !screen.busy, "the failed turn to end");
     assert.deepEqual(screen.plan.steps.map((step) => step.status), ["failed", "pending", "pending"],
       "only the step that ran is marked, the rest stays for a re-plan");
@@ -465,7 +528,7 @@ try {
     session.start();
     try {
       scripted = [{ text: PLAN_JSON }, { text: "one" }, { text: "two" }, { text: "three" }];
-      session.liveSend("build the scene");
+      session.liveSend("build the scene, then animate the camera");
       await waitFor(() => session.liveSnapshot().busy, "the web turn to start");
       await waitFor(() => !session.liveSnapshot().busy, "the web turn to finish");
 

@@ -1,4 +1,4 @@
-import { INTENSITY_PARAMS, type ModelInfo } from "../config.js";
+import { INTENSITY_PARAMS, modelUsesReasoning, type ModelInfo } from "../config.js";
 import type { ToolDefinition } from "./tools.js";
 import {
   HttpStatusError,
@@ -31,6 +31,7 @@ export interface UsageInfo {
 interface ApiMessage {
   role: string;
   content?: string;
+  reasoning_content?: string;
   tool_calls?: unknown[];
   tool_call_id?: string;
   name?: string;
@@ -114,6 +115,12 @@ export class LLMClient {
   top_p: number;
   toolCalls: ToolCall[] = [];
   usage: UsageInfo | null = null;
+  /**
+   * The thinking text streamed alongside the reply. DeepSeek's thinking mode
+   * requires it to be echoed back on the assistant message that carries a tool
+   * call, so the agent loops attach it to that message.
+   */
+  reasoningContent = "";
 
   constructor(model: ModelInfo, provider: string, intensity: string) {
     this.model = model;
@@ -168,6 +175,7 @@ export class LLMClient {
   ): AsyncGenerator<string> {
     this.toolCalls = [];
     this.usage = null;
+    this.reasoningContent = "";
     try {
       if (this.provider === "Anthropic") {
         yield* this.streamAnthropic(messages, options);
@@ -199,6 +207,7 @@ export class LLMClient {
     const policy = resolvePolicy(options);
     for (let attempt = 1; ; attempt++) {
       this.toolCalls = [];
+      this.reasoningContent = "";
       let produced = false;
       try {
         for await (const token of this.openAIAttempt(messages, tools)) {
@@ -213,6 +222,30 @@ export class LLMClient {
     }
   }
 
+  /**
+   * DeepSeek's thinking mode rejects a tools-bearing request when any assistant
+   * message in its history carries no `reasoning_content` ("The
+   * `reasoning_content` in the thinking mode must be passed back to the API").
+   * An empty string is accepted, which is the honest value for a message that
+   * predates this turn's thinking: a compressed summary, the planner's plan, an
+   * error note or a session saved before this rule existed. Endpoints outside
+   * thinking mode must not receive the field at all.
+   */
+  private wireMessages(messages: ApiMessage[]): ApiMessage[] {
+    if (!modelUsesReasoning(this.provider, this.model)) {
+      return messages.map((message) => {
+        if (message.role !== "assistant" || message.reasoning_content === undefined) return message;
+        const { reasoning_content: _ignored, ...rest } = message;
+        return rest;
+      });
+    }
+    return messages.map((message) =>
+      message.role === "assistant" && typeof message.reasoning_content !== "string"
+        ? { ...message, reasoning_content: "" }
+        : message,
+    );
+  }
+
   /** A single streaming attempt; see `streamOpenAI` for the retry policy. */
   private async *openAIAttempt(messages: ApiMessage[], tools?: ToolDefinition[]): AsyncGenerator<string> {
     const url = this.model.url.replace(/\/+$/, "") + "/chat/completions";
@@ -222,7 +255,7 @@ export class LLMClient {
     };
     const payload: Record<string, unknown> = {
       model: this.model.name,
-      messages,
+      messages: this.wireMessages(messages),
       temperature: this.temperature,
       top_p: this.top_p,
       stream: true,
@@ -287,6 +320,10 @@ export class LLMClient {
           }
           const choice = (chunk as { choices?: Array<{ delta?: Record<string, unknown> }> }).choices?.[0];
           const delta = choice?.delta ?? {};
+          // DeepSeek calls it reasoning_content; other compatible endpoints use
+          // the shorter `reasoning`. Neither is part of the visible reply.
+          const reasoning = delta.reasoning_content ?? delta.reasoning;
+          if (typeof reasoning === "string" && reasoning) this.reasoningContent += reasoning;
           const content = delta.content;
           if (typeof content === "string" && content) yield content;
           const toolCalls = delta.tool_calls as Array<{

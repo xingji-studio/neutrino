@@ -23,6 +23,8 @@ import type { ToolDefinition } from "./tools.js";
 export interface SubAgentMessage {
   role: "system" | "user" | "assistant" | "tool";
   content?: string;
+  /** Thinking text echoed back on an assistant tool-call message. */
+  reasoning_content?: string;
   tool_calls?: Array<{
     id: string;
     type: "function";
@@ -131,6 +133,9 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRun
       messages.push({
         role: "assistant",
         content,
+        // A tool-call turn must carry the thinking that produced it back to a
+        // thinking-mode endpoint, or its next request is rejected.
+        ...(client.reasoningContent ? { reasoning_content: client.reasoningContent } : {}),
         ...(toolCalls.length > 0
           ? {
             tool_calls: toolCalls.map((call) => ({

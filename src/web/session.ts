@@ -47,6 +47,7 @@ import {
   advancePlan,
   buildPlannerInput,
   lastRequestText,
+  needsPlan,
   parsePlan,
   planMessage,
   planTranscript,
@@ -86,6 +87,13 @@ type Msg =
 interface ApiMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
+  /** Thinking text echoed back on an assistant tool-call message. */
+  reasoning_content?: string;
+  tool_calls?: Array<{
+    id: string;
+    type: "function";
+    function: { name: string; arguments: string };
+  }>;
   tool_call_id?: string;
 }
 
@@ -464,6 +472,8 @@ export class WebSession implements LiveAgent {
     if (!planFirstEnabled()) return null;
     const request = lastRequestText(this.messages);
     if (!request.trim()) return null;
+    // One action is not a plan: run the turn in one pass, as the terminal does.
+    if (!needsPlan(request)) return null;
     this.planning = true;
     this.publishLive();
     try {
@@ -563,14 +573,33 @@ export class WebSession implements LiveAgent {
           this.tokens.completion += client.usage.completion;
           this.lastPromptTokens = client.usage.prompt;
         }
+        const toolCalls = client.toolCalls;
         if (text.trim()) {
           this.messages.push({ role: "assistant", content: text });
-          apiMessages.push({ role: "assistant", content: text });
+        }
+        if (text.trim() || toolCalls.length > 0) {
+          // The assistant message and the tool results it produced must stay
+          // paired: a `tool` message without its `tool_calls` parent is
+          // rejected by every OpenAI-compatible endpoint. The reasoning is the
+          // thinking that produced the calls, which DeepSeek requires back.
+          apiMessages.push({
+            role: "assistant",
+            content: text,
+            reasoning_content: client.reasoningContent ?? "",
+            ...(toolCalls.length > 0
+              ? {
+                tool_calls: toolCalls.map((call) => ({
+                  id: call.id,
+                  type: "function" as const,
+                  function: { name: call.name, arguments: call.arguments },
+                })),
+              }
+              : {}),
+          });
         }
         this.save();
         this.publishLive();
 
-        const toolCalls = client.toolCalls;
         if (toolCalls.length === 0) break;
         for (const call of toolCalls) {
           if (token !== this.turnToken || this.paused) return false;
