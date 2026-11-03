@@ -15,6 +15,44 @@ export const MODEL_FILE = path.join(NEUTRINO_DIR, "model.json");
 export const SESSION_DIR = path.join(NEUTRINO_DIR, "session");
 export const CONFIG_FILE = path.join(NEUTRINO_DIR, "config.json");
 
+/**
+ * The browser console has two workspaces: the regular one and the isolated
+ * "Pro" workspace served at `/pro`. Everything a workspace owns — transcripts,
+ * model defaults, plan/compaction settings, reviewer model and interface
+ * language — is stored per mode; only the credentials and the approval policy
+ * below are shared, because they protect or gate the whole process.
+ */
+export const MODES = ["standard", "pro"] as const;
+export type Mode = (typeof MODES)[number];
+
+export const PRO_DIR = path.join(NEUTRINO_DIR, "pro");
+export const PRO_CONFIG_FILE = path.join(PRO_DIR, "config.json");
+export const PRO_SESSION_DIR = path.join(PRO_DIR, "session");
+
+/**
+ * Settings that intentionally apply to both workspaces. The Web password, the
+ * approval policy and the console's interface are properties of this process,
+ * not of a conversation workspace.
+ */
+export const SHARED_CONFIG_KEYS = ["web_password_hash", "approval_mode", "auto_approve_extreme_risk", "web_lan"] as const;
+
+export function normalizeMode(value: unknown): Mode {
+  return typeof value === "string" && value.trim().toLowerCase() === "pro" ? "pro" : "standard";
+}
+
+export function configFile(mode: Mode = "standard"): string {
+  return mode === "pro" ? PRO_CONFIG_FILE : CONFIG_FILE;
+}
+
+export function sessionDir(mode: Mode = "standard"): string {
+  return mode === "pro" ? PRO_SESSION_DIR : SESSION_DIR;
+}
+
+/** Key used to remember a model's context capacity per workspace. */
+export function modelContextWindowKey(provider: string, modelName: string): string {
+  return `${provider}/${modelName}`;
+}
+
 export interface ModelInfo {
   name: string;
   url: string;
@@ -55,13 +93,26 @@ export function contextWindow(value: unknown): number {
 }
 
 /** Reload the exact provider/model so settings also apply to active chats. */
-export function modelContextWindow(provider: string, model: ModelInfo): number {
+export function modelContextWindow(provider: string, model: ModelInfo, mode: Mode = "standard"): number {
+  // The Pro workspace keeps its own context capacities: changing one there must
+  // not move the compression threshold of the regular workspace (and vice
+  // versa). The capacity is a per-workspace setting, not shared model metadata,
+  // so an unset Pro value starts from the documented default instead of
+  // inheriting whatever the regular workspace saved in model.json.
+  if (mode === "pro") {
+    const configured = loadConfig("pro").model_context_windows;
+    if (configured && typeof configured === "object" && !Array.isArray(configured)) {
+      const override = (configured as Record<string, unknown>)[modelContextWindowKey(provider, model.name)];
+      if (isContextWindow(override)) return override;
+    }
+    return contextWindow(undefined);
+  }
   const saved = loadModels().providers.find((p) => p.name === provider)?.models.find((m) => m.name === model.name);
   return contextWindow((saved ?? model).context_window);
 }
 
-export function contextCompressionThreshold(provider: string, model: ModelInfo): number {
-  return Math.max(1, Math.floor(modelContextWindow(provider, model) * CONTEXT_COMPRESSION_RATIO));
+export function contextCompressionThreshold(provider: string, model: ModelInfo, mode: Mode = "standard"): number {
+  return Math.max(1, Math.floor(modelContextWindow(provider, model, mode) * CONTEXT_COMPRESSION_RATIO));
 }
 
 export interface ModelSelection {
@@ -140,6 +191,9 @@ export const DEFAULT_CONFIG: Record<string, unknown> = {
   // Mount the browser UI alongside the terminal UI unless it is turned off
   // here or on the command line.
   web_console: true,
+  // Listen on every interface (the equivalent of --lan) instead of loopback.
+  // The listener belongs to the process, so both workspaces share this value.
+  web_lan: false,
   // Working directories opened from the browser, newest first. They remain
   // listed even when they hold no conversations yet.
   web_workspaces: [],
@@ -216,9 +270,10 @@ export function normalizeApprovalMode(value: unknown): ApprovalMode {
     : "request";
 }
 
-export function ensureDirs(): void {
+export function ensureDirs(mode: Mode = "standard"): void {
   fs.mkdirSync(NEUTRINO_DIR, { recursive: true });
-  fs.mkdirSync(SESSION_DIR, { recursive: true });
+  fs.mkdirSync(sessionDir(mode), { recursive: true });
+  if (mode === "pro") fs.mkdirSync(PRO_DIR, { recursive: true });
 }
 
 export function loadModels(): ModelsData {
@@ -240,7 +295,25 @@ export function saveModels(data: ModelsData): void {
   fs.writeFileSync(MODEL_FILE, JSON.stringify(data, null, 2), "utf-8");
 }
 
-export function loadConfig(): Record<string, unknown> {
+/** Read a config file without creating it; null when missing or unreadable. */
+function readConfigFile(file: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf-8")) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+export function loadConfig(mode: Mode = "standard"): Record<string, unknown> {
+  if (mode === "pro") {
+    // Pro keeps its own file, with credentials/approval policy layered on top
+    // from the main config so those stay shared by construction.
+    const own = readConfigFile(PRO_CONFIG_FILE) ?? {};
+    const shared = readConfigFile(CONFIG_FILE) ?? DEFAULT_CONFIG;
+    const merged: Record<string, unknown> = { ...DEFAULT_CONFIG, ...own };
+    for (const key of SHARED_CONFIG_KEYS) merged[key] = shared[key] ?? DEFAULT_CONFIG[key];
+    return merged;
+  }
   try {
     ensureDirs();
     if (!fs.existsSync(CONFIG_FILE)) {
@@ -255,8 +328,27 @@ export function loadConfig(): Record<string, unknown> {
   }
 }
 
-export function saveConfig(data: Record<string, unknown>): void {
-  ensureDirs();
+export function saveConfig(data: Record<string, unknown>, mode: Mode = "standard"): void {
+  ensureDirs(mode);
+  if (mode === "pro") {
+    fs.mkdirSync(PRO_DIR, { recursive: true });
+    const own = { ...data };
+    for (const key of SHARED_CONFIG_KEYS) delete own[key];
+    fs.writeFileSync(PRO_CONFIG_FILE, JSON.stringify(own, null, 2), "utf-8");
+
+    // A Pro settings save that touched a shared key (password, approval policy)
+    // writes it back to the main config, where the terminal and both pages read it.
+    const shared = readConfigFile(CONFIG_FILE) ?? { ...DEFAULT_CONFIG };
+    let changed = false;
+    for (const key of SHARED_CONFIG_KEYS) {
+      if (data[key] === undefined) continue;
+      if (JSON.stringify(data[key]) === JSON.stringify(shared[key])) continue;
+      shared[key] = data[key];
+      changed = true;
+    }
+    if (changed) fs.writeFileSync(CONFIG_FILE, JSON.stringify(shared, null, 2), "utf-8");
+    return;
+  }
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(data, null, 2), "utf-8");
 }
 
@@ -306,11 +398,12 @@ export function saveSession(
   context?: ConversationContext | null,
   approvalMode?: ApprovalMode,
   plan?: PlanState | null,
+  mode: Mode = "standard",
 ): string {
-  ensureDirs();
+  ensureDirs(mode);
   const now = new Date();
   const id = sessionId ?? `${now.toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
-  const existing = sessionId ? loadSession(sessionId) : null;
+  const existing = sessionId ? loadSession(sessionId, mode) : null;
   const created_at = existing ? existing.created_at : now.toISOString();
 
   let title = "";
@@ -340,7 +433,7 @@ export function saveSession(
   // how far it got, and a stopped plan is still the record of what was agreed.
   if (plan && plan.steps.length) session.plan = plan;
 
-  const filePath = path.join(SESSION_DIR, `${id}.json`);
+  const filePath = path.join(sessionDir(mode), `${id}.json`);
   // Keep the last complete transcript intact if writing or replacing fails.
   // The temporary file shares the destination directory so rename is atomic.
   const tempPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
@@ -362,8 +455,8 @@ export function saveSession(
   return id;
 }
 
-export function loadSession(sessionId: string): SessionData | null {
-  const filePath = path.join(SESSION_DIR, `${sessionId}.json`);
+export function loadSession(sessionId: string, mode: Mode = "standard"): SessionData | null {
+  const filePath = path.join(sessionDir(mode), `${sessionId}.json`);
   if (!fs.existsSync(filePath)) return null;
   try {
     return JSON.parse(fs.readFileSync(filePath, "utf-8")) as SessionData;
@@ -372,8 +465,8 @@ export function loadSession(sessionId: string): SessionData | null {
   }
 }
 
-export function deleteSession(sessionId: string): boolean {
-  const filePath = path.join(SESSION_DIR, `${sessionId}.json`);
+export function deleteSession(sessionId: string, mode: Mode = "standard"): boolean {
+  const filePath = path.join(sessionDir(mode), `${sessionId}.json`);
   if (fs.existsSync(filePath)) {
     fs.unlinkSync(filePath);
     return true;
@@ -381,18 +474,19 @@ export function deleteSession(sessionId: string): boolean {
   return false;
 }
 
-export function listSessions(): SessionMeta[] {
-  ensureDirs();
+export function listSessions(mode: Mode = "standard"): SessionMeta[] {
+  ensureDirs(mode);
   const sessions: SessionMeta[] = [];
+  const dir = sessionDir(mode);
   let files: string[] = [];
   try {
-    files = fs.readdirSync(SESSION_DIR).filter((f) => f.endsWith(".json"));
+    files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
   } catch {
     return sessions;
   }
   for (const f of files) {
     try {
-      const data = JSON.parse(fs.readFileSync(path.join(SESSION_DIR, f), "utf-8")) as SessionData;
+      const data = JSON.parse(fs.readFileSync(path.join(dir, f), "utf-8")) as SessionData;
       sessions.push({
         id: data.id ?? f.replace(/\.json$/, ""),
         created_at: data.created_at ?? "",
@@ -417,8 +511,8 @@ export function listSessions(): SessionMeta[] {
  * The history menu is scoped to the current project so sessions started in
  * other directories do not clutter it.
  */
-export function listSessionsForCwd(cwd: string = process.cwd()): SessionMeta[] {
-  return listSessions().filter((s) => sameCwd(s.cwd, cwd));
+export function listSessionsForCwd(cwd: string = process.cwd(), mode: Mode = "standard"): SessionMeta[] {
+  return listSessions(mode).filter((s) => sameCwd(s.cwd, cwd));
 }
 
 function readAsset(...candidates: string[]): string | null {
@@ -485,11 +579,11 @@ export function loadSubAgentPrompt(): string {
  * `NEUTRINO_PLAN=off` overrides both ways for a single run, the way the other
  * environment variables override the saved configuration.
  */
-export function planFirstEnabled(): boolean {
+export function planFirstEnabled(mode: Mode = "standard"): boolean {
   const override = String(process.env.NEUTRINO_PLAN ?? "").trim().toLowerCase();
   if (override === "off" || override === "0" || override === "false" || override === "no") return false;
   if (override === "on" || override === "1" || override === "true" || override === "yes") return true;
-  return loadConfig().plan_first !== false;
+  return loadConfig(mode).plan_first !== false;
 }
 
 let cachedVersion: string | null = null;

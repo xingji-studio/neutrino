@@ -209,6 +209,7 @@ try {
   assert.equal(node("model-apply").disabled, false);
   await node("settings-open").fire("click");
   assert.equal(node("settings-dialog").open, true);
+  assert.equal(node("settings-web-lan").checked, false, "LAN access starts off by default");
   node("default-provider").value = a.provider;
   await node("default-provider").fire("change");
   assert.equal(node("settings-context").value, "1000000");
@@ -226,12 +227,15 @@ try {
   assert.match(node("settings-compress-note").textContent, /51,200/);
   node("settings-reviewer").value = "b-only";
   node("settings-extreme").checked = false;
+  node("settings-web-lan").checked = true;
   await node("settings-form").fire("submit");
   assert.equal(loadConfig().selected_provider, a.provider);
   assert.equal(loadConfig().default_intensity, "Medium");
   assert.equal(getWebSettings().settings.model_context_window, 64000);
   assert.equal(loadConfig().auto_approve_extreme_risk, false);
+  assert.equal(loadConfig().web_lan, true, "the LAN switch is saved with the other settings");
   assert.match(node("settings-feedback").textContent, /saved/);
+  assert.match(node("settings-feedback").textContent, /LAN access is on/);
   await node("settings-cancel").fire("click");
   assert.equal(node("settings-dialog").open, false);
   console.log("ok browser controls: dependent selectors, streaming drafts, apply errors, settings dialog and saved defaults");

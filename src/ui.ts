@@ -411,6 +411,69 @@ export function drawTabButton(
   }
 }
 
+/** Label of the CLI entry point that opens the browser console's Pro workspace. */
+export const PRO_MODE_LABEL = "启用Pro模式";
+
+/**
+ * Geometry of the Pro-mode button: a small box in the top-left corner, directly
+ * below the status bar (row 0). Rendering and hit testing share it so a click
+ * always lands on the box that is drawn.
+ *
+ * Returns null when the terminal is too small to fit the box with a little
+ * breathing room around it. The height floor also keeps the start screen's
+ * centered block (which is pushed below the box) clear of the approval toggle
+ * on very short terminals, where the original layout is preserved instead.
+ */
+export function proModeButton(
+  width: number,
+  height: number,
+): { x: number; y: number; w: number; h: number; label: string } | null {
+  // One blank column at the very edge, then the border: "flush to the edge
+  // with a single space", as the start screen expects.
+  const x = 1;
+  const y = 1;
+  const h = 3;
+  // Two cells of padding, one inside each border.
+  const w = displayWidth(PRO_MODE_LABEL) + 4;
+  if (width < w + 4 || height < 22) return null;
+  return { x, y, w, h, label: PRO_MODE_LABEL };
+}
+
+/**
+ * Draw the Pro-mode button. It is painted as opaque chrome so content behind it
+ * can never bleed through; the label row turns into the highlight background
+ * while the pointer is over it.
+ */
+export function drawProModeButton(buf: Buffer, hovered = false): void {
+  const button = proModeButton(buf.width, buf.height);
+  if (!button) return;
+  const { x, y, w, h, label } = button;
+  if (w < 2 || h < 2) return;
+
+  // Clear the footprint first: the button acts as an overlay over decorative
+  // content (the logo), which must not show through its interior.
+  buf.fillRect(x, y, w, h, { bg: C.black });
+  buf.drawBox(x, y, w, h, { fg: C.dim });
+
+  const innerX = x + 1;
+  const innerW = w - 2;
+  const labelY = y + Math.floor(h / 2);
+  if (hovered) buf.fillRect(innerX, labelY, innerW, 1, { bg: C.highlightBg });
+
+  const text = truncateByWidth(label, innerW);
+  const textX = innerX + Math.max(0, Math.floor((innerW - displayWidth(text)) / 2));
+  const style: Style = hovered
+    ? { fg: C.accent, bg: C.highlightBg, bold: true }
+    : { fg: C.accent, bold: true };
+  buf.writeText(textX, labelY, text, style);
+
+  // The button is chrome, not content: copying a selection across it must not
+  // drag its border or label into the clipboard.
+  for (let j = y; j < y + h; j++) {
+    for (let i = x; i < x + w; i++) buf.markChrome(i, j);
+  }
+}
+
 export function centerVertically(totalHeight: number, contentHeight: number): number {
   const top = Math.floor((totalHeight - contentHeight) / 2);
   return Math.max(1, top);

@@ -81,6 +81,10 @@ export function locale() {
 const ZH = {
   // -- chrome -------------------------------------------------------------
   "Neutrino": "Neutrino",
+  "Switch to Pro mode": "切换至Pro模式",
+  "Exit Pro mode": "返回普通模式",
+  "Click the badge to switch to Pro mode": "点击徽标切换至Pro模式",
+  "Dismiss": "关闭提示",
   "Refresh conversations": "刷新会话",
   "Settings": "设置",
   "Send message": "发送消息",
@@ -269,6 +273,11 @@ const ZH = {
   "Start the Web console with the terminal": "随终端启动 Web 控制台（下次启动生效）",
   "Safety determines automatic approval; task relevance only blocks unanimously confirmed, extreme mismatches. Delete-class automatic approval also requires this setting.": "自动审批取决于安全性；任务相关性只有在两位审查者一致确认极端不匹配时才会阻止执行。删除类命令的自动审批还需要开启此设置。",
   "Web access": "Web 访问",
+  "Allow access from other devices (LAN, 0.0.0.0)": "允许其他设备访问（局域网，0.0.0.0）",
+  "Binds the Web console to 0.0.0.0 so other devices on your network can open it, like --lan. Takes effect immediately; turning it off returns the console to 127.0.0.1. Keep the Web password on: anyone who can reach this port can drive the agent.": "将 Web 控制台绑定到 0.0.0.0，使局域网内的其他设备也能打开（等同于 --lan）。立即生效；关闭后恢复为 127.0.0.1。请保持 Web 密码开启：任何能访问此端口的人都可以驱动该 Agent。",
+  "LAN access is on. Open {urls} from another device.": "局域网访问已开启。请在其他设备上打开 {urls}。",
+  "LAN access is on, but no network address was found. Only this machine can connect.": "局域网访问已开启，但未找到可用的网络地址，目前只能在本机访问。",
+  "LAN access is off. Only this machine can connect.": "局域网访问已关闭，现在只能在本机访问。",
   "New Web password": "新的 Web 密码",
   "Confirm password": "确认密码",
   "Leave blank to keep current password": "留空则保留当前密码",

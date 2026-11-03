@@ -31,6 +31,7 @@ import {
   type ResolvedModelSelection,
   type ModelSelection,
   type ApprovalMode,
+  type Mode,
 } from "../config.js";
 import {
   COMPACT_KEEP,
@@ -134,6 +135,7 @@ export function createWebSession(
   cwd: string,
   selection: ResolvedModelSelection,
   approvalMode?: ApprovalMode,
+  mode: Mode = "standard",
 ): WebSession {
   const now = new Date();
   const source: SessionData = {
@@ -147,9 +149,9 @@ export function createWebSession(
     title: "",
     messages: [],
     tokens: { prompt: 0, completion: 0 },
-    approval_mode: normalizeApprovalMode(approvalMode ?? loadConfig().approval_mode),
+    approval_mode: normalizeApprovalMode(approvalMode ?? loadConfig(mode).approval_mode),
   };
-  return new WebSession(source, selection.model);
+  return new WebSession(source, selection.model, mode);
 }
 
 function parseArguments(raw: string): Record<string, unknown> {
@@ -186,15 +188,17 @@ export function resolveModel(
 }
 
 /** Build a web session from a saved transcript, or explain why we cannot. */
-export function resumeSession(source: SessionData, selection?: ModelSelection): ResumeOutcome {
+export function resumeSession(source: SessionData, selection?: ModelSelection, mode: Mode = "standard"): ResumeOutcome {
   const updated = selection ? { ...source, ...selection } : source;
   const resolved = resolveModel(updated.model, updated.provider);
   if (!resolved.ok) return resolved;
-  return { ok: true, session: new WebSession(updated, resolved.model) };
+  return { ok: true, session: new WebSession(updated, resolved.model, mode) };
 }
 
 export class WebSession implements LiveAgent {
   key: string | null = null;
+  /** Workspace this conversation belongs to; keeps Pro and standard separate. */
+  readonly mode: Mode;
 
   private model: ModelInfo;
   private provider: string;
@@ -240,9 +244,10 @@ export class WebSession implements LiveAgent {
   /** Reviewer count while an automated review runs, null otherwise. */
   private reviewing: LiveReviewProgress | null = null;
 
-  constructor(source: SessionData, model: ModelInfo) {
+  constructor(source: SessionData, model: ModelInfo, mode: Mode = "standard") {
+    this.mode = mode;
     this.model = model;
-    this.approvalMode = normalizeApprovalMode(source.approval_mode ?? loadConfig().approval_mode);
+    this.approvalMode = normalizeApprovalMode(source.approval_mode ?? loadConfig(this.mode).approval_mode);
     this.provider = source.provider;
     this.intensity = source.intensity;
     this.dir = source.cwd;
@@ -538,7 +543,7 @@ export class WebSession implements LiveAgent {
    * a plan must improve a turn, never be a new way for one to fail.
    */
   private async makePlan(token: number): Promise<PlanState | null> {
-    if (!planFirstEnabled()) return null;
+    if (!planFirstEnabled(this.mode)) return null;
     const request = lastRequestText(this.messages);
     if (!request.trim()) return null;
     // One action is not a plan: run the turn in one pass, as the terminal does.
@@ -763,7 +768,7 @@ export class WebSession implements LiveAgent {
         }),
       reviewer: () => this.reviewerModel(),
       autoApprovalEnabled: () => this.approvalMode === "auto",
-      extremeAutoApprovalEnabled: () => loadConfig().auto_approve_extreme_risk === true,
+      extremeAutoApprovalEnabled: () => loadConfig(this.mode).auto_approve_extreme_risk === true,
       onReview: (info) => {
         this.reviewing = info
           ? {
@@ -779,7 +784,7 @@ export class WebSession implements LiveAgent {
 
   /** Reviewer model: `approval_model` when set, otherwise the chat model. */
   private reviewerModel(): { model: ModelInfo; provider: string; intensity: string } {
-    const name = String(loadConfig().approval_model ?? "").trim();
+    const name = String(loadConfig(this.mode).approval_model ?? "").trim();
     const found = name ? findModel(name) : null;
     if (found) {
       const usable = resolveModel(found.model.name, found.provider);
@@ -860,7 +865,7 @@ export class WebSession implements LiveAgent {
   // ---- compression -----------------------------------------------------
 
   private compressThreshold(): number {
-    return contextCompressionThreshold(this.provider, this.model);
+    return contextCompressionThreshold(this.provider, this.model, this.mode);
   }
 
   private async autoCompress(token: number): Promise<void> {
@@ -949,6 +954,7 @@ export class WebSession implements LiveAgent {
         this.context,
         this.approvalMode,
         this.plan,
+        this.mode,
       );
       this.saveError = null;
       return true;

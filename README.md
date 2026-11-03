@@ -23,6 +23,7 @@ A CLI coding agent that lives in your terminal. Neutrino gives you an interactiv
 - **Agent history browser** — view past sessions from other CLI agents (Claude Code, Codex, OpenCode) directly from the history screen.
 - **Approval gate** — risky commands and paths outside the working directory need your sign-off. The header turns orange and reads **Request Approval**; press `Y` or `N`. Delete-class commands always ask, unless you explicitly granted full trust, and there is an opt-in reviewer agent for automatic decisions.
 - **Browser UI on by default** — every `neutrino` launch also mounts a local website at <http://127.0.0.1:8765> that lists every saved conversation grouped by working directory, streams the running one in real time, and lets you pause/resume it, send messages, start new conversations, open or create working directories, switch provider/model/intensity, edit every terminal setting, and switch the interface between English and 简体中文. Use `--port`/`--host` to move it, `--lan` to share it, or `--no-web` to keep the terminal only.
+- **Pro workspace** — click the orbit badge in the Web UI (or the **启用Pro模式** box under the terminal's status bar) to switch to an isolated workspace at `/pro`, introduced by a three-second animated wordmark. Pro has its own conversations, defaults, interface language, plan-first choice, reviewer model and context-compression threshold; only machine-wide settings (the Web password, approval policy and LAN binding) are shared. See [Pro workspace](#pro-workspace).
 
 ## Requirements
 
@@ -193,6 +194,13 @@ Settings are stored under `~/.neutrino/`:
   `web_console`, `web_workspaces`). `language` (`en` or `zh`) is the browser
   console's interface language; the terminal UI itself stays English.
 - `session/` — saved conversation sessions, one JSON file per session.
+- `pro/config.json` and `pro/session/` — the Pro workspace's own settings and
+  conversations. Pro does not read or write the regular workspace's defaults,
+  language, plan choice, reviewer model, compression thresholds or recent
+  folders. Machine-wide settings — `web_password_hash`, `approval_mode`,
+  `auto_approve_extreme_risk` and `web_lan` — are layered in from
+  `config.json`, so the Web password, approval policy and LAN binding are
+  shared by both workspaces.
 
 Set your API key in the model select screen or directly in `model.json`.
 
@@ -333,7 +341,9 @@ Use the selectors above a conversation to change its provider, model or
 intensity, then press **Apply to conversation** (pause an active turn first).
 The **Settings** (gear) button in the sidebar edits defaults for new conversations,
 the interface language, plan-first turns, the default approval mode, context
-compression and approval settings. Conversation choices are saved with the
+compression and approval settings. It also holds the **Web access** switch that
+binds the console to `0.0.0.0` (the in-app equivalent of `--lan`), which takes
+effect immediately and is remembered. Conversation choices are saved with the
 transcript and do not overwrite the defaults. Configured models and keys are
 shared with the terminal; keys stay on the server.
 
@@ -349,9 +359,42 @@ and the prompt/completion/total token counts when no plan is running.
 Context auto-compression starts at 80% of the current model's context window.
 Models default to 1,000,000 tokens (compression at 800,000). Adjust the model
 context window in terminal Settings or select the provider/model in Web Settings
-and enter its capacity in tokens. This is saved per provider/model and applies
-to future turns in active conversations. The legacy fixed
-`context_compress_threshold` setting is no longer used.
+and enter its capacity in tokens. This is saved per provider/model (and
+separately for the Pro workspace) and applies to future turns in active
+conversations. The legacy fixed `context_compress_threshold` setting is no
+longer used.
+
+### Pro workspace
+
+The Web console has two workspaces with the same interface. The regular one is
+at `/`; **Pro** is at `/pro`. In the regular console, click the orbit badge to
+the left of the **Neutrino** title: a `#151515` curtain fades in over the page
+and plays the animated `web/neutrino-pro.gif` wordmark in the centre, then
+fades out onto `/pro` after three seconds. The blue hint pointing at the badge
+explains the switch; its X dismisses the hint permanently for that browser. Pro
+mode uses the static `web/neutrino.png` wordmark as its top-left logo, renames
+the sidebar brand to **Neutrino Pro**, titles the page **Neutrino Pro**, and
+adds an **Exit Pro mode / 返回普通模式** button at the top-right of the
+workspace; the rest of the interface is unchanged. The button returns to the
+regular workspace at `/`.
+
+The terminal exposes the same entry point as a **启用Pro模式** box under the
+status bar on the start screen. Clicking it starts the Web console if it is
+not running and opens `/pro` in the default browser.
+
+The two workspaces never mix conversations or live sessions: Pro saves its
+transcripts under `~/.neutrino/pro/session/` and its settings under
+`~/.neutrino/pro/config.json`. Default models and intensity, plan-first turns,
+interface language, sound alerts, the approval reviewer model, context
+compression capacities and recent working directories all have independent
+values. Only settings that describe the whole machine are shared: the Web
+password, the approval policy (default approval mode and extreme-risk
+auto-approval) and whether the console also listens on the LAN. They guard the
+machine, so both workspaces, the terminal and every browser read and write the
+same values. Login is therefore shared: signing in on one page signs you in on
+the other, and changing the password from either settings dialog changes it for
+both. English and 简体中文 are both available in Pro mode, remembered per
+workspace.
 
 ```sh
 # The terminal UI now brings the web UI up with it
@@ -388,6 +431,13 @@ neutrino web --port 8765 --lan          # headless web UI on every interface
 
 `--lan` is shorthand for `--host 0.0.0.0`; the two cannot be combined.
 
+The same switch is available without a restart: **Settings → Web access → Allow
+access from other devices (LAN, 0.0.0.0)** re-binds the running console to
+`0.0.0.0` on the same port and saves the choice for later launches. Turning it
+off returns the console to `127.0.0.1`. An explicit `--host`/`--lan` picks the
+interface at startup; the in-page switch takes over from there for the running
+process.
+
 Startup prints every address that works, so you can copy the one matching the
 device you are on:
 
@@ -423,7 +473,8 @@ and startup output never contain your password or session credentials.
   and macOS. Allow it for private networks, and check that your WLAN is not
   marked "public", where incoming connections are blocked anyway.
 - **`127.0.0.1` is still the default interface.** The console starts with the
-  terminal UI, but it is not a network service until you pass `--host`/`--lan`.
+  terminal UI, but it is not a network service until you pass `--host`/`--lan`
+  or turn on **Settings → Web access → Allow access from other devices**.
 
 ## Built-in tools
 
@@ -478,6 +529,7 @@ node scripts/test-web-settings-http.mjs # verify authenticated settings and mode
 node scripts/test-web-markdown.mjs # verify the browser markdown renderer and its XSS boundaries
 node scripts/test-web-i18n.mjs   # verify every console label has a Chinese translation and placeholders survive
 node scripts/test-web-workspaces.mjs # verify folder browsing/creation, new conversations, clear/delete and other-agent history
+node scripts/test-web-pro.mjs    # verify /pro routing, isolated history/live sessions/settings, shared password & approval policy
 ```
 
 ### Rendering model

@@ -15,7 +15,8 @@ A small, dependency-free single page app that is served by the Neutrino CLI at
 - switch the workspace between every known folder and **All directories**;
 - switch the provider, model and intensity for the next turn;
 - edit every terminal setting — defaults, interface language, plan-first turns,
-  default approval mode, context compression, reviewer and Web password;
+  default approval mode, context compression, reviewer, Web password, and LAN
+  access;
 - switch the interface between English and 简体中文, instantly and persistently;
 - open the same plan / token card as the terminal's `ⓘ`, clear a conversation,
   delete a saved transcript, and review other agents' read-only history;
@@ -35,7 +36,9 @@ neutrino
 ```
 
 Use `--port` to move it, `--no-web` to skip it for that run, or turn it off
-permanently in the terminal's **Settings → Web console**.
+permanently in the terminal's **Settings → Web console**. LAN access can be
+switched on and off at any time in the browser's **Settings → Web access**
+without restarting anything.
 
 Or serve only the saved history, without a terminal:
 
@@ -57,6 +60,17 @@ neutrino --lan                               # TUI + web UI, every interface (0.
 neutrino --host 100.64.0.7                   # TUI + web UI, one specific address
 neutrino web --port 8765 --lan               # headless web UI, every interface
 ```
+
+You can also switch this at runtime from the browser: **Settings → Web access →
+Allow access from other devices (LAN, 0.0.0.0)**. The server re-binds the same
+port to `0.0.0.0` immediately — no restart, and the tab you are using keeps its
+open connections — and saves the choice in `config.json`, so the next launch
+starts on the LAN too. Turning the switch off returns the console to
+`127.0.0.1`. An explicit `--host`/`--lan` decides the interface at startup; the
+in-page switch takes over from there for the running process.
+
+The console can read every transcript and drive an agent with shell access, so
+keep the Web password on: anyone who can reach the port can use it.
 
 Startup prints the addresses to open:
 
@@ -108,6 +122,42 @@ headers, token URLs, `--token` and `NEUTRINO_WEB_TOKEN` are no longer used.
 Static files and the login/logout routes stay public. `--no-auth` explicitly
 disables password login.
 
+## Pro workspace
+
+The console has two workspaces. The regular one lives at `/`; the reserved,
+fully isolated **Pro** workspace lives at `/pro`. Both use the same page, the
+same login cookie and the same model catalog, but nothing else is shared:
+
+- **Conversations** — Pro transcripts are saved under
+  `~/.neutrino/pro/session/`, so neither sidebar ever lists the other
+  workspace's history. Live sessions are separated too: a Pro tab cannot read,
+  stream, drive or close a regular session, and vice versa.
+- **Settings** — Pro has its own `~/.neutrino/pro/config.json` with its own
+  language, plan-first choice, sound alerts, defaults for new conversations,
+  approval reviewer model, context compression threshold and recent folders.
+  Changing the compression threshold in one workspace does not move the other.
+- **Shared on purpose** — the Web password, the approval policy (default
+  approval mode, extreme-risk auto-approval) and the console's LAN access. They
+  protect or configure the whole machine, so both workspaces, the terminal and
+  every browser read and write the same values.
+
+In the regular console, click the orbit badge to the left of the **Neutrino**
+title (or the blue hint pointing at it). A `#151515` curtain fades in and plays
+the `neutrino-pro.gif` wordmark in the centre; after three seconds it fades out
+onto `/pro`. The X on the blue hint dismisses it permanently for this browser.
+In the terminal, the **启用Pro模式** box below the status bar starts the Web
+console if necessary and opens `/pro` in the default browser. Pro mode uses the
+static `web/neutrino.png` wordmark as its top-left logo, renames the sidebar
+brand to **Neutrino Pro**, and puts an **Exit Pro mode / 返回普通模式** button
+at the top-right of the workspace, which returns to the regular console at
+`/`. The rest of the workspace is identical to the regular one. The interface
+is available in English and 简体中文 in both workspaces (each remembers its own
+choice).
+
+Every API route below has an isolated twin under `/pro/api/` — for example,
+`/pro/api/overview`, `/pro/api/settings` and `/pro/api/live/:key/stream`. The
+login/logout routes are shared and stay unprefixed.
+
 ## Models and settings
 
 Open a conversation to see the **Provider**, **Model** and **Thinking**
@@ -124,12 +174,14 @@ removed can still be continued.
 The **Settings** (gear) button in the sidebar opens the interface language,
 plan-first turns, the default approval mode, defaults for new conversations, the
 context compression threshold, the approval reviewer model, sound alerts, the
-extreme-risk automatic approval option, and the Web password. Save settings
-explicitly; cancelling leaves the saved values intact. Conversation model changes
-are separate from these defaults. Models come from the same catalog as the
-terminal, and API keys stay on the server. Configure missing keys in the terminal
-model screen first. Intensity uses the same Low–Ultra sampling settings as the
-terminal.
+extreme-risk automatic approval option, LAN access, and the Web password. Save
+settings explicitly; cancelling leaves the saved values intact. Conversation
+model changes are separate from these defaults. Models come from the same
+catalog as the terminal, and API keys stay on the server. Configure missing keys
+in the terminal model screen first. Intensity uses the same Low–Ultra sampling
+settings as the terminal. The regular and [Pro](#pro-workspace) workspaces keep
+their own copy of every setting here except the approval policy, the Web password
+and LAN access, which belong to the whole process.
 
 ## New conversations and working directories
 
@@ -154,9 +206,11 @@ that has no conversations yet is still listed after a restart.
 
 The sidebar footer and **Settings → Interface** both offer English and 简体中文.
 The change is applied to the already-open page (labels, messages, status line,
-plan card and dialogs) without a reload, is stored in `config.json`, and is
-shared by every browser. The terminal UI stays in English. New conversation
-content, of course, remains in the language the model writes.
+plan card and dialogs) without a reload, is stored in the workspace's
+`config.json`, and is shared by every browser showing that workspace. The
+regular and Pro workspaces remember their own choice. The terminal UI stays in
+English. New conversation content, of course, remains in the language the model
+writes.
 
 ## History vs. live sessions
 
@@ -254,8 +308,8 @@ to know whether a conversation is driven by the terminal or by the server.
 | GET | `/api/fs?path=…` | Folder listing for the picker (folders only, roots, parent) |
 | POST | `/api/fs/mkdir` | Create `{ "path": "…" }` and return the new path |
 | POST | `/api/conversations` | Start `{ cwd, selection?, approval_mode? }`, returns `{ key, snapshot }` |
-| GET | `/api/settings` | Model catalog, languages and public settings; no credentials |
-| POST | `/api/settings` | Save validated `{ selection?, settings? }`, including `language`, `plan_first`, `approval_mode` and `web_password` |
+| GET | `/api/settings` | Model catalog, languages, public settings, and the live bind address (`web_host`, `web_urls`); no credentials |
+| POST | `/api/settings` | Save validated `{ selection?, settings? }`, including `language`, `plan_first`, `approval_mode`, `web_lan` and `web_password` |
 | GET | `/api/session/:id` | One saved transcript |
 | POST | `/api/session/:id/continue` | Resume a transcript with optional `{ selection }`, returns `{ key }` |
 | POST | `/api/session/:id/delete` | Delete a saved, non-running transcript |

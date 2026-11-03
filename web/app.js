@@ -24,6 +24,37 @@ const REFRESH_MS = 4000;
 // Remove credentials left behind by older versions of the UI.
 try { localStorage.removeItem("neutrino.token"); } catch { /* Storage may be blocked. */ }
 
+// ------------------------------------------------------------------ pro mode
+//
+// The "Pro" workspace is served at /pro and owns an isolated API under
+// /pro/api, while this page and the login cookie are shared. Detect the mode
+// before the request helpers below so no call can leak between the workspaces.
+const PRO_MODE = (() => {
+  try {
+    const pathname = String(location?.pathname ?? "");
+    return pathname === "/pro" || pathname.startsWith("/pro/");
+  } catch {
+    return false; // Test sandboxes and unusual embedders have no location.
+  }
+})();
+
+const API_BASE = PRO_MODE ? "/pro/api" : "/api";
+// Lets Pro-specific chrome (the wider sidebar needed by the longer brand name)
+// apply before the first paint of this module.
+if (PRO_MODE) document.body?.classList.add("pro-mode");
+
+/** Point an /api request at the active workspace; other paths are unchanged. */
+function apiPath(path) {
+  if (!PRO_MODE) return path;
+  const text = String(path);
+  return text.startsWith("/api/") ? `${API_BASE}${text.slice(4)}` : path;
+}
+
+/** Namespace a remembered preference so both workspaces keep their own copy. */
+function modeStorageKey(key) {
+  return PRO_MODE ? `neutrino.pro.${key}` : key;
+}
+
 // Translation lookup. `translate` is an ES-module import; the browser tests
 // that evaluate this file in a sandbox strip imports, so the helper degrades to
 // the English source text instead of throwing. Interpolation is kept here too.
@@ -92,7 +123,7 @@ const initialLogin = (() => {
 
 async function apiFetch(path, init = {}) {
   if (!await initialLogin) throw new Error("Password login required.");
-  const response = await fetch(path, { ...init, credentials: "same-origin" });
+  const response = await fetch(apiPath(path), { ...init, credentials: "same-origin" });
   if (response.status === 401) {
     showGate();
     throw new Error("Password login required.");
@@ -158,6 +189,11 @@ const el = {
   sessions: document.getElementById("sessions"),
   status: document.getElementById("status"),
   refresh: document.getElementById("refresh"),
+  brandLogo: document.getElementById("brand-logo"),
+  brandName: document.getElementById("brand-name"),
+  proTip: document.getElementById("pro-tip"),
+  proTipClose: document.getElementById("pro-tip-close"),
+  proExit: document.getElementById("pro-exit"),
   title: document.getElementById("session-title"),
   sub: document.getElementById("session-sub"),
   controls: document.getElementById("controls"),
@@ -249,7 +285,7 @@ const state = {
 };
 
 function storedWorkspace() {
-  const path = readStorage("neutrino.workspace");
+  const path = readStorage(modeStorageKey("neutrino.workspace"));
   if (!path) return null;
   return { key: pathKey(path), path };
 }
@@ -395,7 +431,7 @@ function workspaceName(value) {
 
 function setWorkspace(workspace, { persist = true } = {}) {
   state.workspace = workspace ? { key: pathKey(workspace.path), path: workspace.path } : null;
-  if (persist) writeStorage("neutrino.workspace", state.workspace?.path ?? "");
+  if (persist) writeStorage(modeStorageKey("neutrino.workspace"), state.workspace?.path ?? "");
   renderWorkspaceChrome();
   renderSidebar();
 }
@@ -649,7 +685,7 @@ async function selectLive(key) {
 
 function openStream(key) {
   closeStream();
-  const source = new EventSource(`/api/live/${encodeURIComponent(key)}/stream`);
+  const source = new EventSource(apiPath(`/api/live/${encodeURIComponent(key)}/stream`));
   state.eventSource = source;
 
   source.addEventListener("snapshot", (event) => {
@@ -2177,7 +2213,7 @@ function syncLanguageSelects(language) {
 async function changeInterfaceLanguage(language, { persist = true } = {}) {
   const normalized = String(language ?? "").toLowerCase().startsWith("zh") ? "zh" : "en";
   setUiLanguage(normalized);
-  writeStorage("neutrino.language", normalized);
+  writeStorage(modeStorageKey("neutrino.language"), normalized);
   applyStaticTranslations();
   syncLanguageSelects(normalized);
   if (state.status) setStatus(state.status.key, state.status.kind);
@@ -2209,11 +2245,190 @@ async function changeInterfaceLanguage(language, { persist = true } = {}) {
 }
 
 function initializeLanguage() {
-  const stored = readStorage("neutrino.language");
+  const stored = readStorage(modeStorageKey("neutrino.language"));
   if (stored) setUiLanguage(stored);
   applyStaticTranslations();
   syncLanguageSelects(uiLanguage());
   if (state.status) setStatus(state.status.key, state.status.kind);
+}
+
+// ------------------------------------------------------------------ pro mode
+//
+// Both workspaces reuse this console. Clicking the orbit badge on the normal
+// console starts a short wordmark curtain; the recorded start time lets /pro
+// finish the same animation instead of flashing the freshly loaded page.
+
+const PRO_TRANSITION_KEY = "neutrino.pro.transition";
+const PRO_TIP_KEY = "neutrino.pro.tip.dismissed";
+const PRO_TRANSITION_FADE_MS = 350; // curtain fade in / fade out
+const PRO_TRANSITION_COVER_MS = 450; // navigate once the curtain is fully opaque
+const PRO_TRANSITION_HOLD_MS = 3000; // wordmark stays up until 3s after the switch began
+const PRO_TRANSITION_RESUME_MS = 8000; // older records are stale and never replayed
+const PRO_LOGO_MARK = '<img class="pro-logo-mark" src="/neutrino.png" alt="Neutrino Pro">';
+
+let proTransitionStarted = false;
+
+function proCurtain() {
+  const curtain = document.createElement("div");
+  curtain.className = "pro-curtain";
+  curtain.setAttribute("aria-hidden", "true");
+  const image = document.createElement("img");
+  image.src = "/neutrino-pro.gif";
+  image.alt = "";
+  curtain.appendChild(image);
+  return curtain;
+}
+
+/** Timers exist in the browser; the test sandboxes load this file without them. */
+function proDelay(callback, ms) {
+  if (typeof setTimeout === "function") setTimeout(callback, ms);
+}
+
+function startProTransition() {
+  if (PRO_MODE || proTransitionStarted) return;
+  proTransitionStarted = true;
+  const started = Date.now();
+  try {
+    sessionStorage.setItem(PRO_TRANSITION_KEY, String(started));
+  } catch { /* Storage may be blocked; navigation still works. */ }
+
+  const curtain = proCurtain();
+  curtain.style.transition = `opacity ${PRO_TRANSITION_FADE_MS}ms ease`;
+  document.body.appendChild(curtain);
+  // Commit the transparent first frame, then let the style transition fade in.
+  void curtain.offsetWidth;
+  curtain.classList.add("pro-curtain-visible");
+
+  proDelay(() => {
+    try { location.assign("/pro"); } catch { location.href = "/pro"; }
+  }, PRO_TRANSITION_COVER_MS);
+}
+
+/** Remove every switch curtain left in this document. */
+function removeProCurtains() {
+  if (typeof document.querySelectorAll !== "function") return;
+  for (const curtain of document.querySelectorAll(".pro-curtain")) curtain.remove?.();
+}
+
+/**
+ * Drop the one-shot switch chrome.
+ *
+ * The curtain lives in the document that navigated away, so the browser's
+ * back/forward cache can restore it fully opaque — a Back or Forward would
+ * otherwise land on that frozen frame. `clearRecord` stays false while this
+ * document is being hidden for /pro: the destination still needs the recorded
+ * start time to finish the same animation.
+ */
+function resetProTransition({ clearRecord = true } = {}) {
+  removeProCurtains();
+  document.documentElement?.classList?.remove?.("pro-transitioning");
+  proTransitionStarted = false;
+  if (!clearRecord) return;
+  try { sessionStorage.removeItem(PRO_TRANSITION_KEY); } catch { /* Storage may be blocked. */ }
+}
+
+/** Undo the switch chrome when the browser restores either page from bfcache. */
+function watchProNavigation() {
+  if (typeof window === "undefined" || typeof window.addEventListener !== "function") return;
+  window.addEventListener("pagehide", (event) => {
+    if (!event?.persisted) return;
+    // The page is entering the back/forward cache: clean the snapshot, but
+    // keep the record for the /pro page that is currently loading.
+    resetProTransition({ clearRecord: false });
+  });
+  window.addEventListener("pageshow", (event) => {
+    if (!event?.persisted) return;
+    // Restored by Back/Forward: any curtain captured in the snapshot is stale.
+    resetProTransition();
+  });
+}
+
+/** Consume a just-recorded switch and finish the animation on /pro. */
+function resumeProTransition() {
+  if (!PRO_MODE) return;
+  let started = 0;
+  try { started = Number(sessionStorage.getItem(PRO_TRANSITION_KEY)) || 0; } catch { /* Storage may be blocked. */ }
+  // Consume the record even when stale: direct visits never show a curtain.
+  if (started) {
+    try { sessionStorage.removeItem(PRO_TRANSITION_KEY); } catch { /* Ignore. */ }
+  }
+  const now = Date.now();
+  const age = now - started;
+  if (!started || age < 0 || age > PRO_TRANSITION_RESUME_MS) {
+    document.documentElement.classList.remove("pro-transitioning");
+    return;
+  }
+
+  const curtain = proCurtain();
+  // Start fully opaque on the first frame so the new page never flashes through.
+  curtain.style.transition = "none";
+  curtain.style.opacity = "1";
+  document.body.appendChild(curtain);
+  // The real curtain is up: retire the pre-paint cover from index.html so it
+  // cannot remain over the page after the fade completes.
+  document.documentElement.classList.remove("pro-transitioning");
+
+  proDelay(() => {
+    curtain.style.transition = `opacity ${PRO_TRANSITION_FADE_MS}ms ease`;
+    curtain.style.opacity = "0";
+    proDelay(() => curtain.remove(), PRO_TRANSITION_FADE_MS);
+  }, Math.max(0, started + PRO_TRANSITION_HOLD_MS - now));
+}
+
+/** In Pro mode the badge is a static "you are here" mark, not a control. */
+function applyProBrand() {
+  document.title = "Neutrino Pro";
+  if (el.brandName) el.brandName.textContent = "Neutrino Pro";
+  const logo = el.brandLogo;
+  if (!logo) return;
+  logo.innerHTML = PRO_LOGO_MARK;
+  logo.classList.add("pro-logo");
+  logo.tabIndex = -1;
+  // Drop the i18n annotations too, or a language switch restores the tooltip.
+  const annotations = ["title", "aria-label", "data-i18n-title", "data-i18n-aria-label"];
+  for (const attribute of annotations) logo.removeAttribute?.(attribute);
+}
+
+/** The blue tip explains the badge on the normal console; Pro never shows it. */
+function initializeProTip() {
+  if (PRO_MODE || !el.proTip) return;
+  if (readStorage(PRO_TIP_KEY) === "1") return;
+  el.proTip.classList.remove("hidden");
+  el.proTipClose?.addEventListener("click", () => {
+    writeStorage(PRO_TIP_KEY, "1");
+    el.proTip.classList.add("hidden");
+  });
+}
+
+/** The Pro workspace's top-right escape hatch back to the regular console. */
+function initializeProExit() {
+  if (!el.proExit) return;
+  el.proExit.classList.remove("hidden");
+  el.proExit.addEventListener("click", () => {
+    el.proExit.disabled = true;
+    try {
+      location.assign("/");
+    } catch {
+      location.href = "/";
+    }
+  });
+}
+
+/** Wire the shared brand and either start the switch or resume its animation. */
+function initializeProWorkspace() {
+  watchProNavigation();
+  if (PRO_MODE) {
+    applyProBrand();
+    initializeProExit();
+    resumeProTransition();
+    return;
+  }
+  // A switch that was interrupted (Stop, Back, a failed navigation) can leave
+  // the record and the pre-paint cover behind. Neither may ever affect the
+  // regular console, so clear them before wiring the badge.
+  resetProTransition();
+  el.brandLogo?.addEventListener("click", startProTransition);
+  initializeProTip();
 }
 
 // --------------------------------------------------------------------- init
@@ -2318,6 +2533,7 @@ el.folderDialog.addEventListener("cancel", (event) => {
 window.addEventListener("beforeunload", closeStream);
 
 initializeLanguage();
+initializeProWorkspace();
 preferences.load()
   .then((config) => {
     const language = config?.settings?.language;

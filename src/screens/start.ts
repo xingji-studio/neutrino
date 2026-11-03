@@ -14,6 +14,8 @@ import {
   inRect,
   approvalToggle,
   drawApprovalToggle,
+  drawProModeButton,
+  proModeButton,
 } from "../ui.js";
 
 const TABS = ["Model", "History", "Settings"];
@@ -57,6 +59,7 @@ export class StartScreen extends Screen {
   private cursor = 0;
   private focusIdx = 0; // 0 = input box, 1..3 = tabs, 4 = approval mode
   private hoverIdx = -1; // -1 = nothing, otherwise the control index
+  private proHover = false; // pointer is over the Pro-mode button
   private lastHoverX = -1;
   private lastHoverY = -1;
 
@@ -161,21 +164,28 @@ export class StartScreen extends Screen {
       this.lastHoverX = ev.x;
       this.lastHoverY = ev.y;
 
+      const pro = proModeButton(this.app.width, this.app.height);
+      const proHover = pro !== null && inRect(ev.x, ev.y, pro);
       const layout = this.layout();
       let hover = -1;
-      if (inRect(ev.x, ev.y, approvalToggle(this.app.width, this.app.height - 4, this.approvalMode))) {
-        hover = FOCUS_COUNT - 1;
-      } else if (layout && inRect(ev.x, ev.y, { x: layout.inputX, y: layout.inputY, w: layout.inputW, h: INPUT_H })) {
-        hover = 0;
-      } else if (layout && ev.y >= layout.tabY && ev.y < layout.tabY + TAB_H) {
-        for (let i = 0; i < layout.tabs.length; i++) {
-          if (inRect(ev.x, ev.y, { x: layout.tabs[i].x, y: layout.tabY, w: layout.tabs[i].w, h: TAB_H })) {
-            hover = i + 1;
-            break;
+      // While the pointer is over the Pro button no other control is hovered
+      // underneath it: the box is opaque, so its neighbours must not light up.
+      if (!proHover) {
+        if (inRect(ev.x, ev.y, approvalToggle(this.app.width, this.app.height - 4, this.approvalMode))) {
+          hover = FOCUS_COUNT - 1;
+        } else if (layout && inRect(ev.x, ev.y, { x: layout.inputX, y: layout.inputY, w: layout.inputW, h: INPUT_H })) {
+          hover = 0;
+        } else if (layout && ev.y >= layout.tabY && ev.y < layout.tabY + TAB_H) {
+          for (let i = 0; i < layout.tabs.length; i++) {
+            if (inRect(ev.x, ev.y, { x: layout.tabs[i].x, y: layout.tabY, w: layout.tabs[i].w, h: TAB_H })) {
+              hover = i + 1;
+              break;
+            }
           }
         }
       }
-      if (hover !== this.hoverIdx) {
+      if (proHover !== this.proHover || hover !== this.hoverIdx) {
+        this.proHover = proHover;
         this.hoverIdx = hover;
         this.app.render();
       }
@@ -186,6 +196,13 @@ export class StartScreen extends Screen {
       const layout = this.layout();
       if (!layout) return;
       if (ev.button === 2) return; // right click: no-op on start screen
+      // The Pro button is a control of its own and is checked first: a left
+      // click anywhere in its box opens Pro mode instead of the control below.
+      const pro = proModeButton(this.app.width, this.app.height);
+      if (ev.button === 0 && pro && inRect(ev.x, ev.y, pro)) {
+        void this.app.openProMode();
+        return;
+      }
       if (ev.y >= 1 && inRect(ev.x, ev.y, approvalToggle(this.app.width, this.app.height - 4, this.approvalMode))) {
         this.focusIdx = FOCUS_COUNT - 1;
         this.toggleApproval();
@@ -230,6 +247,9 @@ export class StartScreen extends Screen {
     const h = this.app.height;
     const rows: number[] = [];
     for (let y = inputY; y <= tabY + TAB_H; y++) if (y >= 0 && y < h) rows.push(y);
+    // The Pro button sits directly below the status bar; repainting its rows
+    // makes it self-heal exactly like the input box and the tabs.
+    for (let y = 1; y <= 3; y++) if (y >= 0 && y < h) rows.push(y);
     if (h - 4 >= 1) rows.push(h - 4);
     return rows;
   }
@@ -243,7 +263,7 @@ export class StartScreen extends Screen {
     const gap = 1;
     const logoGap = logoLines.length ? 1 : 0;
     const contentH = logoLines.length + logoGap + INPUT_H + gap + TAB_H;
-    const inputY = centerVertically(h - 4, contentH) + logoLines.length + logoGap;
+    const inputY = this.contentTop(h, contentH) + logoLines.length + logoGap;
     const tabY = inputY + INPUT_H + gap;
     const tabGap = 2;
     const tabInner = inputW - tabGap * (TABS.length - 1);
@@ -257,6 +277,17 @@ export class StartScreen extends Screen {
       tx += tw + tabGap;
     }
     return { inputX, inputY, inputW, tabY, tabs };
+  }
+
+  /**
+   * First content row. The centered block normally floats in the middle, but
+   * it must start below the Pro button when that button is visible: the box is
+   * opaque chrome and would otherwise clip the top of the logo.
+   */
+  private contentTop(height: number, contentH: number): number {
+    const top = centerVertically(height - 4, contentH);
+    const pro = proModeButton(this.app.width, height);
+    return pro ? Math.max(top, pro.y + pro.h) : top;
   }
 
   private move(delta: number): void {
@@ -302,7 +333,7 @@ export class StartScreen extends Screen {
     const gap = 1;
     const logoGap = logoLines.length ? 1 : 0;
     const contentH = logoLines.length + logoGap + INPUT_H + gap + TAB_H;
-    const top = centerVertically(h - 4, contentH);
+    const top = this.contentTop(h, contentH);
 
     let y = top;
     for (const line of logoLines) {
@@ -352,5 +383,9 @@ export class StartScreen extends Screen {
     }
     drawApprovalToggle(buf, approvalY, this.approvalMode,
       this.focusIdx === FOCUS_COUNT - 1 || this.hoverIdx === FOCUS_COUNT - 1);
+
+    // Painted last so its opaque footprint is never clipped by the decorative
+    // content above it. Its hit box uses the same top-left geometry.
+    drawProModeButton(buf, this.proHover);
   }
 }

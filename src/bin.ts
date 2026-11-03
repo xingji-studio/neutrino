@@ -53,8 +53,11 @@ Environment:
 The web UI starts by default alongside the terminal UI on loopback. Turn it
 off for one run with --no-web, or permanently in Settings → Web console. It can
 read every saved conversation and drive an agent with shell access, so it binds
-to loopback unless you ask for --host/--lan. Log in with the permanent password
-(default: 114514). Change it in Settings. --no-auth disables password login.
+to loopback unless you ask for --host/--lan. The same LAN access can be switched
+on, and off, in the browser's Settings → Web access; the choice is saved for the
+next launch, while --host/--lan win for the current one. Log in with the
+permanent password (default: 114514). Change it in Settings. --no-auth disables
+password login.
 `,
   );
 }

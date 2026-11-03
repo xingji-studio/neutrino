@@ -17,8 +17,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  SESSION_DIR, deleteSession, listSessions, loadConfig, normalizeApprovalMode, resolveModelSelection,
-  saveConfig, type ApprovalMode, type ModelSelection, type ResolvedModelSelection, type SessionData, type SessionMeta,
+  deleteSession, listSessions, loadConfig, normalizeApprovalMode, resolveModelSelection, saveConfig, sessionDir,
+  type ApprovalMode, type Mode, type ModelSelection, type ResolvedModelSelection, type SessionData, type SessionMeta,
 } from "../config.js";
 import { getWebSettings, updateWebSettings } from "./settings.js";
 import { WebAuth } from "./auth.js";
@@ -65,17 +65,40 @@ export interface WebServerHandle {
   host: string;
   /** Whether a browser must log in before using the API. */
   authRequired: boolean;
+  /**
+   * Re-bind the same port on another interface. Live connections (a streaming
+   * turn, the tab asking for the change) stay open; resolves once the new
+   * socket is listening and rejects if it could not be bound.
+   */
+  setHost(host: string): Promise<void>;
   close(): Promise<void>;
 }
 
 /** Bind addresses that mean "every interface" rather than one host. */
 const WILDCARD_HOSTS = new Set(["0.0.0.0", "::", "[::]", ""]);
 
+/** The two interfaces the Web access switch moves between. */
+const LOOPBACK_HOST = "127.0.0.1";
+const WILDCARD_HOST = "0.0.0.0";
+
 /** True when `host` only accepts connections from this machine. */
 export function isLoopbackHost(host: string): boolean {
   const h = host.trim().toLowerCase().replace(/^\[|\]$/g, "");
   if (WILDCARD_HOSTS.has(h)) return false;
   return h === "localhost" || h === "::1" || h.startsWith("127.");
+}
+
+/** True when `host` listens on every interface, i.e. what --lan selects. */
+export function isWildcardHost(host: string): boolean {
+  return WILDCARD_HOSTS.has(host.trim().toLowerCase().replace(/^\[|\]$/g, ""));
+}
+
+/**
+ * The interface a fresh listener uses when the command line did not pick one.
+ * The saved Web access switch behaves exactly like `--lan`.
+ */
+function defaultWebHost(): string {
+  return loadConfig().web_lan === true ? WILDCARD_HOST : LOOPBACK_HOST;
 }
 
 /**
@@ -125,6 +148,37 @@ export function webUrls(host: string, port: number): { url: string; urls: string
   };
 }
 
+/**
+ * The listening socket as the settings page sees it. A settings save can move
+ * it between loopback and every interface without restarting the process.
+ */
+interface WebBinding {
+  host: string;
+  port: number;
+  setHost(host: string): Promise<void>;
+}
+
+/**
+ * Settings plus the live socket. The `web_lan` switch reports and changes what
+ * is listening right now, so a run started with --lan shows as on even though
+ * nothing was saved yet.
+ */
+function settingsPayload(mode: Mode, binding: WebBinding) {
+  const payload = getWebSettings(mode);
+  const lan = isWildcardHost(binding.host);
+  const { urls } = webUrls(binding.host, binding.port);
+  return {
+    ...payload,
+    settings: {
+      ...payload.settings,
+      web_lan: lan,
+      web_host: binding.host,
+      // Addresses another device can open; empty unless every interface is bound.
+      web_urls: lan ? urls.filter((url) => !url.includes("//127.0.0.1:")) : [],
+    },
+  };
+}
+
 interface OverviewSession extends SessionMeta {
   live: boolean;
   liveKey: string | null;
@@ -169,10 +223,11 @@ function isSafeSessionId(id: string): boolean {
   return SESSION_ID_RE.test(id) && id !== "." && id !== ".." && !id.includes("..");
 }
 
-function loadSessionSafe(id: string): SessionData | null {
+function loadSessionSafe(id: string, mode: Mode = "standard"): SessionData | null {
   if (!isSafeSessionId(id)) return null;
-  const filePath = path.join(SESSION_DIR, `${id}.json`);
-  if (path.dirname(filePath) !== SESSION_DIR) return null;
+  const dir = sessionDir(mode);
+  const filePath = path.join(dir, `${id}.json`);
+  if (path.dirname(filePath) !== dir) return null;
   try {
     return JSON.parse(fs.readFileSync(filePath, "utf-8")) as SessionData;
   } catch {
@@ -291,12 +346,12 @@ function readFolder(raw: unknown) {
 }
 
 /** Recent working directories: explicitly opened ones first, then saved-session folders. */
-function recentWorkspacePaths(): string[] {
-  const config = loadConfig();
+function recentWorkspacePaths(mode: Mode = "standard"): string[] {
+  const config = loadConfig(mode);
   const stored = Array.isArray(config.web_workspaces)
     ? (config.web_workspaces as unknown[]).filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "")
     : [];
-  const saved = listSessions().map((session) => session.cwd).filter(Boolean);
+  const saved = listSessions(mode).map((session) => session.cwd).filter(Boolean);
   const seen = new Set<string>();
   const out: string[] = [];
   for (const dir of [...stored, ...saved, process.cwd()]) {
@@ -309,9 +364,9 @@ function recentWorkspacePaths(): string[] {
   return out;
 }
 
-function workspaceList() {
-  const sessions = listSessions();
-  return recentWorkspacePaths().map((dir) => {
+function workspaceList(mode: Mode = "standard") {
+  const sessions = listSessions(mode);
+  return recentWorkspacePaths(mode).map((dir) => {
     let exists = false;
     try {
       exists = fs.statSync(dir).isDirectory();
@@ -328,15 +383,15 @@ function workspaceList() {
 }
 
 /** Best-effort persistence: failing to remember a folder must not fail the conversation. */
-function recordWorkspace(dir: string): void {
+function recordWorkspace(dir: string, mode: Mode = "standard"): void {
   try {
-    const config = loadConfig();
+    const config = loadConfig(mode);
     const stored = Array.isArray(config.web_workspaces)
       ? (config.web_workspaces as unknown[]).filter((entry): entry is string => typeof entry === "string")
       : [];
     config.web_workspaces = [dir, ...stored.filter((entry) => !sameCwd(entry, dir))]
       .slice(0, MAX_RECENT_WORKSPACES);
-    saveConfig(config);
+    saveConfig(config, mode);
   } catch {
     // The picked folder still works for this conversation.
   }
@@ -371,10 +426,10 @@ function safeAgentSessionId(id: string): boolean {
   return AGENT_SESSION_ID_RE.test(id) && !id.includes("..") && id !== "." && id !== "..";
 }
 
-/** Build the sidebar payload: every session grouped by working directory. */
-function buildOverview(): Overview {
-  const sessions = listSessions();
-  const lives = hub.list();
+/** Build the sidebar payload: the selected workspace's sessions grouped by directory. */
+function buildOverview(mode: Mode = "standard"): Overview {
+  const sessions = listSessions(mode);
+  const lives = hub.list(mode);
 
   const liveBySession = new Map<string, LiveEntrySummary>();
   for (const live of lives) {
@@ -594,8 +649,10 @@ async function handleApi(
   res: http.ServerResponse,
   url: URL,
   auth: WebAuth,
+  mode: Mode,
+  pathname: string,
+  binding: WebBinding,
 ): Promise<boolean> {
-  const { pathname } = url;
   if (!pathname.startsWith("/api/")) return false;
 
   if (req.method === "OPTIONS") {
@@ -637,20 +694,43 @@ async function handleApi(
 
   if (pathname === "/api/settings") {
     if (req.method === "GET") {
-      sendJson(res, 200, getWebSettings());
+      sendJson(res, 200, settingsPayload(mode, binding));
     } else if (req.method === "POST") {
       if (!isSameOrigin(req)) {
         sendJson(res, 403, { error: "cross-origin request rejected" });
         return true;
       }
+      const wasLan = loadConfig(mode).web_lan === true;
       try {
         const body = await readJsonBody(req);
-        updateWebSettings(body);
+        updateWebSettings(body, mode);
+        // `web_lan` is both a saved preference and a live switch: apply it to
+        // the socket now so the console starts or stops answering on the LAN
+        // without a restart. Other settings never move the listener, and an
+        // explicit --host still decides the interface until this is changed.
+        const patch = (body as { settings?: Record<string, unknown> } | null)?.settings;
+        const desired = patch && Object.prototype.hasOwnProperty.call(patch, "web_lan")
+          ? patch.web_lan === true
+          : isWildcardHost(binding.host);
+        if (desired !== isWildcardHost(binding.host)) {
+          await binding.setHost(desired ? WILDCARD_HOST : LOOPBACK_HOST);
+        }
         if ((body as { settings?: { web_password?: unknown } }).settings?.web_password !== undefined) {
           auth.remember(res);
         }
-        sendJson(res, 200, getWebSettings());
+        sendJson(res, 200, settingsPayload(mode, binding));
       } catch (err) {
+        // A switch that could not bind must not pretend the socket moved:
+        // restore the saved preference so the file matches what is running.
+        if ((loadConfig(mode).web_lan === true) !== wasLan) {
+          try {
+            const config = loadConfig(mode);
+            config.web_lan = wasLan;
+            saveConfig(config, mode);
+          } catch {
+            // Reporting the original failure matters more than the rollback.
+          }
+        }
         sendJson(res, (err as NodeJS.ErrnoException)?.code ? 500 : 400, {
           error: err instanceof Error ? err.message : "invalid settings",
         });
@@ -662,17 +742,17 @@ async function handleApi(
   }
 
   if (req.method === "GET" && pathname === "/api/health") {
-    sendJson(res, 200, { ok: true, live: hub.list().length });
+    sendJson(res, 200, { ok: true, live: hub.list(mode).length });
     return true;
   }
 
   if (req.method === "GET" && pathname === "/api/overview") {
-    sendJson(res, 200, buildOverview());
+    sendJson(res, 200, buildOverview(mode));
     return true;
   }
 
   if (req.method === "GET" && pathname === "/api/sessions") {
-    sendJson(res, 200, { sessions: listSessions() });
+    sendJson(res, 200, { sessions: listSessions(mode) });
     return true;
   }
 
@@ -681,7 +761,7 @@ async function handleApi(
       sendJson(res, 200, {
         cwd: process.cwd(),
         home: os.homedir(),
-        workspaces: workspaceList(),
+        workspaces: workspaceList(mode),
       });
       return true;
     }
@@ -693,8 +773,8 @@ async function handleApi(
       try {
         const body = await readJsonBody(req);
         const dir = existingDirectory((body as { path?: unknown } | null)?.path);
-        recordWorkspace(dir);
-        sendJson(res, 200, { ok: true, path: dir, workspaces: workspaceList() });
+        recordWorkspace(dir, mode);
+        sendJson(res, 200, { ok: true, path: dir, workspaces: workspaceList(mode) });
       } catch (err) {
         sendApiError(res, err);
       }
@@ -755,7 +835,7 @@ async function handleApi(
       const input = body as Record<string, unknown>;
       const cwd = existingDirectory(input.cwd ?? process.cwd());
       const requested = input.selection === undefined
-        ? getWebSettings().selection
+        ? getWebSettings(mode).selection
         : input.selection;
       const selection = resolveModelSelection(requested, false);
       let approvalMode: ApprovalMode | undefined;
@@ -765,10 +845,10 @@ async function handleApi(
         }
         approvalMode = normalizeApprovalMode(input.approval_mode);
       }
-      const session = createWebSession(cwd, selection, approvalMode);
+      const session = createWebSession(cwd, selection, approvalMode, mode);
       const key = session.start();
       webSessions.set(key, session);
-      recordWorkspace(cwd);
+      recordWorkspace(cwd, mode);
       sendJson(res, 200, { ok: true, key, cwd, snapshot: hub.snapshot(key) });
     } catch (err) {
       sendApiError(res, err);
@@ -787,11 +867,11 @@ async function handleApi(
       sendJson(res, 400, { error: "invalid session id" });
       return true;
     }
-    if (hub.list().some((entry) => entry.sessionId === id)) {
+    if (hub.list(mode).some((entry) => entry.sessionId === id)) {
       sendJson(res, 409, { error: "cannot delete a running conversation" });
       return true;
     }
-    if (!deleteSession(id)) {
+    if (!deleteSession(id, mode)) {
       sendJson(res, 404, { error: "session not found" });
       return true;
     }
@@ -835,7 +915,7 @@ async function handleApi(
       sendJson(res, 400, { error: "invalid session id" });
       return true;
     }
-    const data = loadSessionSafe(id);
+    const data = loadSessionSafe(id, mode);
     if (!data) {
       sendJson(res, 404, { error: "session not found" });
       return true;
@@ -868,7 +948,7 @@ async function handleApi(
     }
 
     // Already running (TUI or another tab)? Attach instead of duplicating.
-    const existing = hub.list().find((entry) => entry.sessionId === id);
+    const existing = hub.list(mode).find((entry) => entry.sessionId === id);
     if (existing) {
       if (selection) {
         const changed = hub.configure(existing.key, selection);
@@ -881,7 +961,7 @@ async function handleApi(
       return true;
     }
 
-    const data = loadSessionSafe(id);
+    const data = loadSessionSafe(id, mode);
     if (!data) {
       sendJson(res, 404, { error: "session not found" });
       return true;
@@ -890,7 +970,7 @@ async function handleApi(
     const requested: ModelSelection | undefined = selection ? {
       provider: selection.provider, model: selection.model.name, intensity: selection.intensity,
     } : undefined;
-    const outcome = resumeSession(data, requested);
+    const outcome = resumeSession(data, requested, mode);
     if (!outcome.ok) {
       sendJson(res, 400, { error: outcome.error });
       return true;
@@ -904,7 +984,14 @@ async function handleApi(
 
   const streamMatch = /^\/api\/live\/([^/]+)\/stream$/.exec(pathname);
   if (req.method === "GET" && streamMatch) {
-    streamLive(decodeURIComponent(streamMatch[1]), req, res);
+    const key = decodeURIComponent(streamMatch[1]);
+    // A Pro tab must never observe (or be handed) a session from the other
+    // workspace just because it guessed the key.
+    if (!hub.has(key, mode)) {
+      sendJson(res, 404, { error: "unknown live session" });
+      return true;
+    }
+    streamLive(key, req, res);
     return true;
   }
 
@@ -914,7 +1001,7 @@ async function handleApi(
     const action = liveMatch[2];
 
     if (req.method === "GET" && !action) {
-      const snapshot = hub.snapshot(key);
+      const snapshot = hub.has(key, mode) ? hub.snapshot(key) : null;
       if (!snapshot) {
         sendJson(res, 404, { error: "unknown live session" });
         return true;
@@ -928,7 +1015,7 @@ async function handleApi(
         sendJson(res, 403, { error: "cross-origin request rejected" });
         return true;
       }
-      if (!hub.has(key)) {
+      if (!hub.has(key, mode)) {
         sendJson(res, 404, { error: "unknown live session" });
         return true;
       }
@@ -1035,6 +1122,7 @@ async function handleRequest(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   auth: WebAuth,
+  binding: WebBinding,
 ): Promise<void> {
   let url: URL;
   try {
@@ -1044,22 +1132,64 @@ async function handleRequest(
     return;
   }
 
-  if (await handleApi(req, res, url, auth)) return;
+  // The Pro workspace is the same single-page app at /pro, talking to an
+  // isolated API under /pro/api. Static assets stay at the root (the app uses
+  // root-absolute URLs), so only the page route and the API prefix are special.
+  const pathname = url.pathname;
+  if (pathname === "/pro" || pathname === "/pro/") {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      sendText(res, 405, "Method not allowed");
+      return;
+    }
+    if (pathname === "/pro/") {
+      // Canonical URL without the trailing slash keeps relative links rooted.
+      res.writeHead(308, { Location: `/pro${url.search}` });
+      res.end();
+      return;
+    }
+    serveStatic(res, "/index.html");
+    return;
+  }
+
+  let mode: Mode = "standard";
+  let apiPathname = pathname;
+  if (pathname.startsWith("/pro/api/")) {
+    mode = "pro";
+    apiPathname = pathname.slice("/pro".length);
+  }
+
+  if (await handleApi(req, res, url, auth, mode, apiPathname, binding)) return;
+  if (mode === "pro") {
+    // Nothing else lives under /pro but the page and its API.
+    sendText(res, 404, "Not found");
+    return;
+  }
 
   if (req.method !== "GET" && req.method !== "HEAD") {
     sendText(res, 405, "Method not allowed");
     return;
   }
-  serveStatic(res, url.pathname);
+  serveStatic(res, pathname);
 }
 
 /** Start the web UI. Resolves once the socket is actually listening. */
 export async function startWebServer(options: WebServerOptions): Promise<WebServerHandle> {
-  const host = options.host ?? "127.0.0.1";
   const auth = new WebAuth(options.auth !== false);
+  // An explicit --host/--lan wins for this run; otherwise the saved Web access
+  // switch is applied exactly as if `--lan` had been passed.
+  let host = options.host?.trim() || defaultWebHost();
+  let port = options.port;
+  let closed = false;
+
+  // The settings page reads and changes this binding while the process runs.
+  const binding: WebBinding = {
+    host,
+    port,
+    setHost: (next) => rebind(next),
+  };
 
   const server = http.createServer((req, res) => {
-    handleRequest(req, res, auth).catch((err) => {
+    handleRequest(req, res, auth, binding).catch((err) => {
       if (!res.headersSent) {
         sendJson(res, 500, { error: err instanceof Error ? err.message : "internal error" });
       } else {
@@ -1068,42 +1198,116 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
     });
   });
 
-  await new Promise<void>((resolve, reject) => {
-    const onError = (err: Error) => {
-      server.removeListener("listening", onListening);
-      reject(err);
-    };
-    const onListening = () => {
-      server.removeListener("error", onError);
-      // Once listening, the server must tolerate connection-level failures
-      // (resets, EMFILE, half-open sockets) without the process dying. An
-      // 'error' event with no listener is fatal in Node.
-      server.on("error", (err: Error) => {
-        writeCrashLog("web server", err);
-      });
-      server.on("clientError", (_err, socket) => {
-        if (socket.writable) socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
-        socket.destroy();
-      });
-      resolve();
-    };
-    server.once("error", onError);
-    server.once("listening", onListening);
-    server.listen(options.port, host);
-  });
+  /** Wait for the socket to actually listen, or for it to fail. */
+  const listen = (onHost: string): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      const onError = (err: Error) => {
+        server.removeListener("listening", onListening);
+        reject(err);
+      };
+      const onListening = () => {
+        server.removeListener("error", onError);
+        resolve();
+      };
+      server.once("error", onError);
+      server.once("listening", onListening);
+      server.listen(port, onHost);
+    });
 
-  const address = server.address();
-  const port = typeof address === "object" && address ? address.port : options.port;
+  /** A just-closed port can need a moment to reappear: retry only that race. */
+  async function listenRetry(onHost: string): Promise<void> {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await listen(onHost);
+        return;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "EADDRINUSE" || attempt >= 20) throw err;
+        await new Promise((done) => setTimeout(done, 10));
+      }
+    }
+  }
 
-  return {
+  const syncAddress = (): void => {
+    const address = webUrls(host, port);
+    binding.host = host;
+    binding.port = port;
+    handle.host = host;
+    handle.port = port;
+    handle.url = address.url;
+    handle.urls = address.urls;
+  };
+
+  // Two tabs saving at once must not interleave close/listen on one socket.
+  let switches: Promise<void> = Promise.resolve();
+  function rebind(next: string): Promise<void> {
+    const target = next.trim() || LOOPBACK_HOST;
+    const task = switches.then(async () => {
+      if (closed) throw new Error("the Web console is shutting down");
+      if (target === host && server.listening) return;
+      // `close` ends acceptance, not the connections already accepted. The
+      // listener is released immediately, which is all the switch needs, so a
+      // streaming turn and the tab that asked for the change stay connected.
+      if (server.listening) server.close();
+      try {
+        await listenRetry(target);
+      } catch (err) {
+        // Put the console back where it was rather than leaving it dark.
+        if (!closed) {
+          try {
+            await listenRetry(host);
+          } catch {
+            // The settings response still reports the original failure.
+          }
+        }
+        throw err;
+      }
+      // A concurrent shutdown wins: never resurrect a console being closed.
+      if (closed) {
+        server.close();
+        throw new Error("the Web Console is shutting down");
+      }
+      host = target;
+      syncAddress();
+    });
+    switches = task.catch(() => undefined);
+    return task;
+  }
+
+  const handle: WebServerHandle = {
     host,
     port,
     authRequired: auth.enabled,
-    ...webUrls(host, port),
+    url: "",
+    urls: [],
+    setHost: (next) => rebind(next),
     close: () =>
       new Promise<void>((resolve) => {
+        closed = true;
         for (const key of [...webSessions.keys()]) closeWebSession(key);
+        if (!server.listening) {
+          resolve();
+          return;
+        }
         server.close(() => resolve());
       }),
   };
+
+  await listenRetry(host);
+  // Port 0 means "let the OS pick": remember the real one for every URL.
+  const address = server.address();
+  port = typeof address === "object" && address ? address.port : options.port;
+  syncAddress();
+
+  // Once listening, the server must tolerate connection-level failures
+  // (resets, EMFILE, half-open sockets) without the process dying: an 'error'
+  // event with no listener is fatal in Node.
+  server.on("error", (err: Error) => {
+    writeCrashLog("web server", err);
+  });
+  server.on("clientError", (_err, socket) => {
+    if (socket.writable) socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
+    socket.destroy();
+  });
+
+  return handle;
 }

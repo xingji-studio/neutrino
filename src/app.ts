@@ -19,6 +19,7 @@ import {
 } from "./selection.js";
 import { offsetFromThumbTop, scrollbarGeometry } from "./ui.js";
 import { copyToClipboard } from "./clipboard.js";
+import { openInBrowser, proModeUrl } from "./browser.js";
 import { ChatScreen } from "./screens/chat.js";
 import { HistoryScreen } from "./screens/history.js";
 import { AgentSelectScreen } from "./screens/agentSelect.js";
@@ -105,6 +106,8 @@ export class App {
   private webHandle: WebServerHandle | null = null;
   /** Where the web UI lives; kept even while it is switched off. */
   private webOptions: { port: number; host?: string; auth: boolean } = { port: 8765, auth: true };
+  /** True while a click is bringing the Web console up, so double clicks are safe. */
+  private proOpening = false;
 
   constructor() {
     this.width = process.stdout.columns || 80;
@@ -186,6 +189,31 @@ export class App {
     await handle?.close();
     this.showToast("Web console stopped");
     return { ok: true };
+  }
+
+  /**
+   * Open the browser console's Pro workspace, bringing the console up first
+   * when it is not running yet. This runs from a mouse handler, so it never
+   * throws and never waits on the browser: failures become a toast and the TUI
+   * keeps rendering.
+   */
+  async openProMode(): Promise<void> {
+    if (this.proOpening) return;
+    this.proOpening = true;
+    try {
+      let handle = this.webHandle;
+      if (!handle) {
+        handle = await this.enableWeb(this.webOptions.port, this.webOptions.host, this.webOptions.auth);
+      }
+      const url = proModeUrl(handle.url);
+      openInBrowser(url);
+      this.showToast(`Opening Pro mode: ${url}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.showToast(`Pro mode failed: ${message}`, "top");
+    } finally {
+      this.proOpening = false;
+    }
   }
 
   async start(): Promise<void> {

@@ -1,17 +1,28 @@
 import {
   DEFAULT_CONFIG, INTENSITY_LEVELS, WEB_LANGUAGES, contextWindow, isContextWindow,
-  loadConfig, loadModels, normalizeApprovalMode, normalizeWebLanguage, resolveModelSelection,
-  saveConfig, saveModels,
+  loadConfig, loadModels, modelContextWindow, modelContextWindowKey, normalizeApprovalMode, normalizeWebLanguage,
+  resolveModelSelection, saveConfig, saveModels, type Mode,
 } from "../config.js";
 
 import { hashWebPassword, validateWebPassword } from "./auth.js";
 
-/** Public settings use a whitelist: API keys and cached credentials stay on disk. */
-export function getWebSettings() {
-  const config = { ...DEFAULT_CONFIG, ...loadConfig() };
+/**
+ * Public settings use a whitelist: API keys and cached credentials stay on disk.
+ *
+ * `mode` selects the workspace. The Pro workspace has its own defaults,
+ * language, plan and reviewer settings; the login password and the approval
+ * policy are layered in from the shared config by loadConfig(), so the two
+ * pages cannot drift apart on those.
+ */
+export function getWebSettings(mode: Mode = "standard") {
+  const config = { ...DEFAULT_CONFIG, ...loadConfig(mode) };
   const providers = loadModels().providers.map((provider) => ({
     name: provider.name,
-    models: provider.models.map((model) => ({ name: model.name, configured: Boolean(model.api_key?.trim()), context_window: contextWindow(model.context_window) })),
+    models: provider.models.map((model) => ({
+      name: model.name,
+      configured: Boolean(model.api_key?.trim()),
+      context_window: modelContextWindow(provider.name, model, mode),
+    })),
   }));
   const preferred = providers.find((p) => p.name === config.selected_provider);
   const provider = preferred ?? providers.find((p) => p.models.some((m) => m.configured)) ?? providers[0];
@@ -37,16 +48,17 @@ export function getWebSettings() {
       plan_first: config.plan_first !== false,
       approval_mode: normalizeApprovalMode(config.approval_mode),
       web_console: config.web_console !== false,
+      web_lan: config.web_lan === true,
     },
   };
 }
 
 /** Validate the complete patch before writing anything, preserving unrelated settings. */
-export function updateWebSettings(value: unknown): void {
+export function updateWebSettings(value: unknown, mode: Mode = "standard"): void {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid settings body");
   const body = value as Record<string, unknown>;
   if (Object.keys(body).some((key) => key !== "selection" && key !== "settings")) throw new Error("unknown settings field");
-  const config = loadConfig();
+  const config = loadConfig(mode);
   if (body.settings !== undefined) {
     if (!body.settings || typeof body.settings !== "object" || Array.isArray(body.settings)) throw new Error("invalid settings");
     const patch = body.settings as Record<string, unknown>;
@@ -80,6 +92,9 @@ export function updateWebSettings(value: unknown): void {
       } else if (key === "web_console") {
         if (typeof val !== "boolean") throw new Error("web console must be a boolean");
         config.web_console = val;
+      } else if (key === "web_lan") {
+        if (typeof val !== "boolean") throw new Error("LAN access must be a boolean");
+        config.web_lan = val;
       } else if (key === "web_password") {
         validateWebPassword(val);
       } else {
@@ -101,12 +116,23 @@ export function updateWebSettings(value: unknown): void {
   if (password !== undefined) config.web_password_hash = hashWebPassword(password);
   const window = (body.settings as Record<string, unknown> | undefined)?.model_context_window;
   if (window !== undefined) {
-    const selection = body.selection ?? getWebSettings().selection;
+    const selection = body.selection ?? getWebSettings(mode).selection;
     const chosen = resolveModelSelection(selection, false);
-    const models = loadModels();
-    const model = models.providers.find((p) => p.name === chosen.provider)!.models.find((m) => m.name === chosen.model.name)!;
-    model.context_window = window as number;
-    saveModels(models);
+    if (mode === "pro") {
+      // Context capacity is part of a workspace's compression settings. Pro
+      // stores its own copy instead of editing the shared model catalog.
+      const current = config.model_context_windows;
+      const overrides = current && typeof current === "object" && !Array.isArray(current)
+        ? { ...(current as Record<string, unknown>) }
+        : {};
+      overrides[modelContextWindowKey(chosen.provider, chosen.model.name)] = window;
+      config.model_context_windows = overrides;
+    } else {
+      const models = loadModels();
+      const model = models.providers.find((p) => p.name === chosen.provider)!.models.find((m) => m.name === chosen.model.name)!;
+      model.context_window = window as number;
+      saveModels(models);
+    }
   }
-  saveConfig(config);
+  saveConfig(config, mode);
 }

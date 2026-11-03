@@ -5,6 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#151517" />
+    <script>
+      // Switching to the Pro workspace navigates only once the #151515 curtain
+      // is opaque. Cover the page here, before the first paint, so a slow
+      // module load cannot flash the freshly loaded /pro page before app.js
+      // takes the curtain over. app.js removes the class; the timer is a
+      // safety net for when the module cannot run at all.
+      try {
+        var proPath = location.pathname === "/pro" || location.pathname.startsWith("/pro/");
+        var proStart = Number(sessionStorage.getItem("neutrino.pro.transition")) || 0;
+        if (proPath && proStart && Date.now() - proStart < 8000) {
+          document.documentElement.classList.add("pro-transitioning");
+          setTimeout(function () {
+            document.documentElement.classList.remove("pro-transitioning");
+          }, 8000);
+        }
+      } catch (error) { /* Storage may be blocked; the page still works. */ }
+    </script>
     <title>Neutrino</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f9fafb' stroke-width='1.7'%3E%3Cellipse cx='12' cy='12' rx='9.4' ry='3.8' transform='rotate(-30 12 12)'/%3E%3Ccircle cx='12' cy='12' r='3.1'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="style.css" />
@@ -13,14 +30,14 @@
     <div id="app">
       <aside id="sidebar">
         <header class="brand">
-          <div class="logo" aria-hidden="true">
+          <button id="brand-logo" class="logo brand-logo" type="button" title="Switch to Pro mode" aria-label="Switch to Pro mode" data-i18n-title="Switch to Pro mode" data-i18n-aria-label="Switch to Pro mode">
             <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <ellipse cx="12" cy="12" rx="9.4" ry="3.8" transform="rotate(-30 12 12)" stroke="currentColor" stroke-width="1.7" />
               <circle cx="12" cy="12" r="3.1" stroke="currentColor" stroke-width="1.7" />
             </svg>
-          </div>
+          </button>
           <div class="brand-text">
-            <strong>Neutrino</strong>
+            <strong id="brand-name">Neutrino</strong>
             <span id="status" class="status">connecting…</span>
           </div>
           <div class="brand-actions">
@@ -32,6 +49,12 @@
             </button>
           </div>
         </header>
+        <div id="pro-tip" class="pro-tip hidden" role="note">
+          <span data-i18n="Click the badge to switch to Pro mode">Click the badge to switch to Pro mode</span>
+          <button id="pro-tip-close" class="pro-tip-close" type="button" title="Dismiss" aria-label="Dismiss" data-i18n-title="Dismiss" data-i18n-aria-label="Dismiss">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+        </div>
 
         <div class="sidebar-tools">
           <button id="new-chat" class="new-chat" type="button" title="New conversation" data-i18n-title="New conversation">
@@ -73,6 +96,10 @@
             <div id="session-sub" class="sub"></div>
           </div>
           <div id="controls" class="controls"></div>
+          <button id="pro-exit" class="control pro-exit hidden" type="button" title="Exit Pro mode" aria-label="Exit Pro mode" data-i18n-title="Exit Pro mode" data-i18n-aria-label="Exit Pro mode">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 5-7 7 7 7M5 12h14" /></svg>
+            <span data-i18n="Exit Pro mode">Exit Pro mode</span>
+          </button>
         </header>
 
         <form id="model-picker" class="model-picker hidden" aria-label="Conversation model">
@@ -163,6 +190,8 @@
           <label class="checkbox-label"><input id="settings-web-console" type="checkbox" /> <span data-i18n="Start the Web console with the terminal">Start the Web console with the terminal</span></label>
           <p class="settings-note" data-i18n="Safety determines automatic approval; task relevance only blocks unanimously confirmed, extreme mismatches. Delete-class automatic approval also requires this setting.">Safety determines automatic approval; task relevance only blocks unanimously confirmed, extreme mismatches. Delete-class automatic approval also requires this setting.</p>
           <h3 data-i18n="Web access">Web access</h3>
+          <label class="checkbox-label"><input id="settings-web-lan" type="checkbox" /> <span data-i18n="Allow access from other devices (LAN, 0.0.0.0)">Allow access from other devices (LAN, 0.0.0.0)</span></label>
+          <p class="settings-note" data-i18n="Binds the Web console to 0.0.0.0 so other devices on your network can open it, like --lan. Takes effect immediately; turning it off returns the console to 127.0.0.1. Keep the Web password on: anyone who can reach this port can drive the agent.">Binds the Web console to 0.0.0.0 so other devices on your network can open it, like --lan. Takes effect immediately; turning it off returns the console to 127.0.0.1. Keep the Web password on: anyone who can reach this port can drive the agent.</p>
           <div class="settings-grid">
             <label><span data-i18n="New Web password">New Web password</span><input id="settings-password" type="password" autocomplete="new-password" maxlength="256" placeholder="Leave blank to keep current password" data-i18n-placeholder="Leave blank to keep current password" /></label>
             <label><span data-i18n="Confirm password">Confirm password</span><input id="settings-password-confirm" type="password" autocomplete="new-password" maxlength="256" placeholder="Repeat new password" data-i18n-placeholder="Repeat new password" /></label>

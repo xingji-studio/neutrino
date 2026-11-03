@@ -7,7 +7,7 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange }) {
     "settings-open", "settings-dialog", "settings-form", "settings-close", "settings-cancel", "settings-save", "settings-feedback",
     "default-provider", "default-model", "default-intensity", "settings-context", "settings-compress-note", "settings-reviewer",
     "settings-extreme", "settings-sound", "settings-password", "settings-password-confirm",
-    "settings-language", "settings-plan", "settings-approval", "settings-web-console"];
+    "settings-language", "settings-plan", "settings-approval", "settings-web-console", "settings-web-lan"];
   const el = Object.fromEntries(ids.map(id => [id, document.getElementById(id)]));
   let config = null;
   let target = null;
@@ -16,6 +16,10 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange }) {
   let applying = false;
   let feedback = "";
   let feedbackError = false;
+  // Value the LAN switch had when the dialog opened. Only an actual flip is
+  // saved, so editing another setting never pins an interface that came from
+  // --lan/--host on the command line.
+  let lanInitial = false;
 
   async function json(path, body) {
     const response = await apiFetch(path, body === undefined ? { cache: "no-store" } : {
@@ -136,6 +140,8 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange }) {
     el["settings-extreme"].checked = config.settings.auto_approve_extreme_risk;
     el["settings-sound"].checked = config.settings.sound_alerts !== false;
     el["settings-web-console"].checked = config.settings.web_console !== false;
+    el["settings-web-lan"].checked = config.settings.web_lan === true;
+    lanInitial = el["settings-web-lan"].checked;
   }
   function renderContextWindow() {
     const provider = config.providers.find(entry => entry.name === el["default-provider"].value);
@@ -205,6 +211,8 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange }) {
       return;
     }
     el["settings-save"].disabled = true;
+    const wasLan = config?.settings?.web_lan === true;
+    const lanChanged = el["settings-web-lan"].checked !== lanInitial;
     const selection = { provider: el["default-provider"].value, model: el["default-model"].value, intensity: el["default-intensity"].value };
     const settings = {
       default_intensity: selection.intensity,
@@ -213,6 +221,7 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange }) {
       auto_approve_extreme_risk: el["settings-extreme"].checked,
       sound_alerts: el["settings-sound"].checked,
       web_console: el["settings-web-console"].checked,
+      ...(lanChanged ? { web_lan: el["settings-web-lan"].checked } : {}),
       language: el["settings-language"].value,
       plan_first: el["settings-plan"].checked,
       approval_mode: el["settings-approval"].value,
@@ -223,7 +232,20 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange }) {
       renderPicker();
       el["settings-password"].value = "";
       el["settings-password-confirm"].value = "";
-      message(el["settings-feedback"], password ? t("Settings saved. Web password updated permanently.") : t("Settings saved."));
+      // The switch takes effect on the live socket, so report exactly what the
+      // server bound and (when available) the address to open elsewhere.
+      el["settings-web-lan"].checked = config.settings.web_lan === true;
+      lanInitial = el["settings-web-lan"].checked;
+      const urls = Array.isArray(config.settings.web_urls) ? config.settings.web_urls : [];
+      const lanNote = config.settings.web_lan === wasLan ? "" : config.settings.web_lan
+        ? urls.length
+          ? t("LAN access is on. Open {urls} from another device.", { urls: urls.join(" · ") })
+          : t("LAN access is on, but no network address was found. Only this machine can connect.")
+        : t("LAN access is off. Only this machine can connect.");
+      const savedText = password
+        ? t("Settings saved. Web password updated permanently.")
+        : t("Settings saved.");
+      message(el["settings-feedback"], lanNote ? `${savedText} ${lanNote}` : savedText);
     } catch (error) { message(el["settings-feedback"], t(error.message), true); }
     finally { el["settings-save"].disabled = false; }
   });

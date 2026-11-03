@@ -14,7 +14,7 @@
  */
 
 import type { ConversationContext } from "../compact.js";
-import type { ResolvedModelSelection, ApprovalMode } from "../config.js";
+import { normalizeMode, type ApprovalMode, type Mode, type ResolvedModelSelection } from "../config.js";
 import type { RiskAssessment } from "../llm/risk.js";
 import type { PlanState } from "../llm/plan.js";
 
@@ -101,6 +101,11 @@ export interface LiveSnapshot extends LiveMeta {
 
 /** A screen that can be observed and driven through the web UI. */
 export interface LiveAgent {
+  /**
+   * Workspace this conversation belongs to. Optional so existing embedders and
+   * terminal screens keep working; a missing mode means the standard workspace.
+   */
+  readonly mode?: Mode;
   /** Working directory the conversation belongs to (used to group it by path). */
   liveCwd(): string;
   liveMeta(): LiveMeta;
@@ -132,6 +137,7 @@ interface Entry {
   key: string;
   agent: LiveAgent;
   cwd: string;
+  mode: Mode;
   listeners: Set<Listener>;
   timer: NodeJS.Timeout | null;
   lastSent: string;
@@ -155,6 +161,7 @@ class LiveHub {
       key,
       agent,
       cwd: agent.liveCwd(),
+      mode: normalizeMode(agent.mode),
       listeners: new Set(),
       timer: null,
       lastSent: "",
@@ -170,14 +177,20 @@ class LiveHub {
     this.entries.delete(key);
   }
 
-  has(key: string): boolean {
-    return this.entries.has(key);
+  /**
+   * Whether a key is live. With a mode, keys from the other workspace are
+   * treated as unknown: the Pro page must never reach a terminal session.
+   */
+  has(key: string, mode?: Mode): boolean {
+    const entry = this.entries.get(key);
+    return Boolean(entry) && (!mode || entry!.mode === mode);
   }
 
-  /** All live sessions, newest registration last. */
-  list(): LiveEntrySummary[] {
+  /** All live sessions, newest registration last. Optionally one workspace only. */
+  list(mode?: Mode): LiveEntrySummary[] {
     const out: LiveEntrySummary[] = [];
     for (const entry of this.entries.values()) {
+      if (mode && entry.mode !== mode) continue;
       out.push({ ...entry.agent.liveMeta(), key: entry.key, cwd: entry.cwd });
     }
     return out;
