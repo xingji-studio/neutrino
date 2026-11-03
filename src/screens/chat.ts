@@ -418,6 +418,45 @@ export class ChatScreen extends Screen implements LiveAgent {
     this.publishLive();
   }
 
+  /**
+   * Start a fresh conversation in the same working directory. Used by Ctrl+L
+   * and by the browser's Clear button, so both screens behave identically. The
+   * previous transcript is saved first and is never overwritten.
+   */
+  liveClear(): void {
+    this.save();
+    if (this.saveError) {
+      this.app.render();
+      return;
+    }
+    this.turnToken++;
+    if (this.pendingApproval) this.settleApproval(false);
+    this.busy = false;
+    this.paused = false;
+    this.queued = null;
+    this.compressing = false;
+    this.retryNotice = null;
+    this.app.state.isThinking = false;
+    this.lastPromptTokens = 0;
+    this.sessionId = null;
+    this.context = null;
+    this.expandedContext = false;
+    this.plan = null;
+    this.planning = false;
+    this.subagent = null;
+    const sysText = this.messages[0] && this.messages[0].role === "system" ? this.messages[0].content : "";
+    this.messages = [{ role: "system", content: sysText }];
+    this.expandedTools.clear();
+    this.finishedTurns.clear();
+    this.expandedTurns.clear();
+    this.activeTurnStart = null;
+    this.streamingContent = null;
+    this.scrollTop = 0;
+    this.followBottom = true;
+    this.publishLive();
+    this.app.render();
+  }
+
   liveSend(text: string): void {
     if (!text.trim()) return;
     this.send(text);
@@ -581,36 +620,7 @@ export class ChatScreen extends Screen implements LiveAgent {
       return;
     }
     if (key.ctrl && key.name === "l") {
-      // Clearing starts a fresh conversation; do not overwrite the old history.
-      this.save();
-      if (this.saveError) {
-        this.app.render();
-        return;
-      }
-      this.turnToken++;
-      this.busy = false;
-      this.paused = false;
-      this.queued = null;
-      this.compressing = false;
-      this.app.state.isThinking = false;
-      this.lastPromptTokens = 0;
-      this.sessionId = null;
-      this.context = null;
-      this.expandedContext = false;
-      this.plan = null;
-      this.planning = false;
-      this.subagent = null;
-      const sysText = this.messages[0] && this.messages[0].role === "system" ? this.messages[0].content : "";
-      this.messages = [{ role: "system", content: sysText }];
-      this.expandedTools.clear();
-      this.finishedTurns.clear();
-      this.expandedTurns.clear();
-      this.activeTurnStart = null;
-      this.streamingContent = null;
-      this.scrollTop = 0;
-      this.followBottom = true;
-      this.publishLive();
-      this.app.render();
+      this.liveClear();
       return;
     }
     if (key.ctrl && key.name === "u") {

@@ -114,6 +114,8 @@ export interface LiveAgent {
   /** Answer a pending approval. Returns false when nothing was pending. */
   liveApprove?(approved: boolean): boolean;
   liveSetApprovalMode?(mode: ApprovalMode): void;
+  /** Empty the conversation in place (a new chat in the same folder). */
+  liveClear?(): void;
   /** Apply a server-resolved choice to future turns, while idle or paused. */
   liveConfigure?(selection: ResolvedModelSelection): ModelChangeResult;
 }
@@ -287,6 +289,15 @@ class LiveHub {
     const entry = this.entries.get(key);
     if (!entry?.agent.liveSetApprovalMode) return false;
     entry.agent.liveSetApprovalMode(mode);
+    this.notify(key);
+    return true;
+  }
+
+  /** Empty a live conversation in place, keeping its key and working folder. */
+  clear(key: string): boolean {
+    const entry = this.entries.get(key);
+    if (!entry?.agent.liveClear) return false;
+    entry.agent.liveClear();
     this.notify(key);
     return true;
   }

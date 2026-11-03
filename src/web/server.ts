@@ -16,13 +16,17 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { SESSION_DIR, listSessions, resolveModelSelection, type ModelSelection, type ResolvedModelSelection, type SessionData, type SessionMeta } from "../config.js";
+import {
+  SESSION_DIR, deleteSession, listSessions, loadConfig, normalizeApprovalMode, resolveModelSelection,
+  saveConfig, type ApprovalMode, type ModelSelection, type ResolvedModelSelection, type SessionData, type SessionMeta,
+} from "../config.js";
 import { getWebSettings, updateWebSettings } from "./settings.js";
 import { WebAuth } from "./auth.js";
-import { normalizeCwd } from "../cwd.js";
+import { normalizeCwd, sameCwd } from "../cwd.js";
 import { hub, type LiveEntrySummary, type LiveSnapshot } from "./hub.js";
 import { writeCrashLog } from "../terminal/restore.js";
-import { resumeSession, type WebSession } from "./session.js";
+import { createWebSession, resumeSession, type WebSession } from "./session.js";
+import { listAgentSessions, loadAgentMessages, type AgentId } from "../agents.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // dist/web -> package root (mirrors the same trick used in config.ts).
@@ -176,6 +180,197 @@ function loadSessionSafe(id: string): SessionData | null {
   }
 }
 
+// ------------------------------------------------------- working directories
+//
+// The browser console can open any folder on this machine, which is exactly
+// what the terminal can do by being launched from that folder. Every route
+// below still sits behind the login cookie: browsing the filesystem is only as
+// exposed as the authenticated console itself.
+
+class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+function sendApiError(res: http.ServerResponse, error: unknown): void {
+  if (error instanceof ApiError) {
+    sendJson(res, error.status, { error: error.message, code: error.code });
+    return;
+  }
+  const message = error instanceof Error ? error.message : "invalid request";
+  sendJson(res, 400, { error: message });
+}
+
+const MAX_RECENT_WORKSPACES = 12;
+const AGENT_IDS = new Set<AgentId>(["claude", "codex", "opencode"]);
+const AGENT_SESSION_ID_RE = /^[A-Za-z0-9._-]{1,200}$/;
+
+/** Expand `~` and require an absolute path; used by every folder route. */
+function absolutePath(raw: unknown): string {
+  if (typeof raw !== "string" || !raw.trim()) {
+    throw new ApiError(400, "working directory is required", "working directory is required");
+  }
+  let value = raw.trim();
+  if (value === "~") value = os.homedir();
+  else if (/^~[\\/]/.test(value)) value = path.join(os.homedir(), value.slice(2));
+  if (!path.isAbsolute(value)) {
+    throw new ApiError(400, "working directory must be an absolute path", "working directory must be an absolute path");
+  }
+  return path.resolve(value);
+}
+
+function existingDirectory(raw: unknown): string {
+  const dir = absolutePath(raw);
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(dir);
+  } catch {
+    throw new ApiError(400, "working directory does not exist", "working directory does not exist");
+  }
+  if (!stat.isDirectory()) {
+    throw new ApiError(400, "working directory is not a folder", "working directory is not a folder");
+  }
+  return dir;
+}
+
+let cachedRoots: string[] | null = null;
+
+/** Filesystem roots worth offering as shortcuts (every existing drive on Windows). */
+function filesystemRoots(): string[] {
+  if (cachedRoots) return cachedRoots;
+  if (process.platform !== "win32") {
+    cachedRoots = ["/"];
+    return cachedRoots;
+  }
+  const roots: string[] = [];
+  for (let code = 65; code <= 90; code += 1) {
+    const root = `${String.fromCharCode(code)}:\\`;
+    try {
+      if (fs.statSync(root).isDirectory()) roots.push(root);
+    } catch {
+      // A drive letter that does not exist is simply not offered.
+    }
+  }
+  cachedRoots = roots.length ? roots : [path.parse(process.cwd()).root];
+  return cachedRoots;
+}
+
+/** One directory listing for the folder picker. Files are hidden: the picker chooses directories. */
+function readFolder(raw: unknown) {
+  const dir = existingDirectory(raw);
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (err) {
+    throw new ApiError(403, "cannot read this folder", err instanceof Error ? err.message : "cannot read this folder");
+  }
+  const folders = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => ({
+      name: entry.name,
+      path: path.join(dir, entry.name),
+      hidden: entry.name.startsWith("."),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
+  const parent = path.dirname(dir);
+  return {
+    path: dir,
+    name: path.basename(dir) || dir,
+    parent: parent === dir ? null : parent,
+    separator: path.sep,
+    home: os.homedir(),
+    cwd: process.cwd(),
+    roots: filesystemRoots(),
+    entries: folders,
+  };
+}
+
+/** Recent working directories: explicitly opened ones first, then saved-session folders. */
+function recentWorkspacePaths(): string[] {
+  const config = loadConfig();
+  const stored = Array.isArray(config.web_workspaces)
+    ? (config.web_workspaces as unknown[]).filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "")
+    : [];
+  const saved = listSessions().map((session) => session.cwd).filter(Boolean);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const dir of [...stored, ...saved, process.cwd()]) {
+    const key = normalizeCwd(dir);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(dir);
+    if (out.length >= MAX_RECENT_WORKSPACES) break;
+  }
+  return out;
+}
+
+function workspaceList() {
+  const sessions = listSessions();
+  return recentWorkspacePaths().map((dir) => {
+    let exists = false;
+    try {
+      exists = fs.statSync(dir).isDirectory();
+    } catch {
+      // A folder that disappeared stays listed, greyed out, so it can be removed by choosing another.
+    }
+    return {
+      path: dir,
+      name: path.basename(dir) || dir,
+      sessions: sessions.filter((session) => sameCwd(session.cwd, dir)).length,
+      exists,
+    };
+  });
+}
+
+/** Best-effort persistence: failing to remember a folder must not fail the conversation. */
+function recordWorkspace(dir: string): void {
+  try {
+    const config = loadConfig();
+    const stored = Array.isArray(config.web_workspaces)
+      ? (config.web_workspaces as unknown[]).filter((entry): entry is string => typeof entry === "string")
+      : [];
+    config.web_workspaces = [dir, ...stored.filter((entry) => !sameCwd(entry, dir))]
+      .slice(0, MAX_RECENT_WORKSPACES);
+    saveConfig(config);
+  } catch {
+    // The picked folder still works for this conversation.
+  }
+}
+
+/** Create one folder inside an existing parent. */
+function createFolder(raw: unknown): string {
+  const target = absolutePath(raw);
+  if (target === path.parse(target).root) {
+    throw new ApiError(400, "cannot create a folder here", "cannot create a folder here");
+  }
+  const parent = path.dirname(target);
+  if (!fs.existsSync(parent) || !fs.statSync(parent).isDirectory()) {
+    throw new ApiError(400, "parent folder does not exist", "parent folder does not exist");
+  }
+  if (fs.existsSync(target)) {
+    throw new ApiError(409, "folder already exists", "folder already exists");
+  }
+  try {
+    fs.mkdirSync(target);
+  } catch (err) {
+    throw new ApiError(400, "cannot create a folder here", err instanceof Error ? err.message : "cannot create a folder here");
+  }
+  return target;
+}
+
+function isAgentId(value: string): value is AgentId {
+  return AGENT_IDS.has(value as AgentId);
+}
+
+function safeAgentSessionId(id: string): boolean {
+  return AGENT_SESSION_ID_RE.test(id) && !id.includes("..") && id !== "." && id !== "..";
+}
+
 /** Build the sidebar payload: every session grouped by working directory. */
 function buildOverview(): Overview {
   const sessions = listSessions();
@@ -224,7 +419,9 @@ function buildOverview(): Overview {
       provider: live.provider,
       intensity: live.intensity,
       cwd: live.cwd,
-      title: live.title || "New conversation",
+      // An unnamed conversation keeps an empty title: the browser translates
+      // its own fallback, and the terminal/server never impose one language.
+      title: live.title || "",
       message_count: 0,
       live: true,
       liveKey: live.key,
@@ -479,6 +676,158 @@ async function handleApi(
     return true;
   }
 
+  if (pathname === "/api/workspaces") {
+    if (req.method === "GET") {
+      sendJson(res, 200, {
+        cwd: process.cwd(),
+        home: os.homedir(),
+        workspaces: workspaceList(),
+      });
+      return true;
+    }
+    if (req.method === "POST") {
+      if (!isSameOrigin(req)) {
+        sendJson(res, 403, { error: "cross-origin request rejected" });
+        return true;
+      }
+      try {
+        const body = await readJsonBody(req);
+        const dir = existingDirectory((body as { path?: unknown } | null)?.path);
+        recordWorkspace(dir);
+        sendJson(res, 200, { ok: true, path: dir, workspaces: workspaceList() });
+      } catch (err) {
+        sendApiError(res, err);
+      }
+      return true;
+    }
+    sendJson(res, 405, { error: "method not allowed" });
+    return true;
+  }
+
+  if (pathname === "/api/fs") {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { error: "method not allowed" });
+      return true;
+    }
+    try {
+      sendJson(res, 200, readFolder(url.searchParams.get("path") ?? process.cwd()));
+    } catch (err) {
+      sendApiError(res, err);
+    }
+    return true;
+  }
+
+  if (pathname === "/api/fs/mkdir") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "method not allowed" });
+      return true;
+    }
+    if (!isSameOrigin(req)) {
+      sendJson(res, 403, { error: "cross-origin request rejected" });
+      return true;
+    }
+    try {
+      const body = await readJsonBody(req);
+      const created = createFolder((body as { path?: unknown } | null)?.path);
+      sendJson(res, 200, { ok: true, path: created });
+    } catch (err) {
+      sendApiError(res, err);
+    }
+    return true;
+  }
+
+  // Start a brand-new conversation in a working directory chosen by the
+  // browser. Unlike `/continue`, there is no transcript to load first.
+  if (pathname === "/api/conversations") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "method not allowed" });
+      return true;
+    }
+    if (!isSameOrigin(req)) {
+      sendJson(res, 403, { error: "cross-origin request rejected" });
+      return true;
+    }
+    try {
+      const body = await readJsonBody(req);
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        throw new ApiError(400, "invalid request", "invalid request");
+      }
+      const input = body as Record<string, unknown>;
+      const cwd = existingDirectory(input.cwd ?? process.cwd());
+      const requested = input.selection === undefined
+        ? getWebSettings().selection
+        : input.selection;
+      const selection = resolveModelSelection(requested, false);
+      let approvalMode: ApprovalMode | undefined;
+      if (input.approval_mode !== undefined) {
+        if (input.approval_mode !== "request" && input.approval_mode !== "auto") {
+          throw new ApiError(400, "invalid approval mode", "invalid approval mode");
+        }
+        approvalMode = normalizeApprovalMode(input.approval_mode);
+      }
+      const session = createWebSession(cwd, selection, approvalMode);
+      const key = session.start();
+      webSessions.set(key, session);
+      recordWorkspace(cwd);
+      sendJson(res, 200, { ok: true, key, cwd, snapshot: hub.snapshot(key) });
+    } catch (err) {
+      sendApiError(res, err);
+    }
+    return true;
+  }
+
+  const deleteMatch = /^\/api\/session\/([^/]+)\/delete$/.exec(pathname);
+  if (req.method === "POST" && deleteMatch) {
+    if (!isSameOrigin(req)) {
+      sendJson(res, 403, { error: "cross-origin request rejected" });
+      return true;
+    }
+    const id = decodeURIComponent(deleteMatch[1]);
+    if (!isSafeSessionId(id)) {
+      sendJson(res, 400, { error: "invalid session id" });
+      return true;
+    }
+    if (hub.list().some((entry) => entry.sessionId === id)) {
+      sendJson(res, 409, { error: "cannot delete a running conversation" });
+      return true;
+    }
+    if (!deleteSession(id)) {
+      sendJson(res, 404, { error: "session not found" });
+      return true;
+    }
+    sendJson(res, 200, { ok: true, deleted: true });
+    return true;
+  }
+
+  // Read-only history recorded by other agents (Claude Code, Codex, OpenCode).
+  const agentSessionsMatch = /^\/api\/agents\/([^/]+)\/sessions$/.exec(pathname);
+  if (req.method === "GET" && agentSessionsMatch) {
+    const agent = decodeURIComponent(agentSessionsMatch[1]);
+    if (!isAgentId(agent)) {
+      sendJson(res, 400, { error: "unknown agent" });
+      return true;
+    }
+    const cwd = url.searchParams.get("cwd") || process.cwd();
+    sendJson(res, 200, { agent, cwd, sessions: listAgentSessions(agent, cwd) });
+    return true;
+  }
+
+  const agentSessionMatch = /^\/api\/agents\/([^/]+)\/sessions\/([^/]+)$/.exec(pathname);
+  if (req.method === "GET" && agentSessionMatch) {
+    const agent = decodeURIComponent(agentSessionMatch[1]);
+    const id = decodeURIComponent(agentSessionMatch[2]);
+    if (!isAgentId(agent)) {
+      sendJson(res, 400, { error: "unknown agent" });
+      return true;
+    }
+    if (!safeAgentSessionId(id)) {
+      sendJson(res, 400, { error: "invalid session id" });
+      return true;
+    }
+    sendJson(res, 200, { agent, id, messages: loadAgentMessages(agent, id) });
+    return true;
+  }
+
   const sessionMatch = /^\/api\/session\/([^/]+)$/.exec(pathname);
   if (req.method === "GET" && sessionMatch) {
     const id = decodeURIComponent(sessionMatch[1]);
@@ -559,7 +908,7 @@ async function handleApi(
     return true;
   }
 
-  const liveMatch = /^\/api\/live\/([^/]+)(?:\/(pause|resume|message|approve|close|model|approval-mode))?$/.exec(pathname);
+  const liveMatch = /^\/api\/live\/([^/]+)(?:\/(pause|resume|message|approve|close|model|approval-mode|clear))?$/.exec(pathname);
   if (liveMatch) {
     const key = decodeURIComponent(liveMatch[1]);
     const action = liveMatch[2];
@@ -646,6 +995,14 @@ async function handleApi(
           return true;
         }
         sendJson(res, 200, { ok: true, closed: true });
+        return true;
+      }
+      if (action === "clear") {
+        if (!hub.clear(key)) {
+          sendJson(res, 409, { error: "this session cannot be cleared" });
+          return true;
+        }
+        sendJson(res, 200, { ok: true, snapshot: hub.snapshot(key) });
         return true;
       }
       // action === "message"

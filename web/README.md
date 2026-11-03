@@ -8,8 +8,17 @@ A small, dependency-free single page app that is served by the Neutrino CLI at
 - watch a running terminal conversation stream in real time: the work behind every
   finished turn folds into one line that opens on a click, while the reply itself
   stays on screen (the turn being answered is open, and a pause is not a fold);
+- read replies as rendered markdown: headings, nested/task lists, tables, block
+  quotes, code fences, emphasis, safe links and images; raw HTML is escaped;
+- start a new conversation in a working directory you choose, including a folder
+  created from the built-in folder picker;
+- switch the workspace between every known folder and **All directories**;
 - switch the provider, model and intensity for the next turn;
-- edit defaults, context compression and approval settings in a Settings dialog;
+- edit every terminal setting — defaults, interface language, plan-first turns,
+  default approval mode, context compression, reviewer and Web password;
+- switch the interface between English and 简体中文, instantly and persistently;
+- open the same plan / token card as the terminal's `ⓘ`, clear a conversation,
+  delete a saved transcript, and review other agents' read-only history;
 - drive the running conversation: pause / resume the current turn and send new
   messages (they queue while the agent is busy);
 - pick up a saved conversation in the browser and keep chatting, even when no
@@ -112,13 +121,42 @@ selection. Changing the selectors and then using **Continue here** or sending a
 message also uses the draft selection, so a transcript whose old model was
 removed can still be continued.
 
-The **Settings** (gear) button in the sidebar opens defaults for new conversations,
-the context compression threshold, the approval reviewer model, and the
-extreme-risk automatic approval option. Save settings explicitly; cancelling
-leaves the saved values intact. Conversation model changes are separate from
-these defaults. Models come from the same catalog as the terminal, and API keys
-stay on the server. Configure missing keys in the terminal model screen first.
-Intensity uses the same Low–Ultra sampling settings as the terminal.
+The **Settings** (gear) button in the sidebar opens the interface language,
+plan-first turns, the default approval mode, defaults for new conversations, the
+context compression threshold, the approval reviewer model, sound alerts, the
+extreme-risk automatic approval option, and the Web password. Save settings
+explicitly; cancelling leaves the saved values intact. Conversation model changes
+are separate from these defaults. Models come from the same catalog as the
+terminal, and API keys stay on the server. Configure missing keys in the terminal
+model screen first. Intensity uses the same Low–Ultra sampling settings as the
+terminal.
+
+## New conversations and working directories
+
+**New conversation** starts a chat that has no transcript yet. The dialog takes a
+working directory plus provider, model, thinking level and approval mode. The
+conversation is browser-owned from that moment: it appears in the sidebar under
+its folder and is written to its own session file once the first message exists.
+
+**Browse…** opens the server-side folder picker. It lists folders only, offers
+the existing drive roots (on Windows) or `/`, moves up through the directory
+tree, and can create a folder in place. **Use this folder** fills the working
+directory of the new conversation.
+
+**Working directories** (the folder button under New conversation) shows every
+folder the console has opened or that already holds conversations. Choosing one
+scopes the sidebar to that folder and shows a landing page where typing starts a
+conversation there. **All directories** returns to the grouped view. Opened
+folders are stored in `config.json` under `web_workspaces`, so an empty folder
+that has no conversations yet is still listed after a restart.
+
+## Interface language
+
+The sidebar footer and **Settings → Interface** both offer English and 简体中文.
+The change is applied to the already-open page (labels, messages, status line,
+plan card and dialogs) without a reload, is stored in `config.json`, and is
+shared by every browser. The terminal UI stays in English. New conversation
+content, of course, remains in the language the model writes.
 
 ## History vs. live sessions
 
@@ -143,6 +181,22 @@ resumed it), the page attaches to that session instead of starting a second one.
 Browser-owned sessions are dropped after 30 idle minutes, or immediately through
 `POST /api/live/:key/close`. Sessions owned by the terminal cannot be closed from
 the web.
+
+**Clear** empties the running conversation in place (the previous transcript is
+checkpointed first and stays on disk), mirroring `Ctrl+L` in the terminal. A
+read-only transcript gets **Delete** instead, which removes the saved JSON file
+after confirmation; a conversation that is currently live cannot be deleted.
+Sessions from the terminal's `Ctrl+L` also appear as fresh live conversations in
+the sidebar.
+
+## Other agents' history
+
+**Other agents** in the sidebar lists read-only sessions recorded by Claude Code,
+Codex and OpenCode for the current working directory (the scoped workspace, the
+open conversation's folder, or the server's launch directory). Clicking one shows
+the complete transcript in the conversation pane with a `read-only` badge. The
+sources are the same as the terminal's history browser; OpenCode requires Node.js
+22.13+ because it reads its SQLite database through `node:sqlite`.
 
 ## Plan-first turns
 
@@ -169,8 +223,10 @@ needed by a client:
 
 `status` is `pending`, `active`, `done` or `failed`; `stopped: true` marks a plan
 whose turn was paused before the last step. The terminal draws this in its `ⓘ`
-card; a browser client can render the same timeline from the snapshot. The page
-itself currently shows the plan as the message it already is.
+card, and the web console renders the same timeline in its `ⓘ` plan card: the
+active step is highlighted, finished steps are ticked, failed steps are red, and
+the footer counts the steps completed. The card also shows token usage when no
+plan is running.
 
 Planning is the default for both loops. It can be turned off with
 `"plan_first": false` in `~/.neutrino/config.json` or `NEUTRINO_PLAN=off`; a
@@ -193,21 +249,31 @@ to know whether a conversation is driven by the terminal or by the server.
 | --- | --- | --- |
 | GET | `/api/overview` | Sessions grouped by cwd + live sessions |
 | GET | `/api/sessions` | Flat list of saved sessions |
-| GET | `/api/settings` | Model catalog and public settings; no credentials |
-| POST | `/api/settings` | Save validated `{ selection?, settings? }` defaults |
+| GET | `/api/workspaces` | Recent working directories, launch cwd and home |
+| POST | `/api/workspaces` | Validate and remember `{ "path": "…" }` |
+| GET | `/api/fs?path=…` | Folder listing for the picker (folders only, roots, parent) |
+| POST | `/api/fs/mkdir` | Create `{ "path": "…" }` and return the new path |
+| POST | `/api/conversations` | Start `{ cwd, selection?, approval_mode? }`, returns `{ key, snapshot }` |
+| GET | `/api/settings` | Model catalog, languages and public settings; no credentials |
+| POST | `/api/settings` | Save validated `{ selection?, settings? }`, including `language`, `plan_first`, `approval_mode` and `web_password` |
 | GET | `/api/session/:id` | One saved transcript |
 | POST | `/api/session/:id/continue` | Resume a transcript with optional `{ selection }`, returns `{ key }` |
+| POST | `/api/session/:id/delete` | Delete a saved, non-running transcript |
+| GET | `/api/agents/:agent/sessions?cwd=…` | Read-only sessions from Claude Code / Codex / OpenCode |
+| GET | `/api/agents/:agent/sessions/:id` | Read-only messages of one other-agent session |
 | GET | `/api/live/:key` | Snapshot of a live session |
 | GET | `/api/live/:key/stream` | SSE stream of a live session |
 | POST | `/api/live/:key/pause` | Pause the running turn |
 | POST | `/api/live/:key/resume` | Resume a paused conversation |
 | POST | `/api/live/:key/message` | Send `{ "text": "…" }` |
 | POST | `/api/live/:key/model` | Apply `{ provider, model, intensity }` while idle or paused |
+| POST | `/api/live/:key/clear` | Empty the conversation in place; keeps the old transcript |
+| POST | `/api/live/:key/approve` | Answer `{ "approved": true|false }` |
+| POST | `/api/live/:key/approval-mode` | Set `{ "mode": "request"|"auto" }` |
 | POST | `/api/live/:key/close` | Dispose a browser-owned session |
 | GET | `/api/health` | Liveness probe |
 | POST | `/api/auth/login` | Sign in with `{ "password": "…" }` |
 | POST | `/api/auth/logout` | Clear the login cookie |
-| GET / POST | `/api/settings` | Read settings or update them, including `settings.web_password` |
 
 Conversation and settings routes require the login cookie; see
 [Authentication](#authentication). `OPTIONS` is answered unauthenticated so
@@ -219,8 +285,10 @@ When a running agent wants to do something risky (a delete-class command, an
 install, a path outside the working directory) the browser shows an orange
 **Request Approval** banner above the composer, showing the full command (or
 formatted tool arguments), working directory and risk reasons, plus two buttons.
-Long proposals remain complete and scroll inside the card. Automatic reviews
-show the same proposal details while they run.
+The banner only appears when a human decision is actually waiting. Long proposals
+remain complete and scroll inside the card.
+Automatic reviews are reported in the conversation's status badge instead
+(`reviewing round 2/3`), so auto approval never looks like a request for approval.
 `Approve` runs the call, `Deny` returns a note to the agent.
 The reviewer uses the current turn's captured user request and earlier user
 messages; queued input belongs to the next turn. Expand a denied tool result

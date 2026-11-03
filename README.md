@@ -22,7 +22,7 @@ A CLI coding agent that lives in your terminal. Neutrino gives you an interactiv
 - **Sub-agents** — independent work can be handed to a sub-agent: a second agent loop with its own context, its own tool calls and the same approval gate. Only its report comes back, so a survey that reads thirty files does not fill the conversation with thirty files. See [Sub-agents](#sub-agents).
 - **Agent history browser** — view past sessions from other CLI agents (Claude Code, Codex, OpenCode) directly from the history screen.
 - **Approval gate** — risky commands and paths outside the working directory need your sign-off. The header turns orange and reads **Request Approval**; press `Y` or `N`. Delete-class commands always ask, unless you explicitly granted full trust, and there is an opt-in reviewer agent for automatic decisions.
-- **Browser UI on by default** — every `neutrino` launch also mounts a local website at <http://127.0.0.1:8765> that lists every saved conversation grouped by working directory, streams the running one in real time, and lets you pause/resume it, send messages, switch provider/model/intensity, and edit settings from the browser. Use `--port`/`--host` to move it, `--lan` to share it, or `--no-web` to keep the terminal only.
+- **Browser UI on by default** — every `neutrino` launch also mounts a local website at <http://127.0.0.1:8765> that lists every saved conversation grouped by working directory, streams the running one in real time, and lets you pause/resume it, send messages, start new conversations, open or create working directories, switch provider/model/intensity, edit every terminal setting, and switch the interface between English and 简体中文. Use `--port`/`--host` to move it, `--lan` to share it, or `--no-web` to keep the terminal only.
 
 ## Requirements
 
@@ -190,7 +190,8 @@ Settings are stored under `~/.neutrino/`:
   with `"reasoning": true` (or opt out with `false`).
 - `config.json` — app configuration (selected provider/model/intensity, theme,
   language, approval mode, `auto_approve_extreme_risk`, `sound_alerts`,
-  `web_console`).
+  `web_console`, `web_workspaces`). `language` (`en` or `zh`) is the browser
+  console's interface language; the terminal UI itself stays English.
 - `session/` — saved conversation sessions, one JSON file per session.
 
 Set your API key in the model select screen or directly in `model.json`.
@@ -306,20 +307,44 @@ terminal UI starts. It groups every saved conversation by working directory
 (showing the five newest per path with the rest collapsed), folds the work of
 every finished turn into one summary line that opens on a click while the reply
 stays on screen, streams a running conversation live, and lets you pause or
-resume it and send new messages from the browser.
+resume it and send new messages from the browser. Conversation text is rendered
+as markdown — headings, lists (including tasks and nesting), tables, block
+quotes, fenced code, emphasis, links and images — while raw HTML stays inert and
+only safe link/image schemes become clickable.
+
+**New conversation** in the sidebar starts a chat that has no transcript yet.
+Its dialog chooses the working directory and the provider, model and thinking
+level for the first turn. **Browse…** opens the server's folder picker, where you
+can walk the filesystem, create a folder, and use it as the conversation's
+working directory. Opened folders are remembered under **Working directories**
+(the folder button above the list), which scopes the sidebar to that project and
+lets you start a new chat there; you can always return to **All directories**.
 
 A saved transcript opens read-only, because nothing is running for it. Press
 **Continue here** (or simply type in the composer) and the server resumes it
 in-process — same model, working directory and token counters — so you can keep
 chatting from the browser with no terminal attached. Turns are written back to
-the same session file.
+the same session file. **Clear** starts a fresh conversation in the same folder
+(the previous transcript stays saved), **Delete** removes a saved transcript,
+and **Other agents** lists read-only sessions that Claude Code, Codex or
+OpenCode recorded in that folder.
 
 Use the selectors above a conversation to change its provider, model or
 intensity, then press **Apply to conversation** (pause an active turn first).
 The **Settings** (gear) button in the sidebar edits defaults for new conversations,
-context compression and approval settings. Conversation choices are saved with
-the transcript and do not overwrite the defaults. Configured models and keys
-are shared with the terminal; keys stay on the server.
+the interface language, plan-first turns, the default approval mode, context
+compression and approval settings. Conversation choices are saved with the
+transcript and do not overwrite the defaults. Configured models and keys are
+shared with the terminal; keys stay on the server.
+
+The interface language can be switched in the sidebar footer or in
+**Settings → Interface**: English and 简体中文 are supported. The change applies
+immediately without a reload, survives restarts in `config.json`, and is shared
+by every browser. The terminal UI itself is not translated.
+
+The `ⓘ` button in a conversation header opens the same plan/token card as
+`Ctrl+P` in the terminal: the steps of a planned turn with their live statuses,
+and the prompt/completion/total token counts when no plan is running.
 
 Context auto-compression starts at 80% of the current model's context window.
 Models default to 1,000,000 tokens (compression at 800,000). Adjust the model
@@ -450,6 +475,9 @@ node scripts/test-tools.mjs      # verify tool-output folding
 node scripts/test-web.mjs        # verify the web server, API, SSE stream and path-traversal guards
 node scripts/test-web-settings.mjs # verify model switching, persistence, browser controls and defaults
 node scripts/test-web-settings-http.mjs # verify authenticated settings and model changes over HTTP
+node scripts/test-web-markdown.mjs # verify the browser markdown renderer and its XSS boundaries
+node scripts/test-web-i18n.mjs   # verify every console label has a Chinese translation and placeholders survive
+node scripts/test-web-workspaces.mjs # verify folder browsing/creation, new conversations, clear/delete and other-agent history
 ```
 
 ### Rendering model

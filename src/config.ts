@@ -111,6 +111,15 @@ export const DEFAULT_MODELS: ModelsData = {
   ],
 };
 
+/** Languages the browser console can render its own interface in. */
+export const WEB_LANGUAGES = ["en", "zh"] as const;
+export type WebLanguage = (typeof WEB_LANGUAGES)[number];
+
+/** Unknown or missing values fall back to English rather than breaking the UI. */
+export function normalizeWebLanguage(value: unknown): WebLanguage {
+  return typeof value === "string" && value.trim().toLowerCase().startsWith("zh") ? "zh" : "en";
+}
+
 export const DEFAULT_CONFIG: Record<string, unknown> = {
   language: "en",
   theme: "default",
@@ -131,6 +140,9 @@ export const DEFAULT_CONFIG: Record<string, unknown> = {
   // Mount the browser UI alongside the terminal UI unless it is turned off
   // here or on the command line.
   web_console: true,
+  // Working directories opened from the browser, newest first. They remain
+  // listed even when they hold no conversations yet.
+  web_workspaces: [],
   // Initialized as a salted hash of the default Web password on first use.
   web_password_hash: "",
 };

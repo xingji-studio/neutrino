@@ -131,9 +131,15 @@ try {
   context.renderApproval({ approval: null, reviewing: {
     total: 2, round: 2, rounds: 3, request: snapshots[0].approval,
   } });
-  assert.equal(byClass(banner, "approval-code").textContent, command);
-  assert.match(byClass(banner, "approval-risk").textContent, /round 2 of 3, 2 reviewers/);
-  assert.equal(byClass(banner, "approval-actions"), undefined, "automated reviews are informational");
+  assert.ok(banner.className.includes("hidden"), "an automated review is not an approval request");
+  assert.equal(banner.children.length, 0, "the approval banner is reserved for a human decision");
+  assert.equal(
+    context.reviewStatus({ total: 2, round: 2, rounds: 3 }),
+    "reviewing round 2/3",
+    "review progress is reported in the status badge",
+  );
+  assert.equal(context.reviewStatus({ total: 1 }), "reviewing · 1 reviewer");
+  assert.equal(context.reviewStatus({ total: 2 }), "reviewing · 2 reviewers");
   context.renderApproval({ approval: { tool: "legacy-tool", level: "high" } });
   assert.match(byClass(banner, "approval-code").textContent, /unavailable/);
   context.renderApproval(null);

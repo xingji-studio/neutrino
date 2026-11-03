@@ -24,39 +24,66 @@
             <span id="status" class="status">connecting…</span>
           </div>
           <div class="brand-actions">
-            <button id="refresh" class="icon-btn" type="button" title="Refresh conversations" aria-label="Refresh conversations">
+            <button id="refresh" class="icon-btn" type="button" title="Refresh conversations" aria-label="Refresh conversations" data-i18n-title="Refresh conversations" data-i18n-aria-label="Refresh conversations">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" /></svg>
             </button>
-            <button id="settings-open" class="icon-btn" type="button" title="Settings" aria-label="Settings">
+            <button id="settings-open" class="icon-btn" type="button" title="Settings" aria-label="Settings" data-i18n-title="Settings" data-i18n-aria-label="Settings">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg>
             </button>
           </div>
         </header>
+
+        <div class="sidebar-tools">
+          <button id="new-chat" class="new-chat" type="button" title="New conversation" data-i18n-title="New conversation">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+            <span data-i18n="New conversation">New conversation</span>
+          </button>
+          <button id="workspace-button" class="workspace-button" type="button" title="Working directory" data-i18n-title="Working directory">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2.5h7.5A2.5 2.5 0 0 1 21 10v7a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17z" /></svg>
+            <span id="workspace-label" class="workspace-label" data-i18n="All directories">All directories</span>
+            <svg class="workspace-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+          </button>
+          <button id="agents-open" class="workspace-button" type="button" title="Other agents" data-i18n-title="Other agents">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5" /><path d="M12 7v5l3 2" /></svg>
+            <span class="workspace-label" data-i18n="Other agents">Other agents</span>
+            <svg class="workspace-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+          </button>
+        </div>
+
         <div id="sessions" class="sessions"></div>
         <footer class="sidebar-foot">
-          <span>Local agent console</span>
+          <span class="foot-note" data-i18n="Local agent console">Local agent console</span>
+          <label class="language-picker" title="Interface language" data-i18n-title="Interface language">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9S14.5 18.4 12 21c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z" /></svg>
+            <select id="language-select" aria-label="Interface language" data-i18n-aria-label="Interface language">
+              <option value="en">English</option>
+              <option value="zh">简体中文</option>
+            </select>
+          </label>
         </footer>
       </aside>
 
       <main id="main">
         <header id="main-header" class="main-header">
-          <button id="back-to-menu" class="icon-btn back-to-menu" type="button" title="Back to conversations" aria-label="Back to conversations" aria-controls="sidebar">
+          <button id="back-to-menu" class="icon-btn back-to-menu" type="button" title="Back to conversations" aria-label="Back to conversations" data-i18n-title="Back to conversations" data-i18n-aria-label="Back to conversations" aria-controls="sidebar">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 5-7 7 7 7M5 12h14" /></svg>
           </button>
           <div class="main-title">
-            <h1 id="session-title">Select a conversation</h1>
+            <h1 id="session-title" data-i18n="Select a conversation">Select a conversation</h1>
             <div id="session-sub" class="sub"></div>
           </div>
           <div id="controls" class="controls"></div>
         </header>
 
         <form id="model-picker" class="model-picker hidden" aria-label="Conversation model">
-          <label>Provider<select id="model-provider"></select></label>
-          <label>Model<select id="model-name"></select></label>
-          <label>Thinking<select id="model-intensity"></select></label>
-          <button id="model-apply" class="control" type="submit">Apply</button>
+          <label><span data-i18n="Provider">Provider</span><select id="model-provider"></select></label>
+          <label><span data-i18n="Model">Model</span><select id="model-name"></select></label>
+          <label><span data-i18n="Thinking">Thinking</span><select id="model-intensity"></select></label>
+          <button id="model-apply" class="control" type="submit" data-i18n="Apply">Apply</button>
           <p id="model-feedback" class="form-feedback" role="status" aria-live="polite"></p>
         </form>
+
+        <aside id="plan-card" class="plan-card hidden" aria-live="polite"></aside>
 
         <section id="messages" class="messages">
           <div class="empty">
@@ -66,8 +93,9 @@
                 <circle cx="12" cy="12" r="3.1" stroke="currentColor" stroke-width="1.7" />
               </svg>
             </span>
-            <strong>No conversation open</strong>
-            <span>Choose a conversation from the sidebar to view it.</span>
+            <strong data-i18n="No conversation open">No conversation open</strong>
+            <span data-i18n="Choose a conversation from the sidebar to view it.">Choose a conversation from the sidebar to view it.</span>
+            <button id="empty-new-chat" class="control primary" type="button" data-i18n="New conversation">New conversation</button>
           </div>
         </section>
 
@@ -76,12 +104,16 @@
         <footer id="composer" class="composer hidden">
           <div class="composer-inner">
             <div class="composer-card">
-              <textarea id="input" rows="1" placeholder="Message Neutrino…" aria-label="Message"></textarea>
-              <button id="send" class="primary" type="button" title="Send message" aria-label="Send message">
+              <textarea id="input" rows="1" placeholder="Message Neutrino…" aria-label="Message" data-i18n-placeholder="Message Neutrino…"></textarea>
+              <button id="send" class="primary" type="button" title="Send message" aria-label="Send message" data-i18n-title="Send message" data-i18n-aria-label="Send message">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
               </button>
             </div>
-            <div class="composer-hint"><kbd>Enter</kbd> to send · <kbd>Shift</kbd> + <kbd>Enter</kbd> for a new line</div>
+            <div class="composer-hint">
+              <span><kbd>Enter</kbd> <span data-i18n="to send">to send</span></span>
+              <span class="hint-sep">·</span>
+              <span><kbd>Shift</kbd> + <kbd>Enter</kbd> <span data-i18n="for a new line">for a new line</span></span>
+            </div>
           </div>
         </footer>
       </main>
@@ -91,36 +123,180 @@
       <form id="settings-form">
         <header class="settings-header">
           <div>
-            <h2 id="settings-title">Settings</h2>
-            <p class="settings-sub">Models, approvals, and console access.</p>
+            <h2 id="settings-title" data-i18n="Settings">Settings</h2>
+            <p class="settings-sub" data-i18n="Models, approvals, and console access.">Models, approvals, and console access.</p>
           </div>
-          <button id="settings-close" class="icon-btn" type="button" aria-label="Close settings">
+          <button id="settings-close" class="icon-btn" type="button" aria-label="Close settings" data-i18n-aria-label="Close settings">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
           </button>
         </header>
         <div class="settings-fields">
-          <h3>Defaults for new conversations</h3>
-          <label>Provider<select id="default-provider"></select></label>
-          <label>Model<select id="default-model"></select></label>
-          <label>Thinking intensity<select id="default-intensity"></select></label>
-          <h3>Conversation and approvals</h3>
-          <label>Model context window (tokens)<input id="settings-context" type="number" min="1" max="9007199254740991" step="1" required /></label>
-          <p id="settings-compress-note" class="settings-note">Auto-compress at 80% of this model's context window. Default: 1,000,000 tokens.</p>
-          <label>Approval reviewer model<select id="settings-reviewer"></select></label>
-          <label class="checkbox-label"><input id="settings-extreme" type="checkbox" /> Extreme-risk auto-approval (del class, 3 separate review rounds)</label>
-          <label class="checkbox-label"><input id="settings-sound" type="checkbox" /> Sound alerts (turn finished, approval waiting)</label>
-          <p class="settings-note">Safety determines automatic approval; task relevance only blocks unanimously confirmed, extreme mismatches. Delete-class automatic approval also requires this setting.</p>
-          <h3>Web access</h3>
-          <label>New Web password<input id="settings-password" type="password" autocomplete="new-password" maxlength="256" placeholder="Leave blank to keep current password" /></label>
-          <label>Confirm password<input id="settings-password-confirm" type="password" autocomplete="new-password" maxlength="256" placeholder="Repeat new password" /></label>
-          <p class="settings-note">The password is permanent and survives restarts. Default: 114514. Saving a new password signs out other browsers.</p>
+          <h3 data-i18n="Interface">Interface</h3>
+          <div class="settings-grid">
+            <label><span data-i18n="Language">Language</span>
+              <select id="settings-language">
+                <option value="en">English</option>
+                <option value="zh">简体中文</option>
+              </select>
+            </label>
+            <label><span data-i18n="Default approval mode">Default approval mode</span>
+              <select id="settings-approval">
+                <option value="request" data-i18n="Request Approval">Request Approval</option>
+                <option value="auto" data-i18n="Auto Approval">Auto Approval</option>
+              </select>
+            </label>
+          </div>
+          <label class="checkbox-label"><input id="settings-plan" type="checkbox" /> <span data-i18n="Plan-first turns">Plan-first turns</span></label>
+          <p class="settings-note" data-i18n="Split multi-step requests into a plan before answering.">Split multi-step requests into a plan before answering.</p>
+          <h3 data-i18n="Defaults for new conversations">Defaults for new conversations</h3>
+          <div class="settings-grid">
+            <label><span data-i18n="Provider">Provider</span><select id="default-provider"></select></label>
+            <label><span data-i18n="Model">Model</span><select id="default-model"></select></label>
+            <label><span data-i18n="Thinking intensity">Thinking intensity</span><select id="default-intensity"></select></label>
+          </div>
+          <h3 data-i18n="Conversation and approvals">Conversation and approvals</h3>
+          <label><span data-i18n="Model context window (tokens)">Model context window (tokens)</span><input id="settings-context" type="number" min="1" max="9007199254740991" step="1" required /></label>
+          <p id="settings-compress-note" class="settings-note" data-i18n="Auto-compress at 80% of this model's context window. Default: 1,000,000 tokens.">Auto-compress at 80% of this model's context window. Default: 1,000,000 tokens.</p>
+          <label><span data-i18n="Approval reviewer model">Approval reviewer model</span><select id="settings-reviewer"></select></label>
+          <label class="checkbox-label"><input id="settings-extreme" type="checkbox" /> <span data-i18n="Extreme-risk auto-approval (del class, 3 separate review rounds)">Extreme-risk auto-approval (del class, 3 separate review rounds)</span></label>
+          <label class="checkbox-label"><input id="settings-sound" type="checkbox" /> <span data-i18n="Sound alerts (turn finished, approval waiting)">Sound alerts (turn finished, approval waiting)</span></label>
+          <label class="checkbox-label"><input id="settings-web-console" type="checkbox" /> <span data-i18n="Start the Web console with the terminal">Start the Web console with the terminal</span></label>
+          <p class="settings-note" data-i18n="Safety determines automatic approval; task relevance only blocks unanimously confirmed, extreme mismatches. Delete-class automatic approval also requires this setting.">Safety determines automatic approval; task relevance only blocks unanimously confirmed, extreme mismatches. Delete-class automatic approval also requires this setting.</p>
+          <h3 data-i18n="Web access">Web access</h3>
+          <div class="settings-grid">
+            <label><span data-i18n="New Web password">New Web password</span><input id="settings-password" type="password" autocomplete="new-password" maxlength="256" placeholder="Leave blank to keep current password" data-i18n-placeholder="Leave blank to keep current password" /></label>
+            <label><span data-i18n="Confirm password">Confirm password</span><input id="settings-password-confirm" type="password" autocomplete="new-password" maxlength="256" placeholder="Repeat new password" data-i18n-placeholder="Repeat new password" /></label>
+          </div>
+          <p class="settings-note" data-i18n="The password is permanent and survives restarts. Default: 114514. Saving a new password signs out other browsers.">The password is permanent and survives restarts. Default: 114514. Saving a new password signs out other browsers.</p>
           <p id="settings-feedback" class="form-feedback" role="status" aria-live="polite"></p>
         </div>
         <footer class="settings-actions">
-          <button id="settings-cancel" class="control" type="button">Cancel</button>
-          <button id="settings-save" class="primary" type="submit">Save changes</button>
+          <button id="settings-cancel" class="control" type="button" data-i18n="Cancel">Cancel</button>
+          <button id="settings-save" class="primary" type="submit" data-i18n="Save changes">Save changes</button>
         </footer>
       </form>
+    </dialog>
+
+    <dialog id="new-chat-dialog" class="sheet-dialog" aria-labelledby="new-chat-title">
+      <form id="new-chat-form" class="sheet">
+        <header class="sheet-header">
+          <div>
+            <h2 id="new-chat-title" data-i18n="New conversation">New conversation</h2>
+            <p class="sheet-sub" data-i18n="Choose a working directory and a model.">Choose a working directory and a model.</p>
+          </div>
+          <button id="new-chat-close" class="icon-btn" type="button" aria-label="Close" data-i18n-aria-label="Close">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+        </header>
+        <div class="sheet-body">
+          <section class="field-group">
+            <h3 data-i18n="Working directory">Working directory</h3>
+            <div class="path-row">
+              <input id="new-chat-cwd" class="path-input" type="text" spellcheck="false" autocomplete="off" placeholder="C:\path\to\project" aria-label="Working directory" data-i18n-aria-label="Working directory" />
+              <button id="new-chat-browse" class="control" type="button" data-i18n="Browse…">Browse…</button>
+            </div>
+            <p class="settings-note" data-i18n="This working directory is used for the conversation's tools.">This working directory is used for the conversation's tools.</p>
+            <h4 class="recent-title" data-i18n="Recent folders">Recent folders</h4>
+            <div id="new-chat-recents" class="workspace-recents"></div>
+          </section>
+          <section class="field-group">
+            <h3 data-i18n="Model">Model</h3>
+            <div class="settings-grid">
+              <label><span data-i18n="Provider">Provider</span><select id="new-chat-provider"></select></label>
+              <label><span data-i18n="Model">Model</span><select id="new-chat-model"></select></label>
+              <label><span data-i18n="Thinking">Thinking</span><select id="new-chat-intensity"></select></label>
+            </div>
+            <label><span data-i18n="Default approval mode">Default approval mode</span>
+              <select id="new-chat-approval">
+                <option value="request" data-i18n="Request Approval">Request Approval</option>
+                <option value="auto" data-i18n="Auto Approval">Auto Approval</option>
+              </select>
+            </label>
+            <p id="new-chat-note" class="settings-note"></p>
+          </section>
+          <p id="new-chat-feedback" class="form-feedback" role="status" aria-live="polite"></p>
+        </div>
+        <footer class="sheet-actions">
+          <button id="new-chat-cancel" class="control" type="button" data-i18n="Cancel">Cancel</button>
+          <button id="new-chat-start" class="primary" type="submit" data-i18n="Start conversation">Start conversation</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <dialog id="folder-dialog" class="sheet-dialog" aria-labelledby="folder-title">
+      <div class="sheet folder-sheet">
+        <header class="sheet-header">
+          <div>
+            <h2 id="folder-title" data-i18n="Open working directory">Open working directory</h2>
+            <p class="sheet-sub" data-i18n="Choose a folder to open as the working directory.">Choose a folder to open as the working directory.</p>
+          </div>
+          <button id="folder-close" class="icon-btn" type="button" aria-label="Close" data-i18n-aria-label="Close">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+        </header>
+        <div class="folder-toolbar">
+          <button id="folder-up" class="icon-btn" type="button" title="Up" aria-label="Up" data-i18n-title="Up" data-i18n-aria-label="Up">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6" /></svg>
+          </button>
+          <input id="folder-path" class="path-input" type="text" spellcheck="false" autocomplete="off" aria-label="Working directory" data-i18n-aria-label="Working directory" />
+          <button id="folder-go" class="control" type="button" data-i18n="Open">Open</button>
+        </div>
+        <div id="folder-roots" class="folder-roots"></div>
+        <div id="folder-list" class="folder-list" role="listbox" aria-label="Folders"></div>
+        <div id="folder-new" class="folder-new hidden">
+          <input id="folder-new-name" class="path-input" type="text" maxlength="255" placeholder="Folder name" aria-label="Folder name" data-i18n-placeholder="Folder name" data-i18n-aria-label="Folder name" />
+          <button id="folder-new-create" class="primary" type="button" data-i18n="Create">Create</button>
+          <button id="folder-new-cancel" class="control" type="button" data-i18n="Cancel">Cancel</button>
+        </div>
+        <p id="folder-feedback" class="form-feedback" role="status" aria-live="polite"></p>
+        <footer class="sheet-actions folder-actions">
+          <button id="folder-mkdir" class="control" type="button" data-i18n="New folder">New folder</button>
+          <span class="sheet-spacer"></span>
+          <button id="folder-cancel" class="control" type="button" data-i18n="Cancel">Cancel</button>
+          <button id="folder-use" class="primary" type="button" data-i18n="Use this folder">Use this folder</button>
+        </footer>
+      </div>
+    </dialog>
+
+    <dialog id="agents-dialog" class="sheet-dialog" aria-labelledby="agents-title">
+      <div class="sheet">
+        <header class="sheet-header">
+          <div>
+            <h2 id="agents-title" data-i18n="Other agents">Other agents</h2>
+            <p class="sheet-sub" data-i18n="Read-only sessions recorded by other coding agents in this working directory.">Read-only sessions recorded by other coding agents in this working directory.</p>
+          </div>
+          <button id="agents-close" class="icon-btn" type="button" aria-label="Close" data-i18n-aria-label="Close">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+        </header>
+        <div id="agents-list" class="agents-list"></div>
+        <p id="agents-feedback" class="form-feedback" role="status" aria-live="polite"></p>
+        <footer class="sheet-actions">
+          <span id="agents-cwd" class="agents-cwd"></span>
+          <span class="sheet-spacer"></span>
+        </footer>
+      </div>
+    </dialog>
+
+    <dialog id="workspace-dialog" class="sheet-dialog" aria-labelledby="workspace-title">
+      <div class="sheet">
+        <header class="sheet-header">
+          <div>
+            <h2 id="workspace-title" data-i18n="Working directories">Working directories</h2>
+            <p class="sheet-sub" data-i18n="Choose a working directory to browse and start conversations in.">Choose a working directory to browse and start conversations in.</p>
+          </div>
+          <button id="workspace-close" class="icon-btn" type="button" aria-label="Close" data-i18n-aria-label="Close">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+        </header>
+        <div id="workspace-list" class="workspace-list"></div>
+        <p id="workspace-feedback" class="form-feedback" role="status" aria-live="polite"></p>
+        <footer class="sheet-actions">
+          <button id="workspace-all" class="control" type="button" data-i18n="All directories">All directories</button>
+          <span class="sheet-spacer"></span>
+          <button id="workspace-add" class="primary" type="button" data-i18n="Open folder…">Open folder…</button>
+        </footer>
+      </div>
     </dialog>
 
     <script src="app.js" type="module"></script>

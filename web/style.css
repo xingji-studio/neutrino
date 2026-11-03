@@ -746,7 +746,7 @@ svg {
   background: var(--surface-2);
   color: var(--text);
   line-height: 1.65;
-  white-space: pre-wrap;
+  white-space: normal;
 }
 
 .message .body p {
@@ -810,6 +810,161 @@ svg {
 
 .message a {
   color: var(--accent);
+}
+
+.message del {
+  color: var(--text-caption);
+}
+
+.message .body h1,
+.message .body h2,
+.message .body h3,
+.message .body h4,
+.message .body h5,
+.message .body h6 {
+  margin: 18px 0 8px;
+  color: var(--text);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.message .body h1 {
+  font-size: 1.35em;
+  letter-spacing: -0.015em;
+}
+
+.message .body h2 {
+  font-size: 1.22em;
+  letter-spacing: -0.01em;
+}
+
+.message .body h3 {
+  font-size: 1.1em;
+}
+
+.message .body h4,
+.message .body h5,
+.message .body h6 {
+  font-size: 1em;
+  color: var(--text-secondary);
+}
+
+.message .body > h1:first-child,
+.message .body > h2:first-child,
+.message .body > h3:first-child,
+.message .body > h4:first-child,
+.message .body > h5:first-child,
+.message .body > h6:first-child {
+  margin-top: 0;
+}
+
+.message .body ul,
+.message .body ol {
+  padding-left: 24px;
+}
+
+.message .body li {
+  margin: 3px 0;
+}
+
+.message .body li > p {
+  margin: 0 0 5px;
+}
+
+.message .body li > p:last-child {
+  margin-bottom: 0;
+}
+
+.message .body li > ul,
+.message .body li > ol {
+  margin: 4px 0 6px;
+}
+
+.message .body li.task-item {
+  list-style: none;
+  margin-left: -20px;
+}
+
+.message .body .task-checkbox {
+  width: 14px;
+  height: 14px;
+  margin: 0 5px 0 0;
+  accent-color: var(--accent-strong);
+  vertical-align: -2px;
+  cursor: default;
+}
+
+.message .body hr {
+  margin: 18px 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.message .body blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+.message .body blockquote p {
+  margin-bottom: 8px;
+}
+
+.message .body .table-wrap {
+  margin: 13px 0;
+  overflow-x: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+}
+
+.message .body table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.8px;
+  line-height: 1.55;
+}
+
+.message .body th,
+.message .body td {
+  padding: 7px 11px;
+  border-bottom: 1px solid var(--border-soft);
+  border-right: 1px solid var(--border-soft);
+  text-align: left;
+  vertical-align: top;
+}
+
+.message .body th:last-child,
+.message .body td:last-child {
+  border-right: 0;
+}
+
+.message .body tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.message .body th {
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.message .body .align-center {
+  text-align: center;
+}
+
+.message .body .align-right {
+  text-align: right;
+}
+
+.message .body img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 12px 0;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+}
+
+.message .body pre.code code {
+  white-space: pre;
 }
 
 .message.streaming .body::after {
@@ -1744,6 +1899,818 @@ select option {
   padding: 0 18px;
 }
 
+/* ---------------------------------------------------- workspaces & sheets */
+
+.sidebar-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: none;
+  padding: 10px 10px 2px;
+}
+
+.new-chat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 36px;
+  padding: 0 12px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-align: left;
+  transition: background var(--fast), border-color var(--fast);
+}
+
+.new-chat:hover {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}
+
+.new-chat svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+}
+
+.workspace-button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--text-caption);
+  font-size: 11.5px;
+  text-align: left;
+  transition: background var(--fast), color var(--fast);
+}
+
+.workspace-button:hover {
+  background: var(--surface-1);
+  color: var(--text-secondary);
+}
+
+.workspace-button.active {
+  color: var(--text-secondary);
+}
+
+.workspace-button > svg:first-child {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.workspace-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.workspace-chevron {
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+
+.sidebar-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.foot-note {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.language-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  color: var(--text-caption);
+  cursor: pointer;
+}
+
+.language-picker > svg {
+  width: 13px;
+  height: 13px;
+}
+
+.language-picker select {
+  width: auto;
+  height: 26px;
+  padding: 0 20px 0 2px;
+  background-color: transparent;
+  border-color: transparent;
+  background-position: right 2px center;
+  color: var(--text-caption);
+  font-size: 11px;
+}
+
+.language-picker select:hover {
+  background-color: var(--surface-1);
+  border-color: var(--border);
+}
+
+/* The plan / usage card floats over the conversation, like the terminal's ⓘ. */
+#main {
+  position: relative;
+}
+
+.plan-card {
+  position: absolute;
+  top: 76px;
+  right: clamp(16px, 4vw, 32px);
+  z-index: 20;
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(60vh, 560px);
+  max-height: min(60dvh, 560px);
+  padding: 13px 15px;
+  overflow-y: auto;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-strong);
+  backdrop-filter: blur(10px);
+  overscroll-behavior: contain;
+}
+
+.plan-card.hidden {
+  display: none;
+}
+
+/* Sit below the model row instead of covering it. */
+#model-picker:not(.hidden) + #plan-card {
+  top: 138px;
+}
+
+.plan-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.plan-card-head strong {
+  color: var(--text-caption);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.plan-card-head .icon-btn {
+  width: 24px;
+  height: 24px;
+}
+
+.plan-goal {
+  margin: 8px 0 10px;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.plan-steps {
+  display: flex;
+  flex-direction: column;
+}
+
+.plan-step {
+  position: relative;
+  display: flex;
+  gap: 10px;
+  padding: 7px 0;
+}
+
+.plan-step:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  top: 22px;
+  bottom: -6px;
+  left: 5px;
+  width: 1px;
+  background: var(--border);
+}
+
+.plan-node {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  width: 11px;
+  height: 11px;
+  margin-top: 4px;
+  background: var(--bg-sidebar);
+  border: 1.5px solid var(--text-caption);
+  border-radius: 50%;
+}
+
+.plan-step.done .plan-node {
+  background: var(--text-caption);
+  border-color: var(--text-caption);
+}
+
+.plan-step.active .plan-node {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-fill);
+}
+
+.plan-step.failed .plan-node {
+  background: var(--red);
+  border-color: var(--red);
+}
+
+.plan-step-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.plan-step-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.plan-step-title strong {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.plan-step.active .plan-step-title strong {
+  color: var(--text);
+}
+
+.plan-step.done .plan-step-title strong {
+  color: var(--text-caption);
+}
+
+.plan-step.failed .plan-step-title strong {
+  color: var(--red);
+}
+
+.plan-step-state {
+  flex: none;
+  color: var(--text-caption);
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.plan-step-detail {
+  margin-top: 2px;
+  color: var(--text-caption);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.plan-meta {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border-soft);
+  color: var(--text-caption);
+  font-size: 10.5px;
+}
+
+.plan-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.plan-usage-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-caption);
+  font-size: 11.5px;
+}
+
+.plan-usage-row strong {
+  color: var(--text-secondary);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-toggle.active {
+  color: var(--accent);
+  background: var(--accent-fill);
+}
+
+.control.danger:hover {
+  color: var(--red);
+  border-color: rgba(242, 90, 90, 0.5);
+  background: rgba(242, 90, 90, 0.08);
+}
+
+/* Dialogs: new conversation, folder picker, working directories. */
+.sheet-dialog {
+  width: min(620px, calc(100vw - 24px));
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  overflow: hidden;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  color: var(--text);
+  box-shadow: var(--shadow-strong);
+}
+
+.sheet-dialog::backdrop {
+  background: rgba(9, 9, 10, 0.66);
+  backdrop-filter: blur(6px);
+}
+
+.sheet-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.sheet {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+}
+
+.sheet-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex: none;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.sheet-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.sheet-sub {
+  margin: 3px 0 0;
+  color: var(--text-caption);
+  font-size: 12px;
+}
+
+.sheet-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 18px 22px 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+
+.field-group h3 {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.field-group h4 {
+  margin: 4px 0 0;
+  color: var(--text-caption);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.recent-title {
+  text-transform: none;
+}
+
+.path-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.path-input {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 11px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  transition: border-color var(--fast), background-color var(--fast);
+}
+
+.path-input::placeholder {
+  color: var(--text-caption);
+}
+
+.path-input:hover {
+  border-color: var(--border);
+}
+
+.path-input:focus {
+  outline: none;
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px rgba(122, 170, 255, 0.1);
+}
+
+.workspace-recents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.path-chip {
+  max-width: 220px;
+  height: 26px;
+  padding: 0 10px;
+  overflow: hidden;
+  background: var(--surface-1);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--text-tertiary);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.path-chip:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.path-chip.selected {
+  background: var(--accent-fill);
+  border-color: var(--accent-line);
+  color: var(--accent);
+}
+
+.recents-empty {
+  color: var(--text-caption);
+  font-size: 11.5px;
+}
+
+.sheet-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: none;
+  padding: 14px 22px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.sheet-actions .control {
+  height: 34px;
+  padding: 0 16px;
+}
+
+.sheet-actions .primary {
+  height: 34px;
+  padding: 0 18px;
+}
+
+.sheet-spacer {
+  flex: 1;
+}
+
+/* Folder picker */
+.folder-sheet {
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+}
+
+.folder-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  padding: 14px 22px 0;
+}
+
+.folder-toolbar .path-input {
+  flex: 1;
+}
+
+.folder-roots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: none;
+  padding: 10px 22px 0;
+}
+
+.folder-roots:empty {
+  display: none;
+}
+
+.root-chip {
+  height: 24px;
+  padding: 0 9px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  color: var(--text-caption);
+  font-size: 11px;
+}
+
+.root-chip:hover {
+  border-color: var(--border-strong);
+  color: var(--text-secondary);
+}
+
+.folder-list {
+  flex: 1 1 auto;
+  min-height: 140px;
+  max-height: 42vh;
+  max-height: 42dvh;
+  margin: 12px 12px 0;
+  padding: 6px;
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  overscroll-behavior: contain;
+}
+
+.folder-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  text-align: left;
+}
+
+.folder-item:hover {
+  background: var(--surface-1);
+  color: var(--text);
+}
+
+.folder-item-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  color: var(--text-caption);
+}
+
+.folder-item-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.folder-new {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  padding: 10px 22px 0;
+}
+
+.folder-new.hidden {
+  display: none;
+}
+
+.folder-sheet > .form-feedback,
+.sheet > .form-feedback {
+  flex: none;
+  padding: 10px 22px 0;
+}
+
+.folder-actions {
+  margin-top: auto;
+}
+
+/* Working-directory switcher */
+.workspace-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 52vh;
+  max-height: 52dvh;
+  padding: 10px 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.workspace-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.workspace-item:hover {
+  background: var(--surface-1);
+}
+
+.workspace-item.selected {
+  background: var(--surface-2);
+}
+
+.workspace-item.missing {
+  opacity: 0.5;
+}
+
+.workspace-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  background: var(--surface-1);
+  border-radius: 9px;
+  color: var(--text-tertiary);
+}
+
+.workspace-icon svg {
+  width: 17px;
+  height: 17px;
+}
+
+.workspace-info {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.workspace-info strong {
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.workspace-info small {
+  overflow: hidden;
+  color: var(--text-caption);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-count {
+  flex: none;
+  color: var(--text-caption);
+  font-size: 10.5px;
+}
+
+.sheet .form-feedback {
+  min-height: 16px;
+}
+
+.agents-list {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 120px;
+  max-height: 56vh;
+  max-height: 56dvh;
+  padding: 10px 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.agent-section {
+  margin-bottom: 10px;
+}
+
+.agent-section h3 {
+  margin: 6px 8px;
+  color: var(--text-caption);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.agent-session {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.agent-session:hover {
+  background: var(--surface-1);
+  color: var(--text);
+}
+
+.agent-session-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.agent-session-title {
+  overflow: hidden;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-session-meta {
+  color: var(--text-caption);
+  font-size: 10.5px;
+}
+
+.agents-cwd {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-caption);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-path {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--text-caption);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.workspace-prompt {
+  margin: 2px 0 6px;
+  color: var(--text-caption);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.workspace-empty .control {
+  margin-top: 4px;
+}
+
+/* Settings use a nested two-column grid so a language row can sit beside the
+   approval default without breaking the existing field layout. */
+.settings-fields .settings-grid {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 18px;
+}
+
 /* --------------------------------------------------------------- scrollbar */
 
 * {
@@ -1866,7 +2833,16 @@ select option {
   }
 
   .sidebar-foot {
-    display: none;
+    display: flex;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+
+  .new-chat {
+    height: 44px;
+  }
+
+  .workspace-button {
+    height: 36px;
   }
 
   .icon-btn {
@@ -2015,6 +2991,69 @@ select option {
 
   .settings-fields {
     grid-template-columns: 1fr;
+  }
+
+  .settings-fields .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sheet-dialog {
+    width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+  }
+
+  .sheet-header,
+  .sheet-actions {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .sheet-body {
+    padding: 16px 16px 8px;
+  }
+
+  .folder-toolbar,
+  .folder-roots,
+  .folder-new,
+  .folder-sheet > .form-feedback,
+  .sheet > .form-feedback {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .sheet-actions {
+    flex-wrap: wrap;
+  }
+
+  .sheet-actions .control,
+  .sheet-actions .primary {
+    height: 40px;
+  }
+
+  .folder-list {
+    max-height: 36dvh;
+  }
+
+  .workspace-list {
+    max-height: 44dvh;
+  }
+
+  .plan-card {
+    position: fixed;
+    top: 72px;
+    right: 10px;
+    left: 10px;
+    width: auto;
+    max-height: 45dvh;
+  }
+
+  .path-row,
+  .folder-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .path-input {
+    font-size: 16px;
   }
 
   .settings-fields label,

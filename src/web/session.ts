@@ -11,6 +11,7 @@
  * (snapshot, stream, pause, resume, message) work unchanged.
  */
 
+import { randomUUID } from "node:crypto";
 import {
   findModel,
   contextCompressionThreshold,
@@ -115,6 +116,41 @@ const SUMMARY_PREFIX = "Context was compressed. Summary of the earlier part:";
 export type ResumeOutcome =
   | { ok: true; session: WebSession }
   | { ok: false; error: string };
+
+/**
+ * A fresh session id in the same shape `saveSession` generates, so a new
+ * browser conversation has a stable identity before its first message exists.
+ */
+export function newSessionId(now = new Date()): string {
+  return `${now.toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
+}
+
+/**
+ * Start an empty conversation in a caller-chosen working directory. Nothing is
+ * written to disk until the first message, so an abandoned new-chat dialog
+ * cannot litter the history with empty transcripts.
+ */
+export function createWebSession(
+  cwd: string,
+  selection: ResolvedModelSelection,
+  approvalMode?: ApprovalMode,
+): WebSession {
+  const now = new Date();
+  const source: SessionData = {
+    id: newSessionId(now),
+    created_at: now.toISOString(),
+    updated_at: now.toISOString(),
+    model: selection.model.name,
+    provider: selection.provider,
+    intensity: selection.intensity,
+    cwd,
+    title: "",
+    messages: [],
+    tokens: { prompt: 0, completion: 0 },
+    approval_mode: normalizeApprovalMode(approvalMode ?? loadConfig().approval_mode),
+  };
+  return new WebSession(source, selection.model);
+}
 
 function parseArguments(raw: string): Record<string, unknown> {
   const text = raw?.trim() ?? "";
@@ -366,6 +402,39 @@ export class WebSession implements LiveAgent {
     this.touch();
     this.save();
     this.publishLive();
+  }
+
+  /**
+   * Start a fresh chat in the same working directory, mirroring the terminal's
+   * clear shortcut. The finished transcript is checkpointed first and stays on
+   * disk; this session simply moves on under a new id.
+   */
+  liveClear(): void {
+    if (this.disposed) return;
+    if (!this.checkpoint.flush()) return;
+    this.turnToken++;
+    if (this.pendingApproval) {
+      const pending = this.pendingApproval;
+      this.pendingApproval = null;
+      pending.resolve(false);
+    }
+    this.busy = false;
+    this.paused = false;
+    this.queued = null;
+    this.compressing = false;
+    this.retrying = null;
+    this.subagent = null;
+    this.reviewing = null;
+    this.streamingContent = null;
+    this.plan = null;
+    this.planning = false;
+    this.messages = [];
+    this.context = null;
+    this.lastPromptTokens = 0;
+    this.saveError = null;
+    this.sessionId = newSessionId();
+    this.publishLive();
+    this.touch();
   }
 
   // ---- turn driving ----------------------------------------------------
@@ -846,7 +915,7 @@ export class WebSession implements LiveAgent {
         return line.length > 80 ? `${line.slice(0, 77)}…` : line;
       }
     }
-    return "Resumed chat";
+    return "";
   }
 
   private retainStreamingContent(): void {

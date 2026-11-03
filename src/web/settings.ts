@@ -1,6 +1,7 @@
 import {
-  DEFAULT_CONFIG, INTENSITY_LEVELS, contextWindow, isContextWindow,
-  loadConfig, loadModels, resolveModelSelection, saveConfig, saveModels,
+  DEFAULT_CONFIG, INTENSITY_LEVELS, WEB_LANGUAGES, contextWindow, isContextWindow,
+  loadConfig, loadModels, normalizeApprovalMode, normalizeWebLanguage, resolveModelSelection,
+  saveConfig, saveModels,
 } from "../config.js";
 
 import { hashWebPassword, validateWebPassword } from "./auth.js";
@@ -20,6 +21,7 @@ export function getWebSettings() {
   return {
     providers,
     intensities: INTENSITY_LEVELS,
+    languages: WEB_LANGUAGES.map((value) => ({ value, label: value === "zh" ? "简体中文" : "English" })),
     selection: {
       provider: provider?.name ?? "",
       model: model?.name ?? "",
@@ -31,6 +33,10 @@ export function getWebSettings() {
       approval_model: String(config.approval_model ?? ""),
       auto_approve_extreme_risk: config.auto_approve_extreme_risk === true,
       sound_alerts: config.sound_alerts !== false,
+      language: normalizeWebLanguage(config.language),
+      plan_first: config.plan_first !== false,
+      approval_mode: normalizeApprovalMode(config.approval_mode),
+      web_console: config.web_console !== false,
     },
   };
 }
@@ -60,6 +66,20 @@ export function updateWebSettings(value: unknown): void {
       } else if (key === "auto_approve_extreme_risk") {
         if (typeof val !== "boolean") throw new Error("auto-approval must be a boolean");
         config[key] = val;
+      } else if (key === "language") {
+        if (typeof val !== "string" || !WEB_LANGUAGES.includes(val as (typeof WEB_LANGUAGES)[number])) {
+          throw new Error("invalid language");
+        }
+        config.language = val;
+      } else if (key === "plan_first") {
+        if (typeof val !== "boolean") throw new Error("invalid plan setting");
+        config.plan_first = val;
+      } else if (key === "approval_mode") {
+        if (val !== "request" && val !== "auto") throw new Error("invalid approval mode");
+        config.approval_mode = val;
+      } else if (key === "web_console") {
+        if (typeof val !== "boolean") throw new Error("web console must be a boolean");
+        config.web_console = val;
       } else if (key === "web_password") {
         validateWebPassword(val);
       } else {
