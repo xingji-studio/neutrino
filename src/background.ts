@@ -3,9 +3,9 @@
  *
  * A background Neutrino is the ordinary Web console running in a detached
  * process, with no terminal attached. Conversations started from the browser
- * are owned by that process, so closing the CLI (or the terminal window) cannot
- * interrupt them. The terminal UI keeps its own conversations; they are local
- * to the terminal and always end with it.
+ * are owned by that process. With residency off, it follows the terminals that
+ * opened it; with residency on, it survives them. Changing that lifetime never
+ * moves or restarts a conversation. Terminal conversations stay local.
  *
  * The service is discovered through a small status file under `~/.neutrino`
  * (`background.json`). It carries the process id, the address it bound and a
@@ -42,6 +42,12 @@ export interface BackgroundStatus {
   /** Secret that authorizes the stop/ping endpoints. */
   token: string;
   started_at: string;
+  /** Whether the console stays up without a terminal. */
+  resident: boolean;
+  /** Terminals currently attached to this console. */
+  owner_pids: number[];
+  /** False for a still-running service from a build without live switching. */
+  lifetime_supported?: boolean;
 }
 
 export interface StartBackgroundOptions {
@@ -53,6 +59,26 @@ export interface StartBackgroundOptions {
   auth: boolean;
   /** Windows tray icon. Off for tests and headless deployments. */
   tray?: boolean;
+  /** Off means the console follows its owners instead of staying resident. */
+  resident?: boolean;
+  /** Terminal that owns a non-resident console. */
+  ownerPid?: number;
+  /** Offer the one-time residency invitation. */
+  prompt?: boolean;
+  /** An explicit standalone port must not be silently ignored. */
+  strictPort?: boolean;
+}
+
+export interface BackgroundUpdate {
+  resident?: boolean;
+  ownerPid?: number;
+  /** Private loopback bridge for a terminal's live conversations. */
+  bridge?: TerminalBridgeInfo;
+}
+
+export interface TerminalBridgeInfo {
+  url: string;
+  token: string;
 }
 
 export type StartBackgroundResult =
@@ -83,6 +109,8 @@ export function parseBackgroundStatus(value: unknown): BackgroundStatus | null {
   if (data.auth_required !== undefined && typeof data.auth_required !== "boolean") return null;
   if (typeof data.token !== "string" || data.token.length < 16) return null;
   if (typeof data.started_at !== "string" || data.started_at === "") return null;
+  if (data.resident !== undefined && typeof data.resident !== "boolean") return null;
+  if (data.owner_pids !== undefined && (!Array.isArray(data.owner_pids) || !data.owner_pids.every(isPid))) return null;
   return {
     pid: data.pid,
     port: data.port,
@@ -93,6 +121,10 @@ export function parseBackgroundStatus(value: unknown): BackgroundStatus | null {
     auth_required: data.auth_required !== false,
     token: data.token,
     started_at: data.started_at,
+    // Older services were always resident and had no terminal owners.
+    resident: data.resident !== false,
+    owner_pids: Array.isArray(data.owner_pids) ? data.owner_pids as number[] : [],
+    lifetime_supported: typeof data.resident === "boolean" && Array.isArray(data.owner_pids),
   };
 }
 
@@ -223,7 +255,32 @@ function cliEntry(): string {
  */
 export async function startBackgroundService(options: StartBackgroundOptions): Promise<StartBackgroundResult> {
   const existing = runningBackground();
-  if (existing) return { ok: true, status: existing, started: false };
+  if (existing) {
+    if (existing.auth_required !== options.auth) {
+      return { ok: false, error: "the running Web console uses a different password setting" };
+    }
+    if (options.host && existing.host !== options.host) {
+      return { ok: false, error: `the running Web console is bound to ${existing.host}, not ${options.host}` };
+    }
+    if (options.strictPort && options.port !== null && existing.port !== options.port) {
+      return { ok: false, error: `the running Web console uses port ${existing.port}, not ${options.port}` };
+    }
+    // An older detached service is already resident. Reuse it without trying
+    // to register an owner through an endpoint that does not exist yet.
+    if (existing.lifetime_supported === false) return { ok: true, status: existing, started: false };
+    const update: BackgroundUpdate = {};
+    if (options.ownerPid && !existing.owner_pids.includes(options.ownerPid)) update.ownerPid = options.ownerPid;
+    if (options.resident !== false && !existing.resident) update.resident = true;
+    try {
+      const status = Object.keys(update).length ? await configureBackgroundService(existing, update) : existing;
+      return { ok: true, status, started: false };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+  if (options.resident === false && (!options.ownerPid || !isProcessAlive(options.ownerPid))) {
+    return { ok: false, error: "a non-resident Web console needs a running terminal" };
+  }
   clearBackgroundStatus();
   const token = randomBytes(32).toString("hex");
   const port = options.port ?? 8765;
@@ -239,7 +296,13 @@ export async function startBackgroundService(options: StartBackgroundOptions): P
       detached: true,
       stdio: "ignore",
       windowsHide: true,
-      env: { ...process.env, NEUTRINO_BACKGROUND_TOKEN: token },
+      env: {
+        ...process.env,
+        NEUTRINO_BACKGROUND_TOKEN: token,
+        NEUTRINO_BACKGROUND_RESIDENT: options.resident === false ? "0" : "1",
+        NEUTRINO_BACKGROUND_OWNER: options.ownerPid ? String(options.ownerPid) : "",
+        NEUTRINO_BACKGROUND_PROMPT: options.prompt ? "1" : "0",
+      },
     });
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
@@ -273,12 +336,32 @@ export async function startBackgroundService(options: StartBackgroundOptions): P
   };
 }
 
+/** Apply a lifetime change to the process that already owns the conversations. */
+export async function configureBackgroundService(status: BackgroundStatus, update: BackgroundUpdate): Promise<BackgroundStatus> {
+  const response = await fetch(`${status.url}/api/background/configure`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${status.token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(update),
+    signal: AbortSignal.timeout(5000),
+  });
+  const data = await response.json() as { error?: string };
+  if (!response.ok) throw new Error(data.error || "could not update background residency");
+  const updated = parseBackgroundStatus(data);
+  if (!updated || updated.pid !== status.pid || updated.token !== status.token) {
+    throw new Error("the Web console returned an invalid background status");
+  }
+  return updated;
+}
+
 /** Stop the detached service, politely first and by signal if it is stuck. */
-export async function stopBackgroundService(): Promise<StopBackgroundResult> {
+export async function stopBackgroundService(expected?: BackgroundStatus): Promise<StopBackgroundResult> {
   const status = runningBackground();
   if (!status) {
-    clearBackgroundStatus();
+    if (!expected) clearBackgroundStatus();
     return { ok: true, stopped: false };
+  }
+  if (expected && (status.pid !== expected.pid || status.token !== expected.token)) {
+    return { ok: false, stopped: false, error: "the Web console changed before it could be stopped" };
   }
   let requested = false;
   try {

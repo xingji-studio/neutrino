@@ -457,12 +457,16 @@ how to choose another port.
 
 Background residency is **off by default**. Turn it on in the browser's
 **Settings → Background residency** (the regular and Pro workspaces share the
-setting) or in the terminal's **Settings → Background residency**. It applies to
-the next CLI launch: `neutrino` then starts the Web console as a detached
-process and prints its address instead of opening a listener in the terminal
-process. Conversations started from the browser live in that process, so closing
-the terminal or exiting the CLI cannot interrupt them. Terminal conversations
-stay local to the terminal.
+setting) or in the terminal's **Settings → Background residency**. The switch
+applies immediately, including to browser conversations already in progress.
+With residency on, browser tasks keep running after the terminal or CLI exits.
+With it off, the console follows its attached terminals and lets current browser
+tasks finish before it shuts down. Terminal conversations stay local to the
+terminal and end with it.
+
+Terminal and standalone launches share one Web console. If a standalone launch
+requests a different port, interface or password setting from an existing
+console, it reports the conflict; stop the existing console before changing it.
 
 A detached console can be managed without a terminal:
 
@@ -481,11 +485,10 @@ random management token are kept in `~/.neutrino/background.json` (mode `0600`).
 The token protects the service's ping/stop endpoints and is never exposed to a
 browser.
 
-When the console is running in-process and background residency is off, the
-first browser to open it gets a one-time invitation: **建议开启后台常驻，避免误触中断任务**
-with a highlighted **开启** and **取消**. Either answer consumes it for that CLI
-run; **开启** saves the setting for the next launch. A detached console and a
-bare `neutrino web` server never show it.
+When background residency is off, the first browser opened from the terminal
+gets a one-time invitation: **建议开启后台常驻，避免误触中断任务** with a highlighted
+**开启** and **取消**. Either answer consumes it for that CLI run; **开启** applies
+immediately. A resident console and a bare `neutrino web` server never show it.
 
 ### Reaching it from another device
 

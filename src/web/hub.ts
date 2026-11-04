@@ -133,6 +133,8 @@ export interface LiveAgent {
   /** Apply a server-resolved choice to future turns, while idle or paused. */
   liveConfigure?(selection: ResolvedModelSelection): ModelChangeResult;
   liveSetProPreset?(preset: string): ModelChangeResult;
+  /** A terminal in another process handles these actions through its bridge. */
+  remoteAction?(action: string, body: unknown): Promise<{ status: number; data: unknown }>;
 }
 
 /** Summary of a live session, as shown in the sidebar. */
@@ -194,6 +196,11 @@ class LiveHub {
   has(key: string, mode?: Mode): boolean {
     const entry = this.entries.get(key);
     return Boolean(entry) && (!mode || entry!.mode === mode);
+  }
+
+  remoteAction(key: string): LiveAgent["remoteAction"] | null {
+    const agent = this.entries.get(key)?.agent;
+    return agent?.remoteAction ? agent.remoteAction.bind(agent) : null;
   }
 
   /** All live sessions, newest registration last. Optionally one workspace only. */

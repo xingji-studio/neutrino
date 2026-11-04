@@ -26,8 +26,11 @@ import { AgentSelectScreen } from "./screens/agentSelect.js";
 import { ModelSelectScreen } from "./screens/modelSelect.js";
 import { SettingsScreen } from "./screens/settings.js";
 import { StartScreen } from "./screens/start.js";
-import { startWebServer, type WebServerHandle } from "./web/server.js";
-import { startBackgroundService, stopBackgroundService, type BackgroundStatus } from "./background.js";
+import {
+  configureBackgroundService, readBackgroundStatus, isProcessAlive, runningBackground,
+  startBackgroundService, stopBackgroundService, type BackgroundStatus, type TerminalBridgeInfo,
+} from "./background.js";
+import { startTerminalBridge } from "./web/terminalBridge.js";
 
 const CURSOR_BLINK_MS = 530;
 const TOAST_MS = 1600;
@@ -104,13 +107,15 @@ export class App {
   // its own (streamed output, a resize) can still carry the anchor along.
   private selOffset: number | null = null;
   private resizeHandler = () => this.onResize();
-  private webHandle: WebServerHandle | null = null;
+  private webService: BackgroundStatus | null = null;
+  private webStarting: Promise<BackgroundStatus> | null = null;
+  private terminalBridge: (TerminalBridgeInfo & { close(): void }) | null = null;
+  private backgroundChanges: Promise<void> = Promise.resolve();
+  private webTray = true;
   /** Where the web UI lives; kept even while it is switched off. */
   private webOptions: { port: number; host?: string; auth: boolean } = { port: 8765, auth: true };
   /** Offer the background-residency prompt when this process mounts the UI. */
   private webPromptBackground = true;
-  /** True while the Web console is owned by the detached background service. */
-  private webBackground = false;
   /** True while a click is bringing the Web console up, so double clicks are safe. */
   private proOpening = false;
 
@@ -160,9 +165,10 @@ export class App {
    * the console is disabled, so Settings can mount it later without guessing.
    * `backgroundPrompt` is false when the console is meant to run detached.
    */
-  configureWeb(port: number, host: string | undefined, auth: boolean, backgroundPrompt = true): void {
+  configureWeb(port: number, host: string | undefined, auth: boolean, backgroundPrompt = true, tray = true): void {
     this.webOptions = { port, host, auth };
     this.webPromptBackground = backgroundPrompt;
+    this.webTray = tray;
   }
 
   /**
@@ -171,26 +177,56 @@ export class App {
    * reach it later.
    */
   attachBackground(status: BackgroundStatus): void {
-    this.webBackground = true;
-    this.webHandle = null;
+    this.webService = status;
     this.webOptions = { port: status.port, host: status.host, auth: status.auth_required };
     this.state.webUrl = status.url;
-    this.state.webBackground = true;
+    this.state.webBackground = status.resident;
   }
 
   /**
    * Mount the browser UI on the given port. Safe to call once; subsequent calls
    * return the already-running server.
    */
-  async enableWeb(port: number, host?: string, auth = true): Promise<WebServerHandle> {
-    if (this.webHandle) return this.webHandle;
+  async enableWeb(port: number, host?: string, auth = true): Promise<BackgroundStatus> {
+    if (this.webService) return this.webService;
+    if (this.webStarting) return this.webStarting;
     this.webOptions = { port, host, auth };
-    const handle = await startWebServer({ port, host, auth, backgroundPrompt: this.webPromptBackground });
-    this.webHandle = handle;
-    this.webBackground = false;
-    this.state.webUrl = handle.url;
-    this.state.webBackground = false;
-    return handle;
+    this.webStarting = (async () => {
+      const bridge = await startTerminalBridge();
+      let started: BackgroundStatus | null = null;
+      try {
+        const result = await startBackgroundService({
+          port, host, auth, tray: this.webTray, resident: loadConfig().background === true,
+          ownerPid: process.pid, prompt: this.webPromptBackground,
+        });
+        if (!result.ok) throw new Error(result.error);
+        if (result.started) started = result.status;
+        if (result.status.lifetime_supported === false) {
+          // Keep an older resident service reachable while its current tasks
+          // finish; it cannot accept live lifetime changes until restarted.
+          bridge.close();
+          this.attachBackground(result.status);
+          return result.status;
+        }
+        const status = await configureBackgroundService(result.status, {
+          ownerPid: process.pid, bridge: { url: bridge.url, token: bridge.token },
+        });
+        this.terminalBridge = bridge;
+        this.attachBackground(status);
+        return status;
+      } catch (error) {
+        bridge.close();
+        if (started) {
+          const current = readBackgroundStatus();
+          if (current && current.owner_pids.every(owner => owner === process.pid)) {
+            await stopBackgroundService(started);
+          }
+        }
+        throw error;
+      }
+    })();
+    try { return await this.webStarting; }
+    finally { this.webStarting = null; }
   }
 
   /**
@@ -198,25 +234,67 @@ export class App {
    * detached service, or nothing.
    */
   private currentWebUrl(): string | null {
-    return this.webHandle?.url ?? (this.webBackground ? this.state.webUrl : null);
+    return this.webService ? this.state.webUrl : null;
+  }
+
+  private syncWebStatus(): boolean {
+    if (!this.webService) return false;
+    const status = readBackgroundStatus();
+    if (!status && isProcessAlive(this.webService.pid)) return false;
+    if (!status || status.pid !== this.webService.pid || !isProcessAlive(status.pid)) {
+      this.terminalBridge?.close();
+      this.terminalBridge = null;
+      this.webService = null;
+      this.state.webUrl = null;
+      this.state.webBackground = false;
+      return true;
+    }
+    const changed = this.state.webUrl !== status.url || this.state.webBackground !== status.resident;
+    this.attachBackground(status);
+    return changed;
   }
 
   /**
-   * Start the Web console when it is not up yet, whether it is configured to
-   * run in-process or in the background. Returns the URL to open.
+   * Start the Web console when it is not up yet. Returns the URL to open.
    */
   private async ensureWebConsole(): Promise<string> {
+    this.syncWebStatus();
     const existing = this.currentWebUrl();
     if (existing) return existing;
-    if (loadConfig().background === true) {
-      const started = await startBackgroundService({ ...this.webOptions, tray: true });
-      if (started.ok) {
-        this.attachBackground(started.status);
-        return started.status.url;
+    const status = await this.enableWeb(this.webOptions.port, this.webOptions.host, this.webOptions.auth);
+    return status.url;
+  }
+
+  /** Change the existing worker's lifetime without moving its conversations. */
+  setBackgroundResidency(enabled: boolean): Promise<{ ok: boolean; error?: string }> {
+    const task = this.backgroundChanges.then(async () => {
+      try {
+        this.syncWebStatus();
+        const existing = this.webService ? null : runningBackground();
+        if (existing) await this.enableWeb(existing.port, existing.host, existing.auth_required);
+        if (!enabled && !this.webService) {
+          saveConfig({ ...loadConfig(), background: false });
+        } else {
+          await this.ensureWebConsole();
+          if (this.webService?.lifetime_supported === false) {
+            throw new Error("Restart the console to update background residency.");
+          }
+          const status = await configureBackgroundService(this.webService!, { resident: enabled, ownerPid: process.pid });
+          this.attachBackground(status);
+        }
+        this.showToast(enabled
+          ? "Background residency on: browser tasks keep running after this terminal closes"
+          : "Background residency off: the console follows this terminal");
+        this.render();
+        return { ok: true };
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        this.showToast(`Background residency failed: ${error}`, "top");
+        return { ok: false, error };
       }
-    }
-    const handle = await this.enableWeb(this.webOptions.port, this.webOptions.host, this.webOptions.auth);
-    return handle.url;
+    });
+    this.backgroundChanges = task.then(() => undefined, () => undefined);
+    return task;
   }
 
   /**
@@ -226,33 +304,30 @@ export class App {
    */
   async setWebConsole(enabled: boolean): Promise<{ ok: boolean; error?: string }> {
     if (enabled) {
-      if (this.webHandle || this.webBackground) return { ok: true };
       try {
         const url = await this.ensureWebConsole();
         this.showToast(`Web console: ${url}`);
         return { ok: true };
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
-        this.state.webUrl = null;
-        this.state.webBackground = false;
         this.showToast(`Web console failed: ${error}`, "top");
         return { ok: false, error };
       }
     }
-    if (this.webBackground) {
-      this.webBackground = false;
-      this.state.webUrl = null;
-      this.state.webBackground = false;
-      this.render();
-      const stopped = await stopBackgroundService();
-      this.showToast(stopped.ok ? "Background console stopped" : "Background console could not be stopped", stopped.ok ? "bottom" : "top");
-      return stopped.ok ? { ok: true } : { ok: false, error: stopped.error };
+    if (this.webStarting) await this.webStarting.catch(() => {});
+    if (this.webService) {
+      const stopped = await stopBackgroundService(this.webService);
+      if (!stopped.ok) {
+        this.showToast(`Web console could not be stopped: ${stopped.error}`, "top");
+        return { ok: false, error: stopped.error };
+      }
     }
-    const handle = this.webHandle;
-    this.webHandle = null;
+    this.terminalBridge?.close();
+    this.terminalBridge = null;
+    this.webService = null;
     this.state.webUrl = null;
+    this.state.webBackground = false;
     this.render();
-    await handle?.close();
     this.showToast("Web console stopped");
     return { ok: true };
   }
@@ -290,7 +365,8 @@ export class App {
     process.on("SIGINT", () => this.handleInterrupt());
     process.on("SIGTERM", () => this.quit());
     this.sizeTimer = setInterval(() => {
-      if (this.syncSize()) this.render();
+      const webChanged = this.syncWebStatus();
+      if (this.syncSize() || webChanged) this.render();
     }, 200);
     this.repaintTimer = setInterval(() => this.renderer.repaint(), REPAINT_MS);
     this.pushScreen(new StartScreen());
@@ -979,7 +1055,7 @@ export class App {
     } catch {
       // Terminal restoration has already run, even if stdin is unusable.
     }
-    void this.webHandle?.close();
+    this.terminalBridge?.close();
     process.exit(exitCode);
   }
 }

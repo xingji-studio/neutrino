@@ -187,10 +187,8 @@ function showGate(message = "") {
 
 // -------------------------------------------------------- background invite
 //
-// A console mounted by the terminal dies with it. The server offers this
-// one-time invitation before the user has invested a long turn; accepting
-// saves the process-wide setting, which the next CLI launch applies. The
-// detached service itself never offers it (it is already in the background).
+// Accepting changes the running console's lifetime immediately, including
+// conversations already in flight. A resident console never offers the prompt.
 
 let backgroundPromptAnswered = false;
 
@@ -235,7 +233,10 @@ async function answerBackgroundPrompt(enable) {
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
-      try { await preferences.load(); } catch { /* The saved flag is enough. */ }
+      if (body.settings?.background_running !== true) {
+        throw new Error(tr("Background residency could not be applied. Restart the console and try again."));
+      }
+      try { await preferences.load(); } catch { /* Residency is already active. */ }
     } else {
       // Consume the invitation for this CLI run. A failed dismissal is
       // harmless: the prompt simply returns on the next page load.

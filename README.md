@@ -41,7 +41,7 @@ npm install -g @xingjisoft/neutrino
 ## 使用小技巧
 
 - Web 控制台配合 Tailscale 等软件，可以直接实现外网安全远控！而且无需下载，打开即用！
-- 支持后台常驻（默认关闭）：在 Web 控制台或终端设置中开启后，关闭终端也不会中断浏览器里开始的任务。也可以用 `neutrino background start|stop|status|open` 管理后台控制台。
+- 支持后台常驻（默认关闭）：在 Web 控制台或终端设置中切换后立即生效，开启时关闭终端也不会中断已开始的浏览器任务。也可以用 `neutrino background start|stop|status|open` 管理后台控制台。
 
 ---
 

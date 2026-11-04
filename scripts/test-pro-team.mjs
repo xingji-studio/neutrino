@@ -26,6 +26,8 @@ let holdPlan = false;
 let releasePlan = null;
 let singleStep = false;
 let emptyMain = false;
+let longMain = false;
+let longMainRounds = 0;
 const mock = http.createServer(async (req, res) => {
   let raw = "";
   for await (const part of req) raw += part;
@@ -64,7 +66,13 @@ const mock = http.createServer(async (req, res) => {
   } else if (body.model.endsWith("confirm_model")) {
     complete(JSON.stringify({ approve: true, safety_score: 100, relevance_score: 100, hard_block: false, obvious_mismatch: false, mismatch_evidence: "", reason: "A bounded project operation requested by the user" }));
   } else if (body.model.endsWith("main_model")) {
-    if (emptyMain) complete("");
+    if (longMain) {
+      longMainRounds++;
+      if (longMainRounds <= 26) complete("", [{ index: 0, id: `long-${longMainRounds}`, type: "function", function: {
+        name: "read_file", arguments: JSON.stringify({ path: "pro-result.txt", reason: "Inspect the task result" }),
+      } }]);
+      else complete("Long professional task complete.");
+    } else if (emptyMain) complete("");
     else if (!results.length) complete("", [tool("front_output_model")]);
     else if (results.length === 1) complete("", [tool("modeling_model")]);
     else complete("All professional tasks completed.");
@@ -153,6 +161,18 @@ try {
   assert.ok(!JSON.stringify(snapshot).includes("shared-private-key"));
   assert.equal(loadSession(snapshot.sessionId, "pro").pro_preset, "best", "history remembers the chosen preset");
   assert.equal(fs.readFileSync(PRO_MODEL_FILE, "utf8"), configText);
+
+  // The Pro main agent must also reach its final reply after a long tool run.
+  longMain = true;
+  longMainRounds = 0;
+  await request(`/pro/api/live/${key}/message`, { text: "Inspect the task result repeatedly and then report." });
+  await waitFor(() => !hub.snapshot(key).busy);
+  longMain = false;
+  const longTurn = hub.snapshot(key);
+  assert.equal(longMainRounds, 27, "Pro continues past 24 model/tool rounds");
+  assert.equal(longTurn.messages.at(-1).content, "Long professional task complete.");
+  assert.ok(longTurn.plan.steps.every((entry) => entry.status === "done"));
+  assert.equal(longTurn.messages.slice(-27, -1).filter((entry) => entry.role === "tool").length, 26);
 
   // Pausing a stalled availability request cannot mutate the replacement turn.
   stallProbe = true;

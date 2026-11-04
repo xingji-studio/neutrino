@@ -19,6 +19,7 @@ import {
 import { drawHeader } from "../header.js";
 import { centerVertically, drawHint } from "../ui.js";
 import { hashWebPassword } from "../web/auth.js";
+import { runningBackground } from "../background.js";
 
 /** The settings that can be changed here, top to bottom. */
 const ROWS = ["intensity", "compress", "approval_model", "extreme_approval", "sound", "web_console", "background", "web_password"] as const;
@@ -42,7 +43,7 @@ export class SettingsScreen extends Screen {
   private backgroundIdx = 0;
   /** Only a row the user actually touched rewrites the saved default. */
   private webChanged = false;
-  private backgroundChanged = false;
+  private backgroundPending = false;
   private models: string[] = [];
   private rowIdx = 0;
   private lastHoverX = -1;
@@ -72,12 +73,13 @@ export class SettingsScreen extends Screen {
     // off, so reflect what is actually running first.
     this.webIdx = (this.app.state.webUrl || config.web_console !== false) ? 1 : 0;
     this.webChanged = false;
-    this.backgroundIdx = config.background === true ? 1 : 0;
-    this.backgroundChanged = false;
+    const background = runningBackground();
+    this.backgroundIdx = (state.webUrl ? state.webBackground : background?.resident ?? config.background === true) ? 1 : 0;
+    this.backgroundPending = false;
   }
 
   /** Change the value of a row by `delta` steps and persist it immediately. */
-  private cycle(row: RowId, delta: number): void {
+  private cycle(row: RowId, delta: number): void | Promise<void> {
     if (row === "web_password") {
       this.editingPassword = true;
       this.passwordDraft = "";
@@ -104,19 +106,10 @@ export class SettingsScreen extends Screen {
       void this.app.setWebConsole(this.webIdx === 1);
       return;
     } else if (row === "background") {
-      this.backgroundIdx = this.backgroundIdx === 1 ? 0 : 1;
-      this.backgroundChanged = true;
-      this.save();
-      // A launch-time mode: the current process already owns its console (or
-      // deliberately does not), so the new value applies to the next launch.
-      this.app.showToast?.(
-        this.backgroundIdx === 1
-          ? "Background residency on: starts with the next CLI launch"
-          : "Background residency off: applies to the next launch",
-        "top",
-      );
-      this.app.render();
-      return;
+      if (this.backgroundPending) return;
+      const service = runningBackground();
+      const current = this.app.state.webUrl ? this.app.state.webBackground : service?.resident ?? this.backgroundIdx === 1;
+      return this.applyBackground(!current);
     } else {
       const options = [...new Set([...CONTEXT_WINDOW_OPTIONS, this.contextTokens])].sort((a, b) => a - b);
       const i = options.indexOf(this.contextTokens);
@@ -124,6 +117,20 @@ export class SettingsScreen extends Screen {
       this.contextChanged = true;
     }
     this.save();
+  }
+
+  private async applyBackground(enabled: boolean): Promise<void> {
+    this.backgroundPending = true;
+    this.app.render();
+    try {
+      const result = await this.app.setBackgroundResidency(enabled);
+      if (result.ok) this.backgroundIdx = enabled ? 1 : 0;
+      else this.backgroundIdx = loadConfig().background === true ? 1 : 0;
+      if (this.app.state.webUrl) this.webIdx = 1;
+    } finally {
+      this.backgroundPending = false;
+      this.app.render();
+    }
   }
 
   onKey(key: Key): void {
@@ -267,11 +274,11 @@ export class SettingsScreen extends Screen {
       },
       {
         label: "Background residency",
-        value: this.backgroundIdx === 0
-          ? "Off"
-          : this.app.state.webBackground
-            ? "On (running)"
-            : "On (next CLI launch)",
+        value: this.backgroundPending
+          ? "Applying…"
+          : this.app.state.webUrl
+            ? this.app.state.webBackground ? "On (running)" : "Off"
+            : runningBackground()?.resident ? "On (running)" : this.backgroundIdx === 1 ? "On (not running)" : "Off",
       },
       {
         label: "Web password",
@@ -312,10 +319,6 @@ export class SettingsScreen extends Screen {
     if (this.webChanged) {
       config.web_console = this.webIdx === 1;
       this.webChanged = false;
-    }
-    if (this.backgroundChanged) {
-      config.background = this.backgroundIdx === 1;
-      this.backgroundChanged = false;
     }
     saveConfig(config);
   }

@@ -8,6 +8,7 @@
  * icon must never stop the service.
  */
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -18,7 +19,6 @@ import { NEUTRINO_DIR } from "./config.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(__dirname, "..");
 const ICON_FILE = path.join(PKG_ROOT, "assets", "neutrino.ico");
-const TRAY_SCRIPT_FILE = path.join(NEUTRINO_DIR, "tray.ps1");
 
 export interface TrayOptions {
   /** Console address opened by a click. */
@@ -37,15 +37,23 @@ function psString(value: string): string {
 }
 
 /** The icon itself. Only Windows has a notification area, and only it can run this. */
-export function startBackgroundTray(options: TrayOptions): void {
-  if (process.platform !== "win32") return;
-  if (process.env.NEUTRINO_NO_TRAY === "1") return;
+export function startBackgroundTray(options: TrayOptions): { close(): void } | null {
+  if (process.platform !== "win32") return null;
+  if (process.env.NEUTRINO_NO_TRAY === "1") return null;
   if (!fs.existsSync(ICON_FILE)) {
     backgroundLog(`tray icon not found at ${ICON_FILE}`);
-    return;
+    return null;
   }
+  // Separate files let an old icon close cleanly even if residency is turned
+  // back on before its PowerShell message loop has processed the shutdown.
+  const suffix = `${process.pid}-${randomBytes(8).toString("hex")}`;
+  const scriptFile = path.join(NEUTRINO_DIR, `tray-${suffix}.ps1`);
+  const closeFile = path.join(NEUTRINO_DIR, `tray-${suffix}.stop`);
   const script = `
 $ErrorActionPreference = 'Continue'
+$scriptFile = ${psString(scriptFile)}
+$closeFile = ${psString(closeFile)}
+try {
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 $iconPath = ${psString(ICON_FILE)}
@@ -75,19 +83,28 @@ $notify.ContextMenuStrip = $menu
 $notify.add_MouseClick({ param($sender, $eventArgs) if ($eventArgs.Button -eq [System.Windows.Forms.MouseButtons]::Left) { Start-Process -FilePath $url } })
 $notify.add_DoubleClick({ Start-Process -FilePath $url })
 $timer = New-Object System.Windows.Forms.Timer
-$timer.Interval = 2000
+$timer.Interval = 250
 $timer.add_Tick({
-  if (-not (Get-Process -Id $parent -ErrorAction SilentlyContinue)) {
+  if ((Test-Path -LiteralPath $closeFile) -or -not (Get-Process -Id $parent -ErrorAction SilentlyContinue)) {
     $notify.Visible = $false
     [System.Windows.Forms.Application]::Exit()
   }
 })
 $timer.Start()
 [System.Windows.Forms.Application]::Run()
+} finally {
+  if ($notify) { $notify.Visible = $false; $notify.Dispose() }
+  Remove-Item -LiteralPath $closeFile, $scriptFile -Force -ErrorAction SilentlyContinue
+}
 `;
+  const cleanup = (): void => {
+    for (const file of [scriptFile, closeFile]) {
+      try { fs.rmSync(file, { force: true }); } catch { /* The helper also cleans up. */ }
+    }
+  };
   try {
     fs.mkdirSync(NEUTRINO_DIR, { recursive: true });
-    fs.writeFileSync(TRAY_SCRIPT_FILE, `\ufeff${script}`, { encoding: "utf-8", mode: 0o600 });
+    fs.writeFileSync(scriptFile, `\ufeff${script}`, { encoding: "utf-8", mode: 0o600 });
     const logFd = fs.openSync(BACKGROUND_LOG_FILE, "a");
     let child: ReturnType<typeof spawn>;
     try {
@@ -95,7 +112,7 @@ $timer.Start()
         "powershell.exe",
         [
           "-NoProfile", "-NonInteractive", "-STA", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
-          "-File", TRAY_SCRIPT_FILE,
+          "-File", scriptFile,
         ],
         // Not detached: on Windows a detached PowerShell exits before its
         // message loop starts. The icon outlives the service on its own; its
@@ -105,11 +122,19 @@ $timer.Start()
     } finally {
       fs.closeSync(logFd);
     }
-    child.once("error", (error) => backgroundLog(`tray failed: ${error.message}`));
-    child.once("exit", (code) => backgroundLog(`tray exited (${code ?? "signal"})`));
+    let active = true;
+    child.once("error", (error) => { active = false; cleanup(); backgroundLog(`tray failed: ${error.message}`); });
+    child.once("exit", (code) => { active = false; cleanup(); backgroundLog(`tray exited (${code ?? "signal"})`); });
     child.unref();
     backgroundLog(`tray icon started (pid ${child.pid ?? "unknown"})`);
+    return { close: () => {
+      if (!active) return;
+      try { fs.writeFileSync(closeFile, "", { mode: 0o600 }); }
+      catch { try { child.kill(); } catch { /* Already gone. */ } }
+    } };
   } catch (error) {
+    cleanup();
     backgroundLog(`tray failed: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
   }
 }

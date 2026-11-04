@@ -24,6 +24,7 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, proMo
   // Same idea for background residency: the dialog must not overwrite a value
   // changed from the terminal while it was open.
   let backgroundInitial = false;
+  let backgroundChanging = false;
 
   async function json(path, body) {
     const response = await apiFetch(path, body === undefined ? { cache: "no-store" } : {
@@ -181,10 +182,45 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, proMo
     el["settings-sound"].checked = config.settings.sound_alerts !== false;
     el["settings-web-console"].checked = config.settings.web_console !== false;
     el["settings-web-lan"].checked = config.settings.web_lan === true;
-    el["settings-background"].checked = config.settings.background === true;
+    el["settings-background"].checked = config.settings.background_running === true;
     backgroundInitial = el["settings-background"].checked;
     lanInitial = el["settings-web-lan"].checked;
   }
+  el["settings-background"].addEventListener("change", async () => {
+    if (!config || backgroundChanging) return;
+    const enabled = el["settings-background"].checked;
+    backgroundChanging = true;
+    el["settings-background"].disabled = true;
+    el["settings-save"].disabled = true;
+    message(el["settings-feedback"], t("Applying…"));
+    try {
+      const updated = await json("/api/settings", { settings: { background: enabled } });
+      if (updated.settings.background_running !== enabled) {
+        throw new Error(t("Background residency could not be applied. Restart the console and try again."));
+      }
+      config = updated;
+      backgroundInitial = config.settings.background_running === true;
+      el["settings-background"].checked = backgroundInitial;
+      onCatalogChange?.(config);
+      message(el["settings-feedback"], t(enabled
+        ? "Background residency is on. Browser tasks keep running after the terminal closes."
+        : "Background residency is off. Current tasks can finish before the console closes."));
+    } catch (error) {
+      // A response can be lost after the service applied the change. Ask the
+      // service for its actual state before putting the switch back.
+      try {
+        config = await json("/api/settings");
+        backgroundInitial = config.settings.background_running === true;
+      } catch { /* Keep the last confirmed value and show the error. */ }
+      el["settings-background"].checked = backgroundInitial;
+      message(el["settings-feedback"], t(error.message), true);
+    } finally {
+      backgroundChanging = false;
+      el["settings-background"].disabled = false;
+      el["settings-save"].disabled = false;
+    }
+  });
+
   function renderContextWindow() {
     const provider = config.providers.find(entry => entry.name === el["default-provider"].value);
     const model = provider?.models.find(entry => entry.name === el["default-model"].value);
@@ -296,7 +332,7 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, proMo
       // server bound and (when available) the address to open elsewhere.
       el["settings-web-lan"].checked = config.settings.web_lan === true;
       lanInitial = el["settings-web-lan"].checked;
-      el["settings-background"].checked = config.settings.background === true;
+      el["settings-background"].checked = config.settings.background_running === true;
       backgroundInitial = el["settings-background"].checked;
       const urls = Array.isArray(config.settings.web_urls) ? config.settings.web_urls : [];
       const lanNote = config.settings.web_lan === wasLan ? "" : config.settings.web_lan
@@ -307,8 +343,8 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, proMo
       const backgroundNote = !backgroundChanged
         ? ""
         : config.settings.background
-          ? t("Background residency will start with the next CLI launch.")
-          : t("Background residency is off. The next CLI launch keeps the console in this process.");
+          ? t("Background residency is on. Browser tasks keep running after the terminal closes.")
+          : t("Background residency is off. Current tasks can finish before the console closes.");
       const savedText = password
         ? t("Settings saved. Web password updated permanently.")
         : t("Settings saved.");

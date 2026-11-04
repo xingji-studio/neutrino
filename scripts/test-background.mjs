@@ -15,8 +15,9 @@ const { DEFAULT_CONFIG, loadConfig, saveConfig } = await import("../dist/config.
 const { getWebSettings, updateWebSettings } = await import("../dist/web/settings.js");
 const { startWebServer } = await import("../dist/web/server.js");
 const {
-  BACKGROUND_LOG_FILE, readBackgroundStatus, runningBackground, startBackgroundService, stopBackgroundService,
+  BACKGROUND_LOG_FILE, BACKGROUND_STATUS_FILE, readBackgroundStatus, runningBackground, startBackgroundService, stopBackgroundService,
 } = await import("../dist/background.js");
+const { App } = await import("../dist/app.js");
 const { SettingsScreen } = await import("../dist/screens/settings.js");
 const { defaultState } = await import("../dist/state.js");
 const { setLanguage, t } = await import("../web/i18n.js");
@@ -54,7 +55,20 @@ try {
   saveConfig({ ...loadConfig(), background: false });
 
   // ---- the one-time invitation offered by a terminal-run console -----------
-  server = await startWebServer({ port: 0, auth: false, backgroundPrompt: true });
+  let fixtureResident = false;
+  const fixtureToken = "0123456789abcdef0123456789abcdef";
+  const fixtureStatus = () => ({
+    pid: process.pid, port: server.port, host: server.host, url: server.url,
+    auth_required: false, token: fixtureToken, started_at: new Date().toISOString(),
+    resident: fixtureResident, owner_pids: [process.pid],
+  });
+  server = await startWebServer({
+    port: 0, auth: false, backgroundPrompt: true,
+    backgroundService: {
+      token: fixtureToken, onStop() {}, status: fixtureStatus,
+      configure(update) { fixtureResident = update.resident ?? fixtureResident; return fixtureStatus(); },
+    },
+  });
   let payload = await request(server.url, "/api/settings");
   assert.equal(payload.status, 200);
   assert.equal(payload.data.settings.background, false);
@@ -69,13 +83,36 @@ try {
   const enabled = await request(server.url, "/api/settings", { body: { settings: { background: true } } });
   assert.equal(enabled.status, 200);
   assert.equal(enabled.data.settings.background, true);
+  assert.equal(enabled.data.settings.background_running, true, "the runtime switch is on before success is returned");
   assert.equal(enabled.data.settings.background_prompt, false, "enabling answers the invitation");
   const pro = await request(server.url, "/pro/api/settings");
   assert.equal(pro.data.settings.background, true, "Pro reports the same process-wide setting");
   const proOff = await request(server.url, "/pro/api/settings", { body: { settings: { background: false } } });
   assert.equal(proOff.status, 200);
+  assert.equal(proOff.data.settings.background_running, false, "Pro turns off the same running service");
   assert.equal(loadConfig().background, false, "saving from Pro updates the shared config");
   assert.equal(getWebSettings().settings.background, false, "the regular workspace sees the Pro change");
+
+  // A service started by the previous version remains reachable during an
+  // upgrade, but must not claim it supports a live lifetime change.
+  const old = fixtureStatus();
+  delete old.resident;
+  delete old.owner_pids;
+  fs.writeFileSync(BACKGROUND_STATUS_FILE, JSON.stringify(old));
+  const legacy = await startBackgroundService({ port: 0, host: server.host, auth: false, ownerPid: process.pid, resident: false });
+  assert.equal(legacy.ok, true);
+  assert.equal(legacy.started, false);
+  assert.equal(legacy.status.lifetime_supported, false);
+  const legacyApp = new App();
+  legacyApp.render = () => {};
+  legacyApp.showToast = () => {};
+  legacyApp.configureWeb(0, server.host, false);
+  assert.equal((await legacyApp.enableWeb(0, server.host, false)).url, server.url);
+  const legacySwitch = await legacyApp.setBackgroundResidency(false);
+  assert.equal(legacySwitch.ok, false);
+  assert.match(legacySwitch.error, /Restart the console/);
+  assert.equal((await request(server.url, "/api/health")).status, 200);
+  fs.rmSync(BACKGROUND_STATUS_FILE);
   await server.close();
   server = null;
 
@@ -155,17 +192,31 @@ try {
     render() {},
     popScreen() {},
     async setWebConsole() { return { ok: true }; },
+    async setBackgroundResidency(enabled) {
+      saveConfig({ ...loadConfig(), background: enabled });
+      this.state.webUrl = "http://127.0.0.1:8765";
+      this.state.webBackground = enabled;
+      return { ok: true };
+    },
   };
   const screen = new SettingsScreen("settings");
   screen.app = app;
   screen.onActivate();
   const row = () => screen.rowTexts().find((entry) => entry.label === "Background residency");
   assert.equal(row().value, "Off");
-  screen.cycle("background", 1);
+  await screen.cycle("background", 1);
   assert.equal(loadConfig().background, true, "the terminal switch persists the shared setting");
-  assert.equal(row().value, "On (next CLI launch)");
-  screen.cycle("background", -1);
+  assert.equal(row().value, "On (running)");
+  await screen.cycle("background", -1);
   assert.equal(loadConfig().background, false);
+  let finishSwitch;
+  app.setBackgroundResidency = () => new Promise(resolve => { finishSwitch = resolve; });
+  const pendingSwitch = screen.cycle("background", 1);
+  assert.equal(row().value, "Applying…", "the terminal shows the pending state");
+  assert.equal(loadConfig().background, false, "the saved setting does not change before success");
+  finishSwitch({ ok: false, error: "start failed" });
+  await pendingSwitch;
+  assert.equal(row().value, "Off", "a failed switch restores the actual state");
 
   // ---- browser surface ----------------------------------------------------
   const html = fs.readFileSync(new URL("../web/index.html", import.meta.url), "utf8");

@@ -60,13 +60,16 @@ Then open <http://127.0.0.1:8765>.
 
 Background residency is off by default. It is a property of the process, so the
 regular and Pro workspaces share it; changing it in either page (or in the
-terminal's **Settings → Background residency**) applies to the next CLI launch.
+terminal's **Settings → Background residency**) applies immediately, including
+to browser tasks already in progress.
 
-With it on, `neutrino` starts the Web console as a detached process and prints
-its address instead of mounting a listener in the terminal process. Conversations
-started from the browser belong to that process, so closing the terminal or
-exiting the CLI does not interrupt them. The terminal's own conversations remain
-local to the terminal. A ready service can be managed without a terminal:
+With it on, closing the terminal or exiting the CLI does not interrupt browser
+conversations. With it off, the console follows its attached terminals and lets
+current browser tasks finish before it shuts down. The terminal's own
+conversations remain local to the terminal. Terminal and standalone launches
+share one Web console; a standalone launch reports a conflict if its requested
+port, interface or password setting differs from the running console. A ready
+service can be managed without a terminal:
 
 ```sh
 neutrino background start     # detach the web console
@@ -87,10 +90,9 @@ browser.
 When a console is mounted by the terminal and the setting is off, the first
 browser to open it is offered **建议开启后台常驻，避免误触中断任务** with a
 highlighted **开启** and **取消**. Either answer consumes the invitation for
-that CLI run — a reload does not ask again. **开启** saves the setting for the
-next launch; the current console keeps running in-process until then. The
-invitation is never shown by a detached service (it is already in the
-background) or by a bare `neutrino web` server.
+that CLI run — a reload does not ask again. **开启** applies immediately to the
+current browser tasks. The invitation is never shown when residency is already
+on or by a bare `neutrino web` server.
 
 ## Using it from another device
 

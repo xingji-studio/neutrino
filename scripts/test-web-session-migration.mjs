@@ -50,7 +50,7 @@ const context = vm.createContext({
   tr: t,
   document: { createElement: () => new Element() },
   preferences: { clear() {} },
-  closeStream() {}, renderSidebar() {}, renderApproval() {}, renderPlanCard() {},
+  closeStream() {}, renderSidebar() {}, renderApproval() {}, renderPlanCard() {}, renderComposerAction() {},
   renderMessageList(messages) { rendered = messages; },
   resetMessagePane(text) { rendered = text; },
   firstUserMessage: messages => messages.find(message => message.role === "user")?.content,

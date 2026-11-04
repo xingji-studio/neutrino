@@ -107,9 +107,6 @@ interface ApiMessage {
 /** Drop a resumed conversation nobody touched for this long. */
 const IDLE_DISPOSE_MS = 30 * 60 * 1000;
 
-/** Upper bound on tool round-trips inside a single turn. */
-const MAX_TOOL_ROUNDS = 24;
-
 /** Placeholder shown while a tool is still running. */
 const TOOL_PENDING = "…";
 
@@ -789,8 +786,11 @@ export class WebSession implements LiveAgent {
     const tools = this.mode === "pro" ? getProToolDefinitions() : getToolDefinitions();
     const team = this.proTeam;
     try {
-      for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      while (true) {
         if (token !== this.turnToken || this.paused) return false;
+        // Match the terminal: long tasks can keep using tools until the model
+        // finishes, while older tool results are trimmed near the context limit.
+        apiMessages = this.trimApiMessages(apiMessages);
         const client = team ? team.client("main_model") : new LLMClient(this.model, this.provider, this.intensity);
         let text = "";
         this.streamingContent = "";
@@ -901,8 +901,6 @@ export class WebSession implements LiveAgent {
         }
         this.save();
       }
-      if (this.mode === "pro") this.messages.push({ role: "assistant", content: "[Error: Pro main agent reached its tool round limit before completion.]" });
-      return false;
     } catch (err) {
       if (token !== this.turnToken) return false;
       if (this.streamingContent) {
@@ -1069,6 +1067,23 @@ export class WebSession implements LiveAgent {
       if (capacity) return Math.max(1, Math.floor(capacity * 0.8));
     }
     return contextCompressionThreshold(this.provider, this.model, this.mode);
+  }
+
+  /** Trim old tool results in a long turn without changing the saved history. */
+  private trimApiMessages(apiMessages: ApiMessage[]): ApiMessage[] {
+    const threshold = this.compressThreshold();
+    if (threshold <= 0 || this.lastPromptTokens < threshold) return apiMessages;
+    const toolIdx: number[] = [];
+    for (let i = 0; i < apiMessages.length; i++) {
+      if (apiMessages[i].role === "tool") toolIdx.push(i);
+    }
+    const dropCount = toolIdx.length - COMPACT_KEEP;
+    if (dropCount <= 0) return apiMessages;
+    const copy = apiMessages.slice();
+    for (let k = 0; k < dropCount; k++) {
+      copy[toolIdx[k]] = { ...copy[toolIdx[k]], content: "[tool output omitted to save context]" };
+    }
+    return copy;
   }
 
   private async autoCompress(token: number): Promise<void> {

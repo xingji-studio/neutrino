@@ -30,7 +30,7 @@ import { createWebSession, proInitialSelection, resumeSession, WebSession } from
 import { defaultProPreset, requireProPreset } from "../pro/config.js";
 import { listAgentSessions, loadAgentMessages, loadAgentSession, safeAgentSessionId, type AgentId } from "../agents.js";
 import { migrateAgentSession, SessionMigrationError } from "../migration.js";
-import { runningBackground } from "../background.js";
+import { runningBackground, type BackgroundStatus, type BackgroundUpdate } from "../background.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // dist/web -> package root (mirrors the same trick used in config.ts).
@@ -67,7 +67,14 @@ export interface WebServerOptions {
    * Present only in the detached background service: the token that authorizes
    * `/api/background/{ping,stop}` and the callback that shuts the process down.
    */
-  backgroundService?: { token: string; onStop: () => void };
+  backgroundService?: {
+    token: string;
+    onStop: () => void;
+    status?: () => BackgroundStatus;
+    configure?: (update: BackgroundUpdate) => BackgroundStatus;
+  };
+  /** Keep service discovery in sync after a live LAN switch. */
+  onAddressChange?: () => void;
 }
 
 export interface WebServerHandle {
@@ -173,7 +180,8 @@ interface WebBinding {
   /** One-time background-residency prompt, consumed by the first browser. */
   prompt: { pending: boolean };
   /** Management token of the detached service, or absent in a terminal run. */
-  service?: { token: string; onStop: () => void };
+  service?: WebServerOptions["backgroundService"];
+  updateSettings(body: unknown, mode: Mode): Promise<void>;
 }
 
 /**
@@ -181,11 +189,22 @@ interface WebBinding {
  * is listening right now, so a run started with --lan shows as on even though
  * nothing was saved yet.
  */
+function validTerminalBridge(bridge: unknown, ownerPid: unknown): boolean {
+  if (!bridge || typeof bridge !== "object" || Array.isArray(bridge) || typeof ownerPid !== "number") return false;
+  const info = bridge as { url?: unknown; token?: unknown };
+  if (typeof info.url !== "string" || typeof info.token !== "string" || !/^[a-f0-9]{64}$/.test(info.token)) return false;
+  try {
+    const url = new URL(info.url);
+    return url.protocol === "http:" && url.hostname === "127.0.0.1" && Boolean(url.port)
+      && url.pathname === "/" && !url.username && !url.password && !url.search && !url.hash;
+  } catch { return false; }
+}
+
 function settingsPayload(mode: Mode, binding: WebBinding) {
   const payload = getWebSettings(mode);
   const lan = isWildcardHost(binding.host);
   const { urls } = webUrls(binding.host, binding.port);
-  const background = runningBackground();
+  const background = binding.service?.status?.() ?? runningBackground();
   return {
     ...payload,
     settings: {
@@ -196,7 +215,8 @@ function settingsPayload(mode: Mode, binding: WebBinding) {
       web_urls: lan ? urls.filter((url) => !url.includes("//127.0.0.1:")) : [],
       // The background service is a process, not a workspace: both pages report
       // the same state. The prompt is never shown once the setting is on.
-      background_running: Boolean(background),
+      background: background?.pid === process.pid ? background.resident : payload.settings.background,
+      background_running: background?.resident === true,
       background_url: background?.url ?? "",
       background_prompt: binding.prompt.pending && payload.settings.background !== true,
     },
@@ -695,7 +715,7 @@ async function handleApi(
   // Management endpoints of the detached service. They are called by the CLI
   // and the tray icon, which have the token from ~/.neutrino/background.json
   // but not necessarily a browser login cookie.
-  if (pathname === "/api/background/ping" || pathname === "/api/background/stop") {
+  if (["/api/background/ping", "/api/background/stop", "/api/background/configure"].includes(pathname)) {
     if (req.method !== "GET" && req.method !== "POST") {
       sendJson(res, 405, { error: "method not allowed" });
       return true;
@@ -710,6 +730,32 @@ async function handleApi(
     }
     if (pathname.endsWith("/ping")) {
       sendJson(res, 200, { ok: true, pid: process.pid, url: webUrls(binding.host, binding.port).url });
+      return true;
+    }
+    if (pathname.endsWith("/configure")) {
+      if (req.method !== "POST") {
+        sendJson(res, 405, { error: "method not allowed" });
+        return true;
+      }
+      if (!binding.service.configure) {
+        sendJson(res, 409, { error: "Restart the console to update background residency." });
+        return true;
+      }
+      try {
+        const body = await readJsonBody(req, 4096) as BackgroundUpdate;
+        if (!body || typeof body !== "object" || Array.isArray(body)
+          || Object.keys(body).some(key => key !== "resident" && key !== "ownerPid" && key !== "bridge")
+          || (body.resident !== undefined && typeof body.resident !== "boolean")
+          || (body.ownerPid !== undefined && (!Number.isSafeInteger(body.ownerPid) || body.ownerPid <= 0))
+          || (body.bridge !== undefined && !validTerminalBridge(body.bridge, body.ownerPid))) {
+          throw new Error("invalid background settings");
+        }
+        const updated = binding.service.configure(body);
+        if (updated.resident) binding.prompt.pending = false;
+        sendJson(res, 200, updated);
+      } catch (error) {
+        sendJson(res, 400, { error: error instanceof Error ? error.message : "invalid background settings" });
+      }
       return true;
     }
     sendJson(res, 200, { ok: true, stopping: true });
@@ -769,39 +815,14 @@ async function handleApi(
         sendJson(res, 403, { error: "cross-origin request rejected" });
         return true;
       }
-      const wasLan = loadConfig(mode).web_lan === true;
       try {
         const body = await readJsonBody(req);
-        updateWebSettings(body, mode);
-        // `web_lan` is both a saved preference and a live switch: apply it to
-        // the socket now so the console starts or stops answering on the LAN
-        // without a restart. Other settings never move the listener, and an
-        // explicit --host still decides the interface until this is changed.
-        const patch = (body as { settings?: Record<string, unknown> } | null)?.settings;
-        const desired = patch && Object.prototype.hasOwnProperty.call(patch, "web_lan")
-          ? patch.web_lan === true
-          : isWildcardHost(binding.host);
-        if (desired !== isWildcardHost(binding.host)) {
-          await binding.setHost(desired ? WILDCARD_HOST : LOOPBACK_HOST);
-        }
-        // Turning background residency on answers the prompt by definition.
-        if (patch?.background === true) binding.prompt.pending = false;
+        await binding.updateSettings(body, mode);
         if ((body as { settings?: { web_password?: unknown } }).settings?.web_password !== undefined) {
           auth.remember(res);
         }
         sendJson(res, 200, settingsPayload(mode, binding));
       } catch (err) {
-        // A switch that could not bind must not pretend the socket moved:
-        // restore the saved preference so the file matches what is running.
-        if ((loadConfig(mode).web_lan === true) !== wasLan) {
-          try {
-            const config = loadConfig(mode);
-            config.web_lan = wasLan;
-            saveConfig(config, mode);
-          } catch {
-            // Reporting the original failure matters more than the rollback.
-          }
-        }
         sendJson(res, (err as NodeJS.ErrnoException)?.code ? 500 : 400, {
           error: err instanceof Error ? err.message : "invalid settings",
         });
@@ -1073,11 +1094,19 @@ async function handleApi(
     // Already running (TUI or another tab)? Attach instead of duplicating.
     const existing = hub.list(mode).find((entry) => entry.sessionId === id);
     if (existing) {
-      if (preset !== undefined) {
+      const remote = hub.remoteAction(existing.key);
+      if (remote && preset !== undefined) {
+        const result = await remote("pro-preset", { preset });
+        if (result.status !== 200) { sendJson(res, result.status, result.data); return true; }
+      } else if (remote && selection) {
+        const result = await remote("model", { provider: selection.provider, model: selection.model.name, intensity: selection.intensity });
+        if (result.status !== 200) { sendJson(res, result.status, result.data); return true; }
+      }
+      if (!remote && preset !== undefined) {
         const changed = hub.setProPreset(existing.key, preset);
         if (!changed.ok) { sendJson(res, 409, { error: changed.error }); return true; }
       }
-      if (selection) {
+      if (!remote && selection) {
         const changed = hub.configure(existing.key, selection);
         if (!changed.ok) {
           sendJson(res, 409, { error: changed.error });
@@ -1145,6 +1174,22 @@ async function handleApi(
       }
       if (!hub.has(key, mode)) {
         sendJson(res, 404, { error: "unknown live session" });
+        return true;
+      }
+      const remote = hub.remoteAction(key);
+      if (remote) {
+        if (action === "close") {
+          sendJson(res, 400, { error: "this session is owned by the terminal UI" });
+          return true;
+        }
+        try {
+          const body = ["approve", "approval-mode", "message", "model", "pro-preset"].includes(action)
+            ? await readJsonBody(req) : {};
+          const result = await remote(action, body);
+          sendJson(res, result.status, result.data);
+        } catch (error) {
+          sendJson(res, 400, { error: error instanceof Error ? error.message : "invalid request" });
+        }
         return true;
       }
       if (action === "pro-preset") {
@@ -1327,6 +1372,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
     setHost: (next) => rebind(next),
     prompt: { pending: options.backgroundPrompt === true },
     service: options.backgroundService,
+    updateSettings: (body, mode) => updateSettings(body, mode),
   };
 
   const server = http.createServer((req, res) => {
@@ -1376,6 +1422,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
     handle.port = port;
     handle.url = address.url;
     handle.urls = address.urls;
+    options.onAddressChange?.();
   };
 
   // Two tabs saving at once must not interleave close/listen on one socket.
@@ -1411,6 +1458,43 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
       syncAddress();
     });
     switches = task.catch(() => undefined);
+    return task;
+  }
+
+  // Serialize saves from both workspaces so a failed switch cannot roll back
+  // another tab's successful change.
+  let settingsChanges: Promise<void> = Promise.resolve();
+  function updateSettings(body: unknown, mode: Mode): Promise<void> {
+    const task = settingsChanges.then(async () => {
+      const previous = loadConfig(mode);
+      const wasHost = binding.host;
+      try {
+        updateWebSettings(body, mode);
+        const patch = (body as { settings?: Record<string, unknown> } | null)?.settings;
+        const desiredHost = patch && Object.prototype.hasOwnProperty.call(patch, "web_lan")
+          ? patch.web_lan === true ? WILDCARD_HOST : LOOPBACK_HOST
+          : binding.host;
+        if (desiredHost !== binding.host) await binding.setHost(desiredHost);
+        if (patch && Object.prototype.hasOwnProperty.call(patch, "background")) {
+          if (!binding.service?.configure) {
+            throw new Error("Background residency could not be applied. Restart the console and try again.");
+          }
+          binding.service.configure({ resident: patch.background === true });
+          if (patch.background === true) binding.prompt.pending = false;
+        }
+      } catch (error) {
+        // A failed lifetime or address change must not look saved or active.
+        if (binding.host !== wasHost) {
+          try { await binding.setHost(wasHost); } catch { /* Report the original failure. */ }
+        }
+        const config = loadConfig(mode);
+        config.web_lan = previous.web_lan;
+        config.background = previous.background;
+        try { saveConfig(config, mode); } catch { /* Report the original failure. */ }
+        throw error;
+      }
+    });
+    settingsChanges = task.catch(() => undefined);
     return task;
   }
 

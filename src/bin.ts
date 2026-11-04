@@ -1,15 +1,13 @@
 #!/usr/bin/env node
 import process from "node:process";
-import { randomBytes } from "node:crypto";
 import { App } from "./app.js";
 import { loadConfig } from "./config.js";
 import { installCrashGuard } from "./terminal/restore.js";
-import { startWebServer, webUrls, type WebServerHandle } from "./web/server.js";
+import { webUrls } from "./web/server.js";
 import {
-  backgroundLog, clearBackgroundStatus, runningBackground, startBackgroundService, stopBackgroundService,
-  writeBackgroundStatus, type BackgroundStatus,
+  runningBackground, startBackgroundService, stopBackgroundService, type BackgroundStatus,
 } from "./background.js";
-import { startBackgroundTray } from "./tray.js";
+import { runWebService } from "./web/service.js";
 import { openInBrowser } from "./browser.js";
 
 const DEFAULT_WEB_PORT = 8765;
@@ -76,9 +74,9 @@ permanent password (default: 114514). Change it in Settings. --no-auth disables
 password login.
 
 Background residency is off by default. Turn it on in Settings → Background
-(shared by the regular and Pro workspaces); the next CLI launch then starts the
-console as a detached process, and this terminal only prints its address. The
-background service keeps running when this terminal closes, so tasks started
+(shared by the regular and Pro workspaces). Switching it takes effect immediately,
+including for browser tasks already running. The background service keeps
+running when this terminal closes, so tasks started
 from the browser are not interrupted. Stop it with 'neutrino background stop',
 the tray icon, or Settings → Web console in the terminal.
 `,
@@ -183,44 +181,26 @@ function parseArgs(argv: string[]): Options {
   return options;
 }
 
-/** Print every address a client can open, plus what it takes to open one. */
-function reportAccess(handle: WebServerHandle): void {
-  process.stdout.write(`Neutrino web UI listening on ${handle.host}:${handle.port}\n`);
-  const multiple = handle.urls.length > 1;
-  process.stdout.write(multiple ? "Open the address that matches your device:\n" : "Open:\n");
-  for (const url of handle.urls) process.stdout.write(`  ${url}\n`);
-  const wildcard = handle.host === "0.0.0.0" || handle.host === "::";
-  if (wildcard && !handle.urls.some((url) => !url.includes("//127.0.0.1:"))) {
-    // Bound to every interface, yet nothing outside this machine is reachable:
-    // usually Wi-Fi is off, the VPN is down, or the only adapters left are
-    // virtual ones we deliberately hide.
-    process.stdout.write(
-      "note: no reachable network address found, so only this machine can connect.\n",
-    );
-  }
-  if (handle.authRequired) {
-    process.stdout.write("Sign in with your permanent Web password (default: 114514). Change it in Settings.\n");
-  } else {
-    process.stdout.write("Password login is disabled.\n");
-  }
-}
-
 /** Print where an already-running detached console can be opened. */
 function reportBackgroundAccess(status: BackgroundStatus, started: boolean): void {
   process.stdout.write(
-    `Neutrino background Web console ${started ? "started" : "already running"} `
+    `Neutrino ${status.resident ? "background " : ""}Web console ${started ? "started" : "already running"} `
       + `(pid ${status.pid}) on ${status.host}:${status.port}\n`,
   );
   const { urls } = webUrls(status.host, status.port);
   const multiple = urls.length > 1;
   process.stdout.write(multiple ? "Open the address that matches your device:\n" : "Open:\n");
   for (const url of urls) process.stdout.write(`  ${url}\n`);
+  if ((status.host === "0.0.0.0" || status.host === "::")
+    && !urls.some((url) => !url.includes("//127.0.0.1:"))) {
+    process.stdout.write("note: no reachable network address found, so only this machine can connect.\n");
+  }
   if (status.auth_required) {
     process.stdout.write("Sign in with your permanent Web password (default: 114514).\n");
   } else {
     process.stdout.write("Password login is disabled.\n");
   }
-  if (started) {
+  if (status.resident) {
     process.stdout.write(
       "It keeps running after this terminal exits. Stop it with 'neutrino background stop'"
         + (process.platform === "win32" ? " or the tray icon" : "") + ".\n",
@@ -236,77 +216,7 @@ function reportBackgroundAccess(status: BackgroundStatus, started: boolean): voi
  * file is the only way another local process can ask it to stop.
  */
 async function runBackgroundService(host: string | undefined, auth: boolean): Promise<void> {
-  installCrashGuard({ surviveHangup: true });
-  const port = options.port ?? portFromEnv ?? DEFAULT_WEB_PORT;
-  const token = String(process.env.NEUTRINO_BACKGROUND_TOKEN ?? "").trim()
-    || randomBytes(32).toString("hex");
-  let handle: WebServerHandle | null = null;
-  let stopping = false;
-
-  const shutdown = (): void => {
-    if (stopping) return;
-    stopping = true;
-    backgroundLog(`stopping pid=${process.pid}`);
-    clearBackgroundStatus(process.pid);
-    const finish = (): void => process.exit(0);
-    if (handle) handle.close().finally(finish).catch(finish);
-    else finish();
-    // Never hang on a wedged socket while shutting down.
-    setTimeout(finish, 3000).unref?.();
-  };
-
-  try {
-    handle = await startWebServer({
-      port,
-      host,
-      auth,
-      backgroundPrompt: false,
-      backgroundService: { token, onStop: shutdown },
-    });
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    backgroundLog(`failed to start pid=${process.pid}: ${detail}`);
-    process.stderr.write(`neutrino: failed to start the background Web console: ${detail}\n`);
-    process.exit(1);
-    return;
-  }
-
-  const status: BackgroundStatus = {
-    pid: process.pid,
-    port: handle.port,
-    host: handle.host,
-    url: handle.url,
-    auth_required: auth,
-    token,
-    started_at: new Date().toISOString(),
-  };
-  try {
-    writeBackgroundStatus(status);
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    backgroundLog(`failed to write status pid=${process.pid}: ${detail}`);
-    process.stderr.write(`neutrino: could not record the background service: ${detail}\n`);
-    await handle.close();
-    process.exit(1);
-    return;
-  }
-  backgroundLog(`started pid=${process.pid} on ${handle.url}`);
-  reportAccess(handle);
-  process.stdout.write("Background service is running. Press Ctrl+C or use 'neutrino background stop'.\n");
-  if (!options.noTray) {
-    startBackgroundTray({
-      url: handle.url,
-      stopUrl: `${handle.url}/api/background/stop`,
-      token,
-      pid: process.pid,
-    });
-  }
-
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
-  // Detached processes normally have no controlling terminal, but keep the
-  // service alive if a POSIX shell still forwards its hangup.
-  if (process.platform !== "win32") process.on("SIGHUP", shutdown);
+  await runWebService({ port: options.port ?? portFromEnv ?? DEFAULT_WEB_PORT, host, auth, tray: !options.noTray });
 }
 
 function printBackgroundStatus(): void {
@@ -317,6 +227,7 @@ function printBackgroundStatus(): void {
     return;
   }
   process.stdout.write(`Neutrino background service: running (pid ${status.pid})\n`);
+  process.stdout.write(`Residency: ${status.resident ? "on" : "off (follows the terminal)"}\n`);
   process.stdout.write(`Started: ${status.started_at}\n`);
   process.stdout.write(`Address: ${status.url}\n`);
   const { urls } = webUrls(status.host, status.port);
@@ -346,22 +257,22 @@ const auth = !options.noAuth;
 const portFromEnv = envPort();
 
 if (options.mode === "web") {
-  // Headless: serve the saved history (and any live sessions in this process,
-  // which for a standalone server is none).
-  const port = options.port ?? portFromEnv ?? DEFAULT_WEB_PORT;
-  try {
-    const handle = await startWebServer({ port, host, auth });
-    reportAccess(handle);
-    process.stdout.write("Serving saved conversations. Press Ctrl+C to stop.\n");
-    const shutdown = () => {
-      handle.close().finally(() => process.exit(0));
-    };
-    process.on("SIGINT", shutdown);
-    process.on("SIGTERM", shutdown);
-  } catch (err) {
-    process.stderr.write(`neutrino: failed to start web server: ${err instanceof Error ? err.message : String(err)}\n`);
+  const result = await startBackgroundService({
+    port: options.port ?? portFromEnv ?? DEFAULT_WEB_PORT, host, auth,
+    tray: !options.noTray, resident: loadConfig().background === true, ownerPid: process.pid,
+    strictPort: options.port !== null,
+  });
+  if (!result.ok) {
+    process.stderr.write(`neutrino: failed to start web server: ${result.error}\n`);
     process.exit(1);
   }
+  reportBackgroundAccess(result.status, result.started);
+  process.stdout.write("Serving saved conversations. Press Ctrl+C to close this terminal.\n");
+  // The owner monitor in the service also handles an abrupt terminal close.
+  const keepAlive = setInterval(() => {}, 60_000);
+  const shutdown = (): void => { clearInterval(keepAlive); process.exit(0); };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 } else if (options.mode === "background") {
   const action = options.backgroundAction ?? "status";
   if (action === "run") {
@@ -390,23 +301,19 @@ if (options.mode === "web") {
     process.stdout.write(result.stopped ? "Background service stopped.\n" : "No background service is running.\n");
     process.exitCode = 0;
   } else if (action === "open") {
-    let status = runningBackground();
-    if (!status) {
-      const started = await startBackgroundService({
-        port: options.port ?? portFromEnv ?? DEFAULT_WEB_PORT,
-        host,
-        auth,
-        tray: !options.noTray,
-      });
-      if (!started.ok) {
-        process.stderr.write(`neutrino: ${started.error}\n`);
-        process.exit(1);
-      }
-      status = started.status;
-      reportBackgroundAccess(status, started.started);
+    const started = await startBackgroundService({
+      port: options.port ?? portFromEnv ?? DEFAULT_WEB_PORT,
+      host,
+      auth,
+      tray: !options.noTray,
+    });
+    if (!started.ok) {
+      process.stderr.write(`neutrino: ${started.error}\n`);
+      process.exit(1);
     }
-    openInBrowser(status.url);
-    process.stdout.write(`Opening ${status.url}\n`);
+    if (started.started) reportBackgroundAccess(started.status, true);
+    openInBrowser(started.status.url);
+    process.stdout.write(`Opening ${started.status.url}\n`);
     process.exitCode = 0;
   } else {
     printBackgroundStatus();
@@ -422,61 +329,22 @@ if (options.mode === "web") {
   const app = new App();
   const webPort = options.port ?? portFromEnv ?? DEFAULT_WEB_PORT;
   const saved = loadConfig();
-  const backgroundEnabled = saved.background === true;
-  // Remember where the UI should live even when it is off right now, so the
-  // Settings toggle can mount it without restarting the terminal. A console
-  // that runs in-process offers the background-residency prompt; a detached one
-  // is already in the background and never does.
-  app.configureWeb(webPort, host, auth, !backgroundEnabled);
+  app.configureWeb(webPort, host, auth, true, !options.noTray);
 
-  // Explicit web settings win over the saved preference; otherwise the web UI
-  // is part of a normal launch unless the user turned it off in Settings.
   const requested = options.port !== null || options.host !== undefined || options.lan
     || options.noAuth || portFromEnv !== null || Boolean(process.env.NEUTRINO_WEB_HOST);
-  const enabledByDefault = saved.web_console !== false;
-  if (!options.noWeb && (requested || enabledByDefault)) {
-    let attached = false;
-    const existing = runningBackground();
-    if (existing) {
-      // Never start a second listener on the same port: if a background
-      // service is already up, use it instead (even when the saved setting was
-      // turned off after that process started).
-      if (options.port !== null && existing.port !== webPort) {
-        process.stderr.write(
-          `note: a background Web console is already running on port ${existing.port}; --port was not applied.\n`,
-        );
+  if (!options.noWeb && (requested || saved.web_console !== false)) {
+    try {
+      const previous = runningBackground();
+      const status = await app.enableWeb(webPort, host, auth);
+      if (options.port !== null && options.port !== 0 && status.port !== webPort) {
+        process.stderr.write(`note: the Web console is already running on port ${status.port}; --port was not applied.\n`);
       }
-      app.attachBackground(existing);
-      reportBackgroundAccess(existing, false);
-      attached = true;
-    } else if (backgroundEnabled) {
-      const started = await startBackgroundService({
-        port: webPort,
-        host,
-        auth,
-        tray: !options.noTray,
-      });
-      if (started.ok) {
-        app.attachBackground(started.status);
-        reportBackgroundAccess(started.status, started.started);
-        attached = true;
-      } else {
-        // A failed detached start must not take the terminal down: fall back to
-        // the in-process console, exactly as if the setting were off.
-        process.stderr.write(`neutrino: background Web console not started: ${started.error}\n`);
-      }
-    }
-    if (!attached) {
-      try {
-        const handle = await app.enableWeb(webPort, host, auth);
-        reportAccess(handle);
-      } catch (err) {
-        // A console that cannot bind (usually a second instance on 8765) must
-        // never take the terminal down with it.
-        const detail = err instanceof Error ? err.message : String(err);
-        process.stderr.write(`neutrino: web UI not started: ${detail}\n`);
-        process.stderr.write("The terminal UI will keep running. Pass --port <port> to use another port, or --no-web to skip the web UI.\n");
-      }
+      reportBackgroundAccess(status, previous?.pid !== status.pid);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`neutrino: web UI not started: ${detail}\n`);
+      process.stderr.write("The terminal UI will keep running. Pass --port <port> to use another port, or --no-web to skip the web UI.\n");
     }
   }
   await app.start();

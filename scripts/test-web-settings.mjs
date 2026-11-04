@@ -172,11 +172,24 @@ try {
   const applied = [];
   let ui;
   let failApply = false;
+  let failBackground = false;
+  let holdBackground = null;
   ui = createSettingsUI({
     async apiFetch(_url, init) {
       try {
-        if (init.method === "POST") updateWebSettings(JSON.parse(init.body));
-        return { ok: true, json: async () => getWebSettings() };
+        if (init.method === "POST") {
+          const patch = JSON.parse(init.body);
+          if (typeof patch.settings?.background === "boolean") {
+            if (holdBackground) await holdBackground;
+            if (failBackground) throw new Error("background switch failed");
+          }
+          updateWebSettings(patch);
+        }
+        return { ok: true, json: async () => {
+          const data = getWebSettings();
+          data.settings.background_running = data.settings.background;
+          return data;
+        } };
       } catch (error) { return { ok: false, status: 400, json: async () => ({ error: error.message }) }; }
     },
     async applyModel(selection) {
@@ -230,6 +243,25 @@ try {
   node("settings-web-lan").checked = true;
   assert.equal(node("settings-background").checked, false, "background residency starts off");
   node("settings-background").checked = true;
+  failBackground = true;
+  await node("settings-background").fire("change");
+  assert.equal(node("settings-background").checked, false, "a failed switch restores the confirmed state");
+  assert.equal(loadConfig().background === true, false);
+  assert.match(node("settings-feedback").textContent, /background switch failed/);
+  failBackground = false;
+  let releaseBackground;
+  holdBackground = new Promise(resolve => { releaseBackground = resolve; });
+  node("settings-background").checked = true;
+  const pendingBackground = node("settings-background").fire("change");
+  assert.equal(node("settings-background").disabled, true);
+  assert.equal(node("settings-save").disabled, true);
+  assert.equal(loadConfig().background === true, false, "the switch is not reported as applied while pending");
+  releaseBackground();
+  await pendingBackground;
+  holdBackground = null;
+  assert.equal(loadConfig().background, true, "the background switch applies before Save");
+  assert.match(node("settings-feedback").textContent, /Background residency is on/);
+  assert.equal(node("settings-web-lan").checked, true, "the immediate switch keeps unsaved changes");
   await node("settings-form").fire("submit");
   assert.equal(loadConfig().selected_provider, a.provider);
   assert.equal(loadConfig().default_intensity, "Medium");
@@ -238,7 +270,6 @@ try {
   assert.equal(loadConfig().web_lan, true, "the LAN switch is saved with the other settings");
   assert.equal(loadConfig().background, true, "the background switch is saved with the other settings");
   assert.match(node("settings-feedback").textContent, /saved/);
-  assert.match(node("settings-feedback").textContent, /Background residency will start/);
   assert.match(node("settings-feedback").textContent, /LAN access is on/);
   await node("settings-cancel").fire("click");
   assert.equal(node("settings-dialog").open, false);
@@ -258,7 +289,10 @@ try {
     async fetch(url, init = {}) {
       browserRequests.push({ url, init });
       let data;
-      if (url === "/api/settings") data = getWebSettings();
+      if (url === "/api/settings") {
+        data = getWebSettings();
+        data.settings.background_running = data.settings.background;
+      }
       else if (url === "/api/overview") data = { groups: [], live: [] };
       else if (url === "/api/live/browser-live/model") {
         snapshot = { ...snapshot, ...JSON.parse(init.body) };
