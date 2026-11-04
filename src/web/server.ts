@@ -25,9 +25,10 @@ import { WebAuth } from "./auth.js";
 import { normalizeCwd, sameCwd } from "../cwd.js";
 import { hub, type LiveEntrySummary, type LiveSnapshot } from "./hub.js";
 import { writeCrashLog } from "../terminal/restore.js";
-import { createWebSession, proInitialSelection, resumeSession, type WebSession } from "./session.js";
+import { createWebSession, proInitialSelection, resumeSession, WebSession } from "./session.js";
 import { defaultProPreset, requireProPreset } from "../pro/config.js";
-import { listAgentSessions, loadAgentMessages, type AgentId } from "../agents.js";
+import { listAgentSessions, loadAgentMessages, loadAgentSession, safeAgentSessionId, type AgentId } from "../agents.js";
+import { migrateAgentSession, SessionMigrationError } from "../migration.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // dist/web -> package root (mirrors the same trick used in config.ts).
@@ -264,7 +265,6 @@ function sendApiError(res: http.ServerResponse, error: unknown): void {
 
 const MAX_RECENT_WORKSPACES = 12;
 const AGENT_IDS = new Set<AgentId>(["claude", "codex", "opencode"]);
-const AGENT_SESSION_ID_RE = /^[A-Za-z0-9._-]{1,200}$/;
 
 /** Expand `~` and require an absolute path; used by every folder route. */
 function absolutePath(raw: unknown): string {
@@ -421,10 +421,6 @@ function createFolder(raw: unknown): string {
 
 function isAgentId(value: string): value is AgentId {
   return AGENT_IDS.has(value as AgentId);
-}
-
-function safeAgentSessionId(id: string): boolean {
-  return AGENT_SESSION_ID_RE.test(id) && !id.includes("..") && id !== "." && id !== "..";
 }
 
 /** Build the sidebar payload: the selected workspace's sessions grouped by directory. */
@@ -881,7 +877,7 @@ async function handleApi(
     return true;
   }
 
-  // Read-only history recorded by other agents (Claude Code, Codex, OpenCode).
+  // History recorded by other agents (Claude Code, Codex, OpenCode).
   const agentSessionsMatch = /^\/api\/agents\/([^/]+)\/sessions$/.exec(pathname);
   if (req.method === "GET" && agentSessionsMatch) {
     const agent = decodeURIComponent(agentSessionsMatch[1]);
@@ -906,7 +902,55 @@ async function handleApi(
       sendJson(res, 400, { error: "invalid session id" });
       return true;
     }
-    sendJson(res, 200, { agent, id, messages: loadAgentMessages(agent, id) });
+    const cwd = url.searchParams.get("cwd");
+    if (cwd) {
+      const source = loadAgentSession(agent, id, cwd);
+      if (!source) {
+        sendJson(res, 404, { error: "session not found in this working directory" });
+        return true;
+      }
+      sendJson(res, 200, { ...source, agent });
+    } else {
+      sendJson(res, 200, { agent, id, messages: loadAgentMessages(agent, id) });
+    }
+    return true;
+  }
+
+  const migrateMatch = /^\/api\/agents\/([^/]+)\/sessions\/([^/]+)\/migrate$/.exec(pathname);
+  if (migrateMatch) {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "method not allowed" });
+      return true;
+    }
+    if (!isSameOrigin(req)) {
+      sendJson(res, 403, { error: "cross-origin request rejected" });
+      return true;
+    }
+    const agent = decodeURIComponent(migrateMatch[1]);
+    const id = decodeURIComponent(migrateMatch[2]);
+    if (!isAgentId(agent) || !safeAgentSessionId(id)) {
+      sendJson(res, 400, { error: !isAgentId(agent) ? "unknown agent" : "invalid session id" });
+      return true;
+    }
+    try {
+      const body = await readJsonBody(req);
+      if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("invalid JSON body");
+      const input = body as Record<string, unknown>;
+      const cwd = existingDirectory(input.cwd ?? process.cwd());
+      const preset = mode === "pro" ? requireProPreset(input.pro_preset ?? defaultProPreset()) : undefined;
+      const selection = mode === "pro" ? proInitialSelection(preset)
+        : resolveModelSelection(input.selection ?? getWebSettings(mode).selection, false);
+      const migrated = migrateAgentSession(agent, id, cwd, {
+        provider: selection.provider, model: selection.model.name, intensity: selection.intensity,
+      }, mode, preset);
+      const session = new WebSession(migrated, selection.model, mode);
+      const key = session.start();
+      webSessions.set(key, session);
+      sendJson(res, 201, { ok: true, id: migrated.id, key, cwd, snapshot: hub.snapshot(key) });
+    } catch (err) {
+      if (err instanceof SessionMigrationError) sendJson(res, err.status, { error: err.message });
+      else sendApiError(res, err);
+    }
     return true;
   }
 

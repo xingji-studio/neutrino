@@ -340,14 +340,21 @@ try {
   // --- the login gate and password are shared with the regular console ----
   server = await startWebServer({ port: 0 });
   const base = server.url;
-  const loginRoute = (password) => fetch(`${base}/api/auth/login`, {
+  // Drain every response before closing the server. An unread HTML body can
+  // otherwise keep Node 18's HTTP connection alive as the page grows.
+  const consumed = async (pending) => {
+    const response = await pending;
+    await response.arrayBuffer();
+    return response;
+  };
+  const loginRoute = (password) => consumed(fetch(`${base}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ password }),
-  });
-  const withCookie = (route, cookie) => fetch(base + route, { headers: { Cookie: cookie } });
-  assert.equal((await fetch(`${base}/pro`)).status, 200, "the pro page stays public like /");
-  assert.equal((await fetch(`${base}/pro/api/overview`)).status, 401, "the pro API needs the shared login");
+  }));
+  const withCookie = (route, cookie) => consumed(fetch(base + route, { headers: { Cookie: cookie } }));
+  assert.equal((await consumed(fetch(`${base}/pro`))).status, 200, "the pro page stays public like /");
+  assert.equal((await consumed(fetch(`${base}/pro/api/overview`))).status, 401, "the pro API needs the shared login");
   const signedIn = await loginRoute("pro password 密码");
   assert.equal(signedIn.status, 200, "the password saved from pro settings signs in");
   const cookie = signedIn.headers.get("set-cookie").split(";")[0];
@@ -355,11 +362,11 @@ try {
   assert.equal((await withCookie("/api/overview", cookie)).status, 200, "one cookie opens both workspaces");
 
   // Changing the password in the Pro workspace changes it for the standard one.
-  const changed = await fetch(`${base}/pro/api/settings`, {
+  const changed = await consumed(fetch(`${base}/pro/api/settings`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Cookie: cookie },
     body: JSON.stringify({ settings: { web_password: "shared password 密码" } }),
-  });
+  }));
   assert.equal(changed.status, 200);
   assert.equal((await withCookie("/api/overview", cookie)).status, 401, "the old cookie is signed out");
   const replacement = changed.headers.get("set-cookie").split(";")[0];

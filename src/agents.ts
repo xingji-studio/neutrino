@@ -19,6 +19,11 @@ export interface AgentMessage {
   content: string;
 }
 
+export interface AgentSession extends AgentSessionMeta {
+  cwd: string;
+  messages: AgentMessage[];
+}
+
 const HOME = os.homedir();
 
 function parseJsonlLines(filePath: string): Record<string, unknown>[] {
@@ -177,10 +182,14 @@ function listClaude(cwd: string): AgentSessionMeta[] {
   return metas;
 }
 
-function loadClaude(id: string): AgentMessage[] {
+function loadClaude(id: string, cwd?: string): AgentMessage[] {
   for (const dir of claudeProjectDirs()) {
     const fp = path.join(dir, `${id}.jsonl`);
     if (!fs.existsSync(fp)) continue;
+    if (cwd) {
+      const recorded = claudeSessionCwd(fp);
+      if (recorded ? !sameCwd(recorded, cwd) : path.basename(dir).toLowerCase() !== claudeProjectKey(cwd)) continue;
+    }
     const out: AgentMessage[] = [];
     for (const o of parseJsonlLines(fp)) {
       if (o.type === "user") {
@@ -471,8 +480,21 @@ export function listAgentSessions(agent: AgentId, cwd: string = process.cwd()): 
   return listOpencode(cwd);
 }
 
-export function loadAgentMessages(agent: AgentId, id: string): AgentMessage[] {
-  if (agent === "claude") return loadClaude(id);
+export function loadAgentMessages(agent: AgentId, id: string, cwd?: string): AgentMessage[] {
+  if (!safeAgentSessionId(id)) return [];
+  if (agent === "claude") return loadClaude(id, cwd);
   if (agent === "codex") return loadCodex(id);
   return loadOpencode(id);
+}
+
+export function safeAgentSessionId(id: string): boolean {
+  return /^[A-Za-z0-9._-]{1,200}$/.test(id) && id !== "." && !id.includes("..");
+}
+
+/** Resolve the source in its project, including older Claude files without cwd. */
+export function loadAgentSession(agent: AgentId, id: string, cwd: string): AgentSession | null {
+  if (!safeAgentSessionId(id)) return null;
+  const meta = listAgentSessions(agent, cwd).find((session) => session.id === id);
+  if (!meta) return null;
+  return { ...meta, cwd, messages: loadAgentMessages(agent, id, cwd) };
 }

@@ -252,6 +252,9 @@ const el = {
   agentsList: document.getElementById("agents-list"),
   agentsFeedback: document.getElementById("agents-feedback"),
   agentsCwd: document.getElementById("agents-cwd"),
+  agentActions: document.getElementById("agent-actions"),
+  agentMigrate: document.getElementById("agent-migrate"),
+  agentMigrateFeedback: document.getElementById("agent-migrate-feedback"),
 };
 
 const state = {
@@ -272,6 +275,7 @@ const state = {
   fileData: null,
   // Last loaded read-only transcript from another agent.
   agentData: null,
+  agentMigration: null,
   // { key, path } | null — the working directory the sidebar is scoped to.
   workspace: storedWorkspace(),
   // Plan / usage card visibility and the plan it was opened for.
@@ -865,6 +869,7 @@ async function continueSession(id, selection = preferences.selectionForFile(id))
 
 function setComposerMode(mode) {
   state.composerMode = mode;
+  el.agentActions.classList.add("hidden");
   el.composer.classList.remove("hidden");
   el.input.placeholder = mode === "resume"
     ? tr("Continue this conversation…")
@@ -876,6 +881,7 @@ function setComposerMode(mode) {
 function hideComposer() {
   preferences.clear();
   el.composer.classList.add("hidden");
+  el.agentActions.classList.add("hidden");
   renderApproval(null);
 }
 
@@ -2192,7 +2198,7 @@ function renderAgentList(groups) {
         "</span>";
       item.addEventListener("click", () => {
         el.agentsDialog.close();
-        void selectAgentSession(group.id, session.id, session.title || "");
+        void selectAgentSession(group.id, session.id, session.title || "", group.cwd);
       });
       section.appendChild(item);
     }
@@ -2211,7 +2217,7 @@ async function openAgentsDialog() {
       const response = await apiFetch(`/api/agents/${agent.id}/sessions?cwd=${encodeURIComponent(cwd)}`, { cache: "no-store" });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(apiError(data, `HTTP ${response.status}`));
-      return { ...agent, sessions: Array.isArray(data.sessions) ? data.sessions : [] };
+      return { ...agent, cwd: data.cwd || cwd, sessions: Array.isArray(data.sessions) ? data.sessions : [] };
     }));
     el.agentsFeedback.textContent = "";
     renderAgentList(groups);
@@ -2238,11 +2244,53 @@ function renderAgentView(data) {
   renderApproval(null);
   renderPlanCard(null);
   hideComposer();
+  renderAgentMigration(data);
 }
 
-async function selectAgentSession(agent, id, title) {
+function renderAgentMigration(data) {
+  el.agentActions.classList.remove("hidden");
+  el.agentMigrate.disabled = Boolean(state.agentMigration) || !data.cwd || !data.messages?.length;
+  el.agentMigrate.textContent = state.agentMigration === state.selection ? tr("Migrating…") : tr("Migrate session");
+}
+
+async function migrateSelectedAgentSession() {
+  const selection = state.selection;
+  const source = state.agentData;
+  if (selection?.kind !== "agent" || !source?.cwd || !source.messages?.length || state.agentMigration) return;
+  state.agentMigration = selection;
+  el.agentMigrateFeedback.textContent = "";
+  renderAgentMigration(source);
+  try {
+    const payload = { cwd: source.cwd };
+    if (PRO_MODE) payload.pro_preset = currentProPreset();
+    const response = await apiFetch(`/api/agents/${encodeURIComponent(selection.agent)}/sessions/${encodeURIComponent(selection.id)}/migrate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(apiError(data, `HTTP ${response.status}`));
+    if (state.selection === selection) {
+      setWorkspace({ path: data.cwd });
+      await selectLive(data.key);
+      el.input.focus();
+    }
+    await loadOverview({ silent: true });
+  } catch (error) {
+    if (state.selection === selection) {
+      el.agentMigrateFeedback.textContent = tr("Could not migrate this session: {error}", { error: error.message });
+    }
+  } finally {
+    state.agentMigration = null;
+    if (state.selection?.kind === "agent" && state.agentData) renderAgentMigration(state.agentData);
+  }
+}
+
+async function selectAgentSession(agent, id, title, cwd) {
+  const scope = cwd || await agentsScopeCwd();
   closeStream();
-  state.selection = { kind: "agent", agent, id, title };
+  const selection = { kind: "agent", agent, id, title, cwd: scope };
+  state.selection = selection;
   state.snapshot = null;
   state.fileData = null;
   state.agentData = null;
@@ -2254,17 +2302,20 @@ async function selectAgentSession(agent, id, title) {
   renderApproval(null);
   renderPlanCard(null);
   hideComposer();
+  el.agentMigrateFeedback.textContent = "";
   el.title.textContent = tr("Loading…");
   el.sub.textContent = title || "";
   resetMessagePane(tr("Loading…"));
   setConversationView(true);
   try {
-    const response = await apiFetch(`/api/agents/${encodeURIComponent(agent)}/sessions/${encodeURIComponent(id)}`, { cache: "no-store" });
+    const response = await apiFetch(`/api/agents/${encodeURIComponent(agent)}/sessions/${encodeURIComponent(id)}?cwd=${encodeURIComponent(scope)}`, { cache: "no-store" });
     const data = await response.json().catch(() => ({}));
+    if (state.selection !== selection) return;
     if (!response.ok) throw new Error(apiError(data, `HTTP ${response.status}`));
-    state.agentData = { ...data, agent, cwd: state.agentData?.cwd || state.workspace?.path || "" };
+    state.agentData = { ...data, agent, cwd: data.cwd || scope };
     renderAgentView(state.agentData);
   } catch (error) {
+    if (state.selection !== selection) return;
     el.title.textContent = title || tr("Conversation");
     el.sub.textContent = tr("Could not load this session: {error}", { error: error.message });
     resetMessagePane(tr("Could not load this session: {error}", { error: error.message }));
@@ -2528,6 +2579,7 @@ el.workspaceAdd.addEventListener("click", () => {
   openFolderDialog({ start: state.workspace?.path || state.workspaces?.cwd || "", onPick: (path) => openWorkspace(path) });
 });
 el.agentsOpen.addEventListener("click", () => openAgentsDialog());
+el.agentMigrate.addEventListener("click", () => migrateSelectedAgentSession());
 el.agentsClose.addEventListener("click", () => el.agentsDialog.close());
 el.agentsDialog.addEventListener("cancel", (event) => {
   event.preventDefault();

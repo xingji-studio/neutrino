@@ -20,7 +20,7 @@ A CLI coding agent that lives in your terminal. Neutrino gives you an interactiv
 - **Plan-first turns** — before a request is answered, a planner agent splits it into ordered, independent steps ("model the case from box.png", "animate the camera: push in, orbit, pull back"), and the worker then executes those steps one at a time, top to bottom. Every step is a concrete deliverable, so later work is explicit instead of one vague instruction. See [Plan-first turns](#plan-first-turns).
 - **The step card** — click `ⓘ` in the chat header (or press `Ctrl+P`) to open the info card in the top-right corner. It lists the plan as a vertical timeline of nodes: the step being worked on is highlighted, steps still to come are lit, and finished steps are drawn dark with a tick. The same card shows prompt/completion/total token counts when no plan is running.
 - **Sub-agents** — independent work can be handed to a sub-agent: a second agent loop with its own context, its own tool calls and the same approval gate. Only its report comes back, so a survey that reads thirty files does not fill the conversation with thirty files. See [Sub-agents](#sub-agents).
-- **Agent history browser** — view past sessions from other CLI agents (Claude Code, Codex, OpenCode) directly from the history screen.
+- **Agent history browser** — view past sessions from other CLI agents (Claude Code, Codex, OpenCode), or migrate them into a new Neutrino conversation in the same working directory.
 - **Approval gate** — risky commands and paths outside the working directory need your sign-off. The header turns orange and reads **Request Approval**; press `Y` or `N`. Delete-class commands always ask, unless you explicitly granted full trust, and there is an opt-in reviewer agent for automatic decisions.
 - **Browser UI on by default** — every `neutrino` launch also mounts a local website at <http://127.0.0.1:8765> that lists every saved conversation grouped by working directory, streams the running one in real time, and lets you pause/resume it, send messages, start new conversations, open or create working directories, switch provider/model/intensity, edit every terminal setting, and switch the interface between English and 简体中文. Use `--port`/`--host` to move it, `--lan` to share it, or `--no-web` to keep the terminal only.
 - **Pro workspace** — click the orbit badge in the Web UI (or the **启用Pro模式** box under the terminal's status bar) to switch to an isolated workspace at `/pro`, introduced by a three-second animated wordmark. Pro coordinates eight model roles with a preset slider, mandatory planning, temporary per-role fallback and configurable recursion; only machine-wide settings (the Web password, approval policy and LAN binding) are shared. See [Pro workspace](#pro-workspace).
@@ -311,7 +311,7 @@ From the history screen, select **Open other Agent's history** to view past sess
 - **Codex** — reads `~/.codex/sessions` and `~/.codex/archived_sessions`.
 - **OpenCode** — reads the local SQLite database (`opencode.db`) via `node:sqlite` (requires Node.js **22.13+**; silently unavailable on older versions).
 
-Only sessions that were started in the current working directory are listed, so the history stays focused on the project you are in. These sessions are read-only; you can open them for review but not edit or delete.
+Only sessions that were started in the current working directory are listed, so the history stays focused on the project you are in. Open a session and click **迁移会话 / Migrate session** at the bottom right (or press `M` / `Enter` in the terminal) to copy its readable user/assistant text into a new Neutrino conversation. The copy is saved immediately, uses the same working directory and your current Neutrino model, and opens ready to continue chatting. The source transcript stays unchanged; foreign system prompts, tool records and non-text attachments are not imported.
 
 ## Web UI
 
@@ -551,6 +551,8 @@ node scripts/test-fetch.mjs      # verify streamed requests release aborts, retr
 node scripts/test-compact.mjs    # verify context-compression planning
 node scripts/test-history-fold.mjs # verify full-history retention, folding and resume
 node scripts/test-web-history.mjs  # verify browser history disclosures and streaming state
+node scripts/test-session-migration.mjs # verify foreign history conversion, terminal/HTTP actions and continuation
+node scripts/test-web-session-migration.mjs # verify migration UI, directory scope, retries and navigation races
 node scripts/test-web-default.mjs  # verify the web console starts and toggles by default
 node scripts/test-turn-fold.mjs    # verify folded turns keep their reply and every message
 node scripts/test-plan.mjs         # verify plan-first turns, step order, the step card and the fallback

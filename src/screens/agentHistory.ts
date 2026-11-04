@@ -101,8 +101,10 @@ export class AgentHistoryScreen extends Screen {
   private loadSelected(): void {
     if (this.selectedIdx < 0 || this.selectedIdx >= this.sessions.length) return;
     const s = this.sessions[this.selectedIdx];
-    const messages = loadAgentMessages(this.agent, s.id);
-    this.app.pushScreen(new AgentConversationScreen(`${this.label} · ${s.title || s.id}`, messages));
+    const messages = loadAgentMessages(this.agent, s.id, this.cwd);
+    this.app.pushScreen(new AgentConversationScreen(`${this.label} · ${s.title || s.id}`, messages, {
+      agent: this.agent, id: s.id, cwd: this.cwd,
+    }));
   }
 
   private buildRows(): void {

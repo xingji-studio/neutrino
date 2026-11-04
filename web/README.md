@@ -19,7 +19,7 @@ A small, dependency-free single page app that is served by the Neutrino CLI at
   access;
 - switch the interface between English and 简体中文, instantly and persistently;
 - open the same plan / token card as the terminal's `ⓘ`, clear a conversation,
-  delete a saved transcript, and review other agents' read-only history;
+  delete a saved transcript, and review or migrate other agents' history;
 - drive the running conversation: pause / resume the current turn and send new
   messages (they queue while the agent is busy);
 - pick up a saved conversation in the browser and keep chatting, even when no
@@ -272,6 +272,14 @@ the complete transcript in the conversation pane with a `read-only` badge. The
 sources are the same as the terminal's history browser; OpenCode requires Node.js
 22.13+ because it reads its SQLite database through `node:sqlite`.
 
+Click **Migrate session** at the bottom right of an opened transcript to convert
+its readable user/assistant text into a new, saved Neutrino conversation. The
+copy opens immediately in the same working directory, using the current
+Neutrino model (or the current Pro preset on `/pro`). The source is unchanged.
+Foreign system prompts, tool records and non-text attachments are not imported.
+The button is disabled while copying; a failed migration leaves the source open
+with an error so you can retry.
+
 ## Plan-first turns
 
 A browser-owned turn is planned before it runs, exactly like a turn in the
@@ -335,6 +343,7 @@ to know whether a conversation is driven by the terminal or by the server.
 | POST | `/api/session/:id/delete` | Delete a saved, non-running transcript |
 | GET | `/api/agents/:agent/sessions?cwd=…` | Read-only sessions from Claude Code / Codex / OpenCode |
 | GET | `/api/agents/:agent/sessions/:id` | Read-only messages of one other-agent session |
+| POST | `/api/agents/:agent/sessions/:id/migrate` | Copy a source in `cwd` into a saved native conversation and return its live key; accepts optional `selection` or Pro `pro_preset` |
 | GET | `/api/live/:key` | Snapshot of a live session |
 | GET | `/api/live/:key/stream` | SSE stream of a live session |
 | POST | `/api/live/:key/pause` | Pause the running turn |

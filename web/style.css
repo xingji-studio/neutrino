@@ -1372,6 +1372,26 @@ svg {
 
 /* --------------------------------------------------------------- composer */
 
+.agent-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 12px clamp(16px, 4vw, 40px) max(18px, env(safe-area-inset-bottom));
+}
+
+.agent-actions .form-feedback {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.agent-actions button {
+  flex-shrink: 0;
+}
+
 .composer {
   flex-shrink: 0;
   padding: 0 clamp(16px, 4vw, 40px) 18px;
