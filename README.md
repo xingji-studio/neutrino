@@ -1,42 +1,44 @@
 # XINGJI Neutrino
 
-A CLI coding agent that lives in your terminal. Neutrino gives you an interactive chat interface backed by LLMs, with built-in tool use (running commands, reading and writing files) so it can help you work on real projects.
+[English](./README-en.md) | **简体中文**
 
-## Features
+一个运行在终端中的 CLI 编程代理。Neutrino 提供由大语言模型驱动的交互式聊天界面，并内置工具调用能力（执行命令、读写文件），因此可以帮你处理真实项目。
 
-- **Interactive terminal UI** — logo screen, chat, model select, history, and settings screens.
-- **Full mouse support** — hover to highlight, click to select/open/position the cursor, wheel to scroll, right-click to go back (like OpenCode).
-- **Select & copy** — drag the mouse over any text (agent output, the input box, menus, …) to select it; releasing the button copies the selection to the clipboard (via OSC 52, with a native fallback). Holding the drag against the top or bottom edge of the log scrolls it, so one selection can run for as long as the whole conversation.
-- **Paste-friendly input** — like OpenCode, a pasted block has its newlines turned into spaces so it stays one line, and only a manually typed `Enter` submits the message.
-- **Faithful log rendering** — text in the chat log keeps its indentation, blank lines and column alignment; when a long tool-output line wraps, continuation lines stay indented instead of snapping back to the left margin.
-- **Scrollable context log** — a vertical scrollbar is drawn on the right edge of the chat (and the agent-conversation viewer) whenever the conversation is taller than the view. Scroll with the wheel, `PgUp`/`PgDn` or `↑`/`↓`, or grab the scrollbar with the mouse and drag it like in a GUI.
-- **LLM providers** — ships with DeepSeek, OpenAI, and Anthropic presets; works with any OpenAI-compatible endpoint.
-- **Tool calling** — the agent can run shell commands, read files, write files, and list directories in your working directory.
-- **Streaming responses** — token-by-token output with pause/resume (`ESC ESC`).
-- **Intensity control** — tune `temperature`/`top_p` from `Low` to `Ultra`, limited to the levels each model declares in `model.json`.
-- **Session history** — messages are saved before a turn starts, streamed replies are checkpointed every second, and tool calls/results are saved immediately. The history screen lists conversations started in the current working directory. Failed saves are shown in the terminal and browser UI.
-- **Auto-folding turns** — once a turn finishes, the work behind the reply (the thinking and the tool calls) folds into one summary line in both the terminal and the browser, while the answer itself always stays on screen. Click the line to read the whole round again; a turn with little to hide, or a long answer on its own, stays open. A turn stopped with `ESC ESC` is paused, not finished, so it stays open. Nothing is dropped: the transcript, the saved session and the model's context keep every message.
-- **Complete conversation history** — context compression keeps every original message and tool result on disk. The earlier portion starts collapsed in the terminal and browser; click **Earlier conversation** to expand it, including in reopened history. Model requests use a separate summary plus recent messages.
-- **Plan-first turns** — before a request is answered, a planner agent splits it into ordered, independent steps ("model the case from box.png", "animate the camera: push in, orbit, pull back"), and the worker then executes those steps one at a time, top to bottom. Every step is a concrete deliverable, so later work is explicit instead of one vague instruction. See [Plan-first turns](#plan-first-turns).
-- **The step card** — click `ⓘ` in the chat header (or press `Ctrl+P`) to open the info card in the top-right corner. It lists the plan as a vertical timeline of nodes: the step being worked on is highlighted, steps still to come are lit, and finished steps are drawn dark with a tick. The same card shows prompt/completion/total token counts when no plan is running.
-- **Sub-agents** — independent work can be handed to a sub-agent: a second agent loop with its own context, its own tool calls and the same approval gate. Only its report comes back, so a survey that reads thirty files does not fill the conversation with thirty files. See [Sub-agents](#sub-agents).
-- **Agent history browser** — view past sessions from other CLI agents (Claude Code, Codex, OpenCode) directly from the history screen.
-- **Approval gate** — risky commands and paths outside the working directory need your sign-off. The header turns orange and reads **Request Approval**; press `Y` or `N`. Delete-class commands always ask, unless you explicitly granted full trust, and there is an opt-in reviewer agent for automatic decisions.
-- **Browser UI on by default** — every `neutrino` launch also mounts a local website at <http://127.0.0.1:8765> that lists every saved conversation grouped by working directory, streams the running one in real time, and lets you pause/resume it, send messages, start new conversations, open or create working directories, switch provider/model/intensity, edit every terminal setting, and switch the interface between English and 简体中文. Use `--port`/`--host` to move it, `--lan` to share it, or `--no-web` to keep the terminal only.
-- **Pro workspace** — click the orbit badge in the Web UI (or the **启用Pro模式** box under the terminal's status bar) to switch to an isolated workspace at `/pro`, introduced by a three-second animated wordmark. Pro coordinates eight model roles with a preset slider, mandatory planning, temporary per-role fallback and configurable recursion; only machine-wide settings (the Web password, approval policy and LAN binding) are shared. See [Pro workspace](#pro-workspace).
+## 功能特性
 
-## Requirements
+- **交互式终端界面**——包含 Logo 页、聊天、模型选择、历史记录和设置页面。
+- **完整鼠标支持**——悬停高亮，点击选择/打开/定位光标，滚轮滚动，右键返回（与 OpenCode 类似）。
+- **选择与复制**——在任意文本（代理输出、输入框、菜单……）上拖动鼠标即可选中；松开按键后，选区会复制到剪贴板（通过 OSC 52，并提供原生回退方案）。将拖动保持在日志顶部或底部边缘可滚动日志，因此一次选择可以贯穿整段对话。
+- **粘贴友好的输入**——与 OpenCode 一样，粘贴的文本块会将换行符转换为空格以保持单行，只有手动键入的 `Enter` 才会发送消息。
+- **忠实的日志渲染**——聊天日志中的文本保留缩进、空行和列对齐；长工具输出换行时，续行会保持缩进，而不会退回到左侧页边距。
+- **可滚动的上下文日志**——当对话高度超过视图时，聊天区域（以及代理对话查看器）右边缘会绘制垂直滚动条。可用滚轮、`PgUp`/`PgDn` 或 `↑`/`↓` 滚动，也可以像 GUI 一样用鼠标抓住滚动条拖动。
+- **LLM 服务商**——内置 DeepSeek、OpenAI 和 Anthropic 预设；兼容任何 OpenAI 兼容端点。
+- **工具调用**——代理可以在你的工作目录中执行 shell 命令、读取文件、写入文件和列出目录。
+- **流式响应**——逐 token 输出，支持暂停/恢复（`ESC ESC`）。
+- **强度控制**——可在 `Low` 到 `Ultra` 之间调节 `temperature`/`top_p`，范围限于每个模型在 `model.json` 中声明的级别。
+- **会话历史**——消息会在回合开始前保存，流式回复每秒建立检查点，工具调用/结果会立即保存。历史记录页面列出在当前工作目录中开始的对话。保存失败会在终端和浏览器界面中显示。
+- **自动折叠回合**——回合结束后，回复背后的工作（思考和工具调用）会在终端和浏览器中折叠成一行摘要，而答案本身始终留在屏幕上。点击该行可重新展开整轮对话；没有多少内容可隐藏的回合，或本身很长的答案，会保持展开。用 `ESC ESC` 停止的回合处于暂停而非完成状态，因此保持展开。不会丢弃任何内容：对话记录、已保存会话和模型上下文都保留每条消息。
+- **完整对话历史**——上下文压缩会将每条原始消息和工具结果保留在磁盘上。较早部分在终端和浏览器中默认折叠；点击**更早的对话**可展开它，重新打开的历史记录中也是如此。模型请求则使用单独的摘要加上近期消息。
+- **先规划后执行的回合**——在回答请求之前，规划代理会先把它拆成有序、独立的步骤（“用 box.png 建模该案例”、“为相机制作动画：推近、环绕、拉远”），然后工作代理自上而下逐项执行这些步骤。每个步骤都是一项具体交付物，因此后续工作变得明确，而不是一条含糊的指令。参见[先规划后执行](#先规划后执行)。
+- **步骤卡片**——点击聊天标题栏中的 `ⓘ`（或按 `Ctrl+P`）可在右上角打开信息卡片。它把计划显示为纵向的节点时间线：正在处理的步骤高亮，尚未进行的步骤点亮，已完成的步骤以深色加对勾绘制。没有计划运行时，同一卡片会显示提示/补全/总 token 数。
+- **子代理**——独立工作可以交给子代理：一个拥有独立上下文、独立工具调用和相同审批关卡的第二个代理循环。只返回其报告，因此读取三十个文件的调研不会让对话里塞满三十个文件的内容。参见[子代理](#子代理)。
+- **代理历史记录浏览器**——可直接在历史记录页面查看其他 CLI 代理（Claude Code、Codex、OpenCode）的过往会话。
+- **审批关卡**——高风险命令和工作目录之外的路径需要你签字确认。标题栏会变成橙色并显示 **请求审批（Request Approval）**；按 `Y` 或 `N`。删除类命令始终会询问，除非你明确授予了完全信任；此外还有一个可选的审查代理用于自动决策。
+- **默认开启的浏览器界面**——每次启动 `neutrino` 时，也会在 <http://127.0.0.1:8765> 挂载一个本地网站，按工作目录列出所有已保存对话，实时流式显示正在运行的对话，并允许你暂停/恢复它、发送消息、开始新对话、打开或创建工作目录、切换服务商/模型/思考强度、编辑所有终端设置，以及在 English 和简体中文之间切换界面语言。用 `--port`/`--host` 修改它，用 `--lan` 共享它，或用 `--no-web` 只保留终端。
+- **Pro 工作区**——点击 Web 界面中的轨道徽标（或终端状态栏下方的 **启用Pro模式** 框）可切换到 `/pro` 处的隔离工作区，进入时会播放三秒的动态字标动画。Pro 通过预设滑块协调八个模型角色，强制规划，按角色临时降档，并可配置递归；只有机器级设置（Web 密码、审批策略和局域网绑定）是共享的。参见 [Pro 工作区](#pro-工作区)。
+
+## 环境要求
 
 - Node.js **>= 18.0.0**
-- An interactive terminal (TTY)
+- 一个交互式终端（TTY）
 
-## Installation
+## 安装
 
 ```sh
 npm install -g @xingjisoft/neutrino
 ```
 
-Or run from source:
+或从源码运行：
 
 ```sh
 git clone <repo-url> neutrino
@@ -46,433 +48,231 @@ npm run build
 npm link
 ```
 
-## Usage
+## 使用
 
 ```sh
 neutrino
 ```
 
-Type a message on the start screen and press `Enter` to begin a new chat.
-The browser UI is mounted at <http://127.0.0.1:8765> at the same time; see
-[Web UI](#web-ui) below for `--port`, `--lan` and `--no-web`.
+在开始界面输入消息并按 `Enter` 开始新对话。浏览器界面会同时挂载在 <http://127.0.0.1:8765>；关于 `--port`、`--lan` 和 `--no-web`，请参阅下方的 [Web 界面](#web-界面)。
 
-### Keys
+### 快捷键
 
-| Keys | Action |
+| 按键 | 操作 |
 | --- | --- |
-| `Enter` | Send message / confirm (only a manually typed Enter sends) |
-| `←`/`→`, `↑`/`↓` | Move focus / navigate |
-| `Ctrl+E` | Open model config |
-| `Ctrl+B` | Back to menu (from chat) |
-| `Ctrl+L` | Clear conversation (from chat) |
-| `Esc Esc` | Pause / resume streaming (a paused turn stays open: only a finished reply folds) |
-| `Esc` | Clear an active selection |
-| `PgUp` / `PgDn` | Scroll chat history |
-| `Ctrl+C` | Do nothing while text is selected; otherwise pause the running conversation or show the exit hint at the top |
-| `Ctrl+C` × 3 | Quit after three consecutive presses, no more than 1.5 seconds apart (another key, paste, click or scroll resets the count) |
-| `Ctrl+Shift+C` | Quit immediately (requires the terminal to forward the shortcut) |
-| `Ctrl+A` | Toggle Request Approval / Auto Approval in a conversation |
-| `Ctrl+P` | Toggle the plan / token info card in the top-right corner |
-| `Y` | Approve the pending request (while the approval card is up) |
-| `N` / `Esc` | Deny the pending request |
-| `Ctrl+Q` | Quit |
+| `Enter` | 发送消息 / 确认（只有手动键入的 Enter 才会发送） |
+| `←`/`→`、`↑`/`↓` | 移动焦点 / 导航 |
+| `Ctrl+E` | 打开模型配置 |
+| `Ctrl+B` | 返回菜单（在聊天中） |
+| `Ctrl+L` | 清空对话（在聊天中） |
+| `Esc Esc` | 暂停 / 恢复流式输出（暂停的回合保持展开：只有已完成的回复才会折叠） |
+| `Esc` | 清除当前选区 |
+| `PgUp` / `PgDn` | 滚动聊天历史 |
+| `Ctrl+C` | 有文本被选中时不做任何事；否则暂停正在运行的对话，或在顶部显示退出提示 |
+| `Ctrl+C` × 3 | 连续按三次退出，每次间隔不超过 1.5 秒（按其他键、粘贴、点击或滚动会重置计数） |
+| `Ctrl+Shift+C` | 立即退出（需要终端转发该快捷键） |
+| `Ctrl+A` | 在对话中切换请求审批 / 自动审批 |
+| `Ctrl+P` | 切换右上角的计划 / token 信息卡片 |
+| `Y` | 批准待处理请求（审批卡片出现时） |
+| `N` / `Esc` | 拒绝待处理请求 |
+| `Ctrl+Q` | 退出 |
 
-### Mouse
+### 鼠标
 
-| Action | Effect |
+| 操作 | 效果 |
 | --- | --- |
-| Hover over an item | Highlight / select it in lists and menus |
-| Click an item | Select and confirm (open a screen, load a session, apply a setting…) |
-| Click the input box | Focus it and place the cursor at the clicked position |
-| Click a folded turn | Expand the complete round, or fold it again |
-| Click `⚙ tool` | Expand or collapse a tool call's output |
-| Click and drag | Select text under the rectangle; releasing copies it to the clipboard |
-| Drag onto the first/last row of the log | Scroll the log a line at a time (faster the longer you hold it) and keep growing the selection past the screen |
-| Click the header (left of `ⓘ`) | Open the model selector |
-| Click `ⓘ` (chat header) | Toggle the plan / token info card |
-| Drag the scrollbar | Grab the thumb on the right edge of the chat/log and drag it to scroll |
-| Scroll wheel | Scroll the chat/log, or move through lists |
-| Right-click | Go back (like `Esc`) |
+| 悬停条目 | 在列表和菜单中高亮 / 选中该项 |
+| 点击条目 | 选择并确认（打开页面、加载会话、应用设置……） |
+| 点击输入框 | 聚焦输入框并将光标放到点击位置 |
+| 点击折叠的回合 | 展开完整的一轮，或再次折叠 |
+| 点击 `⚙ tool` | 展开或折叠工具调用的输出 |
+| 点击并拖动 | 选中矩形范围内的文本；松开后复制到剪贴板 |
+| 拖到日志首行/末行 | 逐行滚动日志（按住越久越快），并让选区继续延伸到屏幕之外 |
+| 点击标题栏（`ⓘ` 左侧） | 打开模型选择器 |
+| 点击 `ⓘ`（聊天标题栏） | 切换计划 / token 信息卡片 |
+| 拖动滚动条 | 抓住聊天/日志右边缘的滑块并拖动以滚动 |
+| 滚轮 | 滚动聊天/日志，或在列表中移动 |
+| 右键 | 返回（等同于 `Esc`） |
 
-The selection highlight is drawn over whatever is on screen, so it works uniformly on the chat log, the input box and every menu. Selected text is copied with trailing whitespace trimmed per line (shell-style), so it can be pasted straight back into a terminal. UI chrome (such as the scrollbar) is skipped when copying and highlighting, so a copy never picks up the bar or the padding in front of it.
+选择高亮绘制在屏幕内容之上，因此在聊天日志、输入框和每个菜单上表现一致。复制选中文本时，会按行去掉行尾空白（shell 风格），因此可以直接粘贴回终端。复制和高亮时会跳过 UI 装饰（例如滚动条），所以复制内容永远不会带上滚动条或它前面的填充。
 
-A drag that scrolls keeps its starting point anchored to the line it began on,
-not to the row it began on: the mark stays on the edge that is scrolling, the
-highlight stops at the log's edge instead of spilling into the header or the
-input box, and the copy includes the lines that scrolled out of view. Scroll back
-and the selection shrinks again; press `Esc` to drop it.
+拖动滚动时，选区起点会固定在其开始时所在的那一行内容上，而不是当时所在的屏幕行：标记会留在正在滚动的一侧边缘，高亮停在日志边缘而不会溢出到标题栏或输入框，复制内容也包含已经滚出可视区域的行的内容。往回滚动时选区会缩小；按 `Esc` 取消选区。
 
-## Plan-first turns
+## 先规划后执行
 
-A request is answered in two passes. A **planner agent** first turns the message
-into an ordered list of independent steps; a **worker agent** then executes
-exactly one step per pass, from the top down. Each step names one deliverable, so
-a long request stops being a single vague instruction and becomes a sequence of
-concrete, verifiable ones. The plan is written into the conversation as a
-message and saved with the session, so the steps of a reopened conversation are
-still there.
+一个请求分两遍回答。**规划代理**首先把消息转换为一个有序的独立步骤列表；**工作代理**随后自上而下、每遍只执行一个步骤。每个步骤都对应一项交付物，因此长请求不再是一条含糊的指令，而是一系列具体、可验证的任务。计划会作为一条消息写入对话并随会话保存，因此重新打开对话时步骤仍然存在。
 
-The steps are also listed in the `ⓘ` card in the top-right corner of the chat —
-click it, or press `Ctrl+P`:
+这些步骤也会列在聊天右上角的 `ⓘ` 卡片中——点击它，或按 `Ctrl+P`：
 
-- nodes run top to bottom in execution order, joined by a connector,
-- the step being worked on is the highlighted row,
-- steps still to come are lit, and
-- finished steps are drawn dark with a tick; a failed one is marked in red.
+- 节点按执行顺序自上而下排列，并由连接线相连，
+- 正在处理的步骤是当前高亮行，
+- 尚未进行的步骤会被点亮，
+- 已完成的步骤以深色加对勾绘制；失败的步骤标为红色。
 
-The card opens by itself as soon as a plan is written, and closing it loses
-nothing: `Ctrl+P` brings it back. On a short terminal the card shows a window
-around the running step and counts the steps above and below it.
+计划一写入，卡片就会自动打开；关闭它也不会丢失任何内容：按 `Ctrl+P` 即可重新打开。在较矮的终端中，卡片会显示当前步骤附近的窗口，并统计其上方和下方的步骤数。
 
-A step that fails stops the plan: the remaining steps stay pending and the next
-message can re-plan them. A turn paused with `Esc Esc` stops the plan and marks
-it **stopped**, so no step keeps looking live. When no usable plan comes back —
-a single-action request, a provider error, an answer that is not a plan — the
-turn runs in one pass exactly as before, so planning is never a new way to fail.
+某个步骤失败会终止计划：其余步骤保持待处理，下一条消息可以重新规划它们。用 `Esc Esc` 暂停的回合会停止计划并标记为 **stopped**，因此不会有步骤继续显示为运行中。当没有返回可用的计划时——单动作请求、服务商错误、返回内容不是计划——该回合会像以前一样一次性执行，因此规划绝不会成为新的失败来源。
 
-**Simple requests are not planned at all.** Planning costs a model round-trip
-before any work starts, and for "把这个变量改名" that round-trip is pure friction.
-A request is planned only when it shows a reason to be split:
+**简单请求完全不会进入规划。** 规划会在任何工作开始前消耗一次模型往返，而对于“把这个变量改名”这类请求，这次往返纯属摩擦。只有当请求显示出需要拆分的理由时才会进行规划：
 
-| Signal | Example |
+| 信号 | 示例 |
 | --- | --- |
-| More than one thing to do | `先改配置，再更新文档`, `运行测试，并且把报错修掉` |
-| Its own structure | a numbered or bulleted list |
-| It reads as a brief | longer than about 180 columns |
-| It asks for a plan | `列个计划`, `plan`, `steps` |
+| 不止一件事要做 | `先改配置，再更新文档`, `运行测试，并且把报错修掉` |
+| 本身的结构 | 编号列表或项目符号列表 |
+| 读起来像任务简报 | 超过约 180 列 |
+| 要求给出计划 | `列个计划`, `plan`, `steps` |
 
-Everything else runs in one pass: no planner call, no plan card, and the agent
-still names the steps it is taking inside its own answer. The check lives in
-`needsPlan()` in `src/llm/plan.ts`.
+其他所有请求都一次性执行：不调用规划代理，不显示计划卡片，代理仍会在自己的回答中说明它正在采取的步骤。该判断位于 `src/llm/plan.ts` 中的 `needsPlan()`。
 
-The prompts are files, not code: [`assets/planner.txt`](./assets/planner.txt)
-says how steps are written, [`assets/step.txt`](./assets/step.txt) is the
-instruction for each step, and [`assets/prompt.txt`](./assets/prompt.txt) is the
-worker's base system prompt. Turn planning off for one run with
-`NEUTRINO_PLAN=off`, or permanently with `"plan_first": false` in `config.json`.
+提示词是文件而不是代码：[`assets/planner.txt`](./assets/planner.txt) 规定步骤如何编写，[`assets/step.txt`](./assets/step.txt) 是每个步骤的指令，[`assets/prompt.txt`](./assets/prompt.txt) 是工作代理的基础系统提示词。单次运行可通过 `NEUTRINO_PLAN=off` 关闭规划，或在 `config.json` 中设置 `"plan_first": false` 永久关闭。
 
-## Sub-agents
+## 子代理
 
-The agent can hand one self-contained sub-task to a **sub-agent**: a second agent
-loop with its own transcript, its own tool calls and the same working directory.
-Only its final report comes back — the files it read and the commands it ran
-never enter the main conversation. That is the point: surveying a large codebase
-or probing how a command behaves costs many messages, and the parent needs the
-conclusion, not the transcript. The child's tokens still count in the
-conversation's usage.
+代理可以把一个自包含的子任务交给**子代理**：这是一个拥有自己的对话记录、自己的工具调用和相同工作目录的第二个代理循环。只返回最终报告——它读取的文件和运行的命令永远不会进入主对话。这正是关键所在：调研大型代码库或试探命令行为会消耗大量消息，而父代理需要的是结论，不是过程记录。子代理的 token 仍计入对话用量。
 
-- The parent calls the `delegate` tool with a complete task and, optionally, a
-  little context. The sub-agent cannot see the conversation and cannot ask the
-  user, so a task that refers to "the file above" fails; the system prompt tells
-  the model to write a brief that stands alone.
-- Its tool calls go through the **same approval gate**: a risky call parks the
-  turn and shows the usual card (the header turns orange, the browser shows its
-  banner). Denying it tells the sub-agent not to retry unchanged, and the parent
-  receives the refusal in the report.
-- Delegation is one level deep — `delegate` is not in a sub-agent's toolset — so
-  the work always has one owner and one pause button.
-- While it runs, the terminal status line and the browser badge name the current
-  phase (`Sub-agent — read_file`), and the `delegate` tool block shows the task
-  it was given. The report replaces that marker when it arrives, as the result of
-  the tool call.
-- The round limit (12) bounds a child that never finishes; the parent then gets
-  the partial report, clearly marked as partial. A paused turn aborts the
-  sub-agent and says so in the tool result.
+- 父代理调用 `delegate` 工具，传入完整任务以及（可选的）少量上下文。子代理看不到对话，也不能向用户提问，因此引用“上面的文件”的任务会失败；系统提示词会要求模型编写一份自包含的简报。
+- 它的工具调用经过**相同的审批关卡**：风险调用会停住回合并显示通常的卡片（标题栏变橙，浏览器显示横幅）。拒绝会告诉子代理不要原样重试，父代理会在报告中收到拒绝信息。
+- 委派只有一层——`delegate` 不在子代理的工具集中——因此工作始终只有一个负责人和一个暂停按钮。
+- 运行期间，终端状态行和浏览器徽标会显示当前阶段（`Sub-agent — read_file`），`delegate` 工具块会显示交给它的任务。报告到达后会替换该标记，作为工具调用的结果。
+- 轮次上限（12）用于约束永远无法完成的子代理；父代理随后会收到部分报告，并清楚标记为部分完成。暂停的回合会中止子代理，并在工具结果中说明。
 
-The sub-agent's prompt is a file too: [`assets/subagent.txt`](./assets/subagent.txt).
+子代理的提示词同样是一个文件：[`assets/subagent.txt`](./assets/subagent.txt)。
 
-## Configuration
+## 配置
 
-Settings are stored under `~/.neutrino/`:
+设置保存在 `~/.neutrino/` 下：
 
-- `model.json` — provider and model definitions (edit to add your own endpoints).
-  A model can list the thinking intensities it accepts:
-  `"intensity": ["low", "high", "max"]`. Names are matched case-insensitively
-  and the terminal, Web UI and API only offer levels on that list, so an
-  unsupported level is never sent to the endpoint. Omit the field (or leave it
-  empty) to keep allowing all five (`Low`, `Medium`, `High`, `Max`, `Ultra`).
-  DeepSeek-style thinking endpoints get `reasoning_content` sent back on their
-  assistant messages automatically; a differently named endpoint can opt in
-  with `"reasoning": true` (or opt out with `false`).
-- `config.json` — app configuration (selected provider/model/intensity, theme,
-  language, approval mode, `auto_approve_extreme_risk`, `sound_alerts`,
-  `web_console`, `web_workspaces`). `language` (`en` or `zh`) is the browser
-  console's interface language; the terminal UI itself stays English.
-- `session/` — saved conversation sessions, one JSON file per session.
-- `pro/config.json` and `pro/session/` — the Pro workspace's own settings and
-  conversations. Pro does not read or write the regular workspace's defaults,
-  language, plan choice, reviewer model, compression thresholds or recent
-  folders. Machine-wide settings — `web_password_hash`, `approval_mode`,
-  `auto_approve_extreme_risk` and `web_lan` — are layered in from
-  `config.json`, so the Web password, approval policy and LAN binding are
-  shared by both workspaces.
+- `model.json` — 服务商和模型定义（可编辑以添加自己的端点）。模型可以列出它接受的思考强度：`"intensity": ["low", "high", "max"]`。名称匹配不区分大小写，终端、Web 界面和 API 只会提供该列表中的级别，因此不受支持的级别永远不会发送到端点。省略该字段（或留空）则继续允许全部五档（`Low`、`Medium`、`High`、`Max`、`Ultra`）。DeepSeek 风格的思考端点会自动在 assistant 消息中回传 `reasoning_content`；名称不同的端点可以通过 `"reasoning": true` 选择启用（或用 `false` 选择禁用）。
+- `config.json` — 应用配置（选中的服务商/模型/思考强度、主题、语言、审批模式、`auto_approve_extreme_risk`、`sound_alerts`、`web_console`、`web_workspaces`）。`language`（`en` 或 `zh`）是浏览器控制台的界面语言；终端界面本身保持英文。
+- `session/` — 保存的对话会话，每个会话一个 JSON 文件。
+- `pro/config.json` 和 `pro/session/` — Pro 工作区自己的设置和对话。Pro 不读写常规工作区的默认值、语言、规划选择、审查模型、压缩阈值或最近文件夹。机器级设置——`web_password_hash`、`approval_mode`、`auto_approve_extreme_risk` 和 `web_lan`——会从 `config.json` 分层读取，因此 Web 密码、审批策略和局域网绑定由两个工作区共享。
 
-Set your API key in the model select screen or directly in `model.json`.
+在模型选择页面或直接在 `model.json` 中设置 API 密钥。
 
-A few environment variables override flags:
+一些环境变量可以覆盖启动参数：
 
-| Variable | Effect |
+| 变量 | 作用 |
 | --- | --- |
-| `NEUTRINO_WEB_PORT` | Web UI port: like `--port` in either mode, and it mounts the UI even when `web_console` is off. |
-| `NEUTRINO_WEB_HOST` | Interface to bind, like `--host`; also mounts the UI when `web_console` is off. |
-| `NEUTRINO_NETWORK_ATTEMPTS` | Total tries for a model request that keeps dropping (default 7). |
-| `NEUTRINO_RETRY_DELAY_MS` | Wait before the first retry in ms; each retry doubles it (default 5000). |
-| `NEUTRINO_PLAN` | `off` answers a request in one pass without planning it (overrides `plan_first`); `on` forces planning. |
+| `NEUTRINO_WEB_PORT` | Web 界面端口：等同于任一模式下的 `--port`，并且即使 `web_console` 关闭也会挂载界面。 |
+| `NEUTRINO_WEB_HOST` | 要绑定的接口，等同于 `--host`；当 `web_console` 关闭时也会挂载界面。 |
+| `NEUTRINO_NETWORK_ATTEMPTS` | 对反复断线的模型请求的总尝试次数（默认 7）。 |
+| `NEUTRINO_RETRY_DELAY_MS` | 首次重试前的等待时间（毫秒）；每次重试翻倍（默认 5000）。 |
+| `NEUTRINO_PLAN` | `off` 会一次性回答请求而不进行规划（覆盖 `plan_first`）；`on` 强制规划。 |
 
-### Approvals
+### 审批
 
-Every tool call is classified before it runs.
+每次工具调用在执行前都会被分类。
 
-| Class | Examples | Default behaviour |
+| 类别 | 示例 | 默认行为 |
 | --- | --- | --- |
-| Routine | `npm run build`, `git status`, reading or writing inside the project | Runs without asking |
-| High | `sudo`, `chmod`, package installs, `git push`, `curl`, inline `python -c`, any path outside the working directory | Asks the user |
-| Extreme | Delete-class: `rm`, `del`, `shred`, `mkfs`, `git clean -f`, `git reset --hard`, `find -delete`, `DROP TABLE`, … | Always asks the user |
+| 常规 | `npm run build`、`git status`、在项目内读取或写入 | 直接运行，不询问 |
+| 高风险 | `sudo`、`chmod`、安装软件包、`git push`、`curl`、内联 `python -c`、工作目录之外的任意路径 | 询问用户 |
+| 极高风险 | 删除类：`rm`、`del`、`shred`、`mkfs`、`git clean -f`、`git reset --hard`、`find -delete`、`DROP TABLE` 等 | 始终询问用户 |
 
-While a call waits for an answer the top bar turns orange and reads
-**Request Approval**, and an orange card floats above the input box with the
-command, **why the agent says it needs it**, why it was flagged, and
-`[ Y ] Approve` / `[ N ] Deny`. Approving runs the call; denying returns a note
-to the model so it can pick another route instead of retrying.
+当调用等待回答时，顶部栏会变成橙色并显示 **请求审批（Request Approval）**，输入框上方会浮出一张橙色卡片，展示命令、**代理说明为何需要它**、它被标记的原因，以及 `[ Y ] Approve` / `[ N ] Deny`（批准 / 拒绝）。批准即运行该调用；拒绝会给模型返回一条说明，让它选择其他路径而不是重试。
 
-Every tool call carries a `reason` argument, and a call that needs approval but
-states none does not run: the gate refuses it before you are interrupted or a
-reviewer is paid for, and the model is told to resend the same call with a
-reason. The reason is the agent's own claim, shown apart from the arguments.
-A vague, imperfect or seemingly unrelated reason is not itself a safety hazard;
-reviewers judge the actual call's consequences and explicit user restrictions.
+每次工具调用都带有一个 `reason` 参数；需要审批但未说明理由的调用不会运行：审批关卡会在打扰你或付费请审查者之前拒绝它，并告知模型带上理由重新发送同一调用。理由是代理自己的说法，会与参数分开显示。含糊、不完美或看似无关的理由本身并不构成安全风险；审查者判断的是实际调用的后果以及用户明确提出的限制。
 
-Two phrases in your message change the policy for that conversation:
+消息中的两个短语会改变该对话的策略：
 
-| Phrase in the prompt | Effect |
+| 提示词中的短语 | 作用 |
 | --- | --- |
-| `无需审批` | High-risk calls run without asking. Delete-class calls still ask. |
-| `我已知悉风险，同意给予完整权限，无需任何审批` | Nothing asks, including delete-class calls. |
+| `无需审批` | 高风险调用直接运行，不再询问。删除类调用仍会询问。 |
+| `我已知悉风险，同意给予完整权限，无需任何审批` | 任何调用都不再询问，包括删除类调用。 |
 
-The one-row **Request Approval / Auto Approval** button above the main menu's
-version label sets and remembers the default for new conversations. Each terminal
-conversation has its own button above the input (or **Ctrl+A**), and each browser
-conversation has a switch in its controls. The conversation's choice is saved
-with its history and synced between terminal and browser. Writing `自动审批` or
-`自动批准` in a prompt no longer enables automatic review.
+主菜单版本标签上方的一行**请求审批 / 自动审批**按钮用于设置并记住新对话的默认值。每个终端对话在输入框上方都有自己的按钮（或使用 **Ctrl+A**），每个浏览器对话在其控制区中都有一个开关。对话的选择会随其历史记录保存，并在终端和浏览器之间同步。在提示词中写入 `自动审批` 或 `自动批准` 不再会启用自动审查。
 
-With **Auto Approval** enabled, each pending tool call receives **two independent
-safety reviews**. A review round passes when its average safety score is at least
-60/100 and no concrete safety hazard or failed review blocks it. Task relevance
-has zero weight and no ordinary minimum: even a score of 0 does not by itself
-prevent a safe call from running, and doubts about purpose must not lower safety.
+启用**自动审批**后，每个待处理的工具调用会接受**两次独立的安全审查**。当一轮审查的平均安全评分至少为 60/100，且没有具体的安全隐患或审查失败时，该轮才通过。任务相关性权重为零，也没有普通的最低分要求：即使评分为 0，其本身也不会阻止安全调用运行；对目的的疑虑不得降低安全性。
 
-Only an extreme, obvious task mismatch can veto on relevance: both reviewers
-must independently mark it, give a relevance score of at most 5/100, and provide
-specific evidence comparing the task and proposed action. One suspicion, weak
-justification, or uncertainty about the task is insufficient.
+只有极端、明显的任务不匹配才能以相关性为由否决：两位审查者必须各自独立标记，给出至多 5/100 的相关性评分，并提供比较任务与拟议操作的具体证据。单一怀疑、薄弱理由或对任务的不确定都不足以构成否决。
 
-The policy favors ordinary implementation and verification steps, including
-scoped edits, dependency installation, public network checks and temporary test
-files. Concrete serious hazards and explicit user prohibitions block approval;
-a failed, timed-out or malformed review also prevents automatic execution.
-Every assessment and the safety result are included in the decision, per round
-for delete-class calls.
+该策略倾向于普通的实现与验证步骤，包括限定范围的编辑、依赖安装、公开网络检查和临时测试文件。具体而严重的危险以及用户明确的禁止会阻止批准；审查失败、超时或格式错误也会阻止自动执行。每项评估和安全结果都会纳入决策；对于删除类调用，则按轮次纳入。
 
-Each turn captures its literal user request and earlier user messages separately
-from summaries and tool output, so short follow-ups keep their task context.
-Queued messages take effect on the next turn. Denied tool results include the
-reviewed user request and recent user requests for diagnosis.
+每个回合都会把用户的字面请求和更早的用户消息单独捕获，与摘要及工具输出分开，因此简短的后续消息仍保留任务上下文。排队的消息在下一回合生效。被拒绝的工具结果会包含本次审查的用户请求和近期用户请求，以便诊断。
 
-Automatic approval of delete-class commands is behind a switch in **Settings →
-Extreme-risk auto-approval**, which is **off by default**: while it is off,
-delete-class calls always go to a human even in **Auto Approval** mode.
+删除类命令的自动审批由**设置 → 极高风险自动审批**中的开关控制，该开关**默认关闭**：关闭期间，即使在**自动审批**模式下，删除类调用也始终交由人工处理。
 
-With the switch on, a delete-class call is reviewed **three separate times**.
-Each round is the usual pair of independent reviewers; the rounds run one after
-another and no round is told what an earlier one concluded. Every round is
-judged on its own scores and the call only runs if **all three** approve, so the
-first round that denies or fails ends the sequence: a deletion never gets a
-second chance to pass. The switches are layered, so turning **Auto Approval**
-off still sends every delete-class request to you. The reviewer model defaults
-to the chat model and can be changed in **Settings → Approval reviewer model**.
+开启开关后，删除类调用会被**独立审查三次**。每轮都是通常的一对独立审查者；各轮依次运行，且不会告知某一轮之前各轮的结论。每轮按自身评分判定，只有**三轮全部**批准时调用才会运行，因此第一个拒绝或失败的轮次就会结束整个流程：删除操作永远没有第二次通过的机会。开关是分层生效的，因此关闭**自动审批**后，每个删除类请求仍会发送给你。审查模型默认使用聊天模型，可在**设置 → 审批审查模型**中更改。
 
-### Sound alerts
+### 声音提醒
 
-A short cue plays when a turn finishes and when an approval request appears, in
-both the terminal and the web UI, so a long task or a blocking approval is
-noticeable from another window. Approval requests ring twice; finished turns
-ring once. Toggle it in **Settings → Sound alerts** (TUI or web), or set
-`"sound_alerts": false` in `config.json`.
+回合结束和出现审批请求时，终端和 Web 界面都会播放一段短提示音，这样即使你身处另一个窗口，也能注意到耗时较长的任务或阻塞中的审批。审批请求响两声，回合结束响一声。可在**设置 → 声音提醒**（TUI 或 Web）中切换，或在 `config.json` 中设置 `"sound_alerts": false`。
 
-Browsers refuse to start audio before a user gesture, so the web UI stays silent
-until the page has been clicked or a key has been pressed at least once.
+浏览器在用户手势之前会拒绝启动音频，因此在你点击页面或按过至少一次键之前，Web 界面会保持静音。
 
-### Browsing other agents' history
+### 浏览其他代理的历史记录
 
-From the history screen, select **Open other Agent's history** to view past sessions recorded by other CLI agents installed on your machine:
+在历史记录页面选择 **Open other Agent's history（打开其他 Agent 的历史记录）**，可查看本机安装的其他 CLI 代理记录的过往会话：
 
-- **Claude Code** — reads `~/.claude/projects/**/*.jsonl`.
-- **Codex** — reads `~/.codex/sessions` and `~/.codex/archived_sessions`.
-- **OpenCode** — reads the local SQLite database (`opencode.db`) via `node:sqlite` (requires Node.js **22.13+**; silently unavailable on older versions).
+- **Claude Code** — 读取 `~/.claude/projects/**/*.jsonl`。
+- **Codex** — 读取 `~/.codex/sessions` 和 `~/.codex/archived_sessions`。
+- **OpenCode** — 通过 `node:sqlite` 读取本地 SQLite 数据库（`opencode.db`）（需要 Node.js **22.13+**；在旧版本上会静默不可用）。
 
-Only sessions that were started in the current working directory are listed, so the history stays focused on the project you are in. These sessions are read-only; you can open them for review but not edit or delete.
+只列出在当前工作目录中开始的会话，因此历史记录始终聚焦于你所在的项目。这些会话是只读的；可以打开查看，但不能编辑或删除。
 
-## Web UI
+## Web 界面
 
-Neutrino mounts a small website at <http://127.0.0.1:8765> whenever the
-terminal UI starts. It groups every saved conversation by working directory
-(showing the five newest per path with the rest collapsed), folds the work of
-every finished turn into one summary line that opens on a click while the reply
-stays on screen, streams a running conversation live, and lets you pause or
-resume it and send new messages from the browser. Conversation text is rendered
-as markdown — headings, lists (including tasks and nesting), tables, block
-quotes, fenced code, emphasis, links and images — while raw HTML stays inert and
-only safe link/image schemes become clickable.
+每当终端界面启动时，Neutrino 都会在 <http://127.0.0.1:8765> 挂载一个小型网站。它按工作目录对所有已保存对话进行分组（每个路径显示最新的五个，其余折叠），将每个已完成回合的工作折叠为一行摘要，点击即可展开，而回复始终留在屏幕上；实时流式呈现正在运行的对话，并允许你从浏览器暂停或恢复它、发送新消息。对话文本以 Markdown 渲染——包括标题、列表（含任务列表和嵌套）、表格、引用块、围栏代码、强调、链接和图片——同时原始 HTML 保持惰性，只有安全的链接/图片协议才会变为可点击。
 
-**New conversation** in the sidebar starts a chat that has no transcript yet.
-Its dialog chooses the working directory and the provider, model and thinking
-level for the first turn. **Browse…** opens the server's folder picker, where you
-can walk the filesystem, create a folder, and use it as the conversation's
-working directory. Opened folders are remembered under **Working directories**
-(the folder button above the list), which scopes the sidebar to that project and
-lets you start a new chat there; you can always return to **All directories**.
+侧边栏中的**新建对话**会开始一段尚无对话记录的聊天。其对话框用于选择工作目录，以及首回合的服务商、模型和思考强度。**浏览…**会打开服务器的文件夹选择器，你可以在其中浏览文件系统、创建文件夹，并将其用作对话的工作目录。打开过的文件夹会记录在**工作目录**下（列表上方的文件夹按钮），从而将侧边栏限定到该项目，并允许你在那里开始新聊天；你随时可以返回**所有目录**。
 
-A saved transcript opens read-only, because nothing is running for it. Press
-**Continue here** (or simply type in the composer) and the server resumes it
-in-process — same model, working directory and token counters — so you can keep
-chatting from the browser with no terminal attached. Turns are written back to
-the same session file. **Clear** starts a fresh conversation in the same folder
-(the previous transcript stays saved), **Delete** removes a saved transcript,
-and **Other agents** lists read-only sessions that Claude Code, Codex or
-OpenCode recorded in that folder.
+已保存的对话记录以只读方式打开，因为此时没有正在运行的进程。点击**在此继续**（或直接在输入框中输入），服务器便会在进程内恢复它——模型、工作目录和 token 计数器保持不变——因此即使没有连接终端，你也可以继续从浏览器聊天。回合会写回同一个会话文件。**清空**会在同一文件夹中开始一段新对话（之前的对话记录仍会保存），**删除**会移除已保存的对话记录，**其他 Agent** 会列出 Claude Code、Codex 或 OpenCode 在该文件夹中记录的只读会话。
 
-Use the selectors above a conversation to change its provider, model or
-intensity, then press **Apply to conversation** (pause an active turn first).
-The **Settings** (gear) button in the sidebar edits defaults for new conversations,
-the interface language, plan-first turns, the default approval mode, context
-compression and approval settings. It also holds the **Web access** switch that
-binds the console to `0.0.0.0` (the in-app equivalent of `--lan`), which takes
-effect immediately and is remembered. Conversation choices are saved with the
-transcript and do not overwrite the defaults. Configured models and keys are
-shared with the terminal; keys stay on the server.
+使用对话上方的选择器可更改其服务商、模型或思考强度，然后点击**应用到对话**（请先暂停活动回合）。侧边栏中的**设置**（齿轮）按钮用于编辑新对话的默认值、界面语言、先规划后执行、默认审批模式、上下文压缩和审批设置。它还包含**Web 访问**开关，可将控制台绑定到 `0.0.0.0`（应用内等同于 `--lan`），立即生效并被记住。对话中的选择会随对话记录保存，不会覆盖默认值。已配置的模型和密钥与终端共享；密钥只保留在服务器上。
 
-The interface language can be switched in the sidebar footer or in
-**Settings → Interface**: English and 简体中文 are supported. The change applies
-immediately without a reload, survives restarts in `config.json`, and is shared
-by every browser. The terminal UI itself is not translated.
+界面语言可在侧边栏底部或**设置 → 界面**中切换：支持 English 和简体中文。更改会立即生效，无需刷新，并会保存在 `config.json` 中，重启后仍然有效，且所有浏览器共享。终端界面本身不会被翻译。
 
-The `ⓘ` button in a conversation header opens the same plan/token card as
-`Ctrl+P` in the terminal: the steps of a planned turn with their live statuses,
-and the prompt/completion/total token counts when no plan is running.
+对话标题栏中的 `ⓘ` 按钮会打开与终端中 `Ctrl+P` 相同的计划/token 卡片：已规划回合的各步骤及其实时状态，以及没有计划运行时的提示/补全/总计 token 数。
 
-Context auto-compression starts at 80% of the current model's context window.
-Models default to 1,000,000 tokens (compression at 800,000). Adjust the model
-context window in terminal Settings or select the provider/model in Web Settings
-and enter its capacity in tokens. This is saved per provider/model (and
-separately for the Pro workspace) and applies to future turns in active
-conversations. The legacy fixed `context_compress_threshold` setting is no
-longer used.
+上下文自动压缩会在当前模型上下文窗口的 80% 处开始。模型默认为 1,000,000 token（在 800,000 时压缩）。可在终端设置中调整模型上下文窗口，或在 Web 设置中选择服务商/模型并输入其容量（以 token 计）。该值按服务商/模型保存（Pro 工作区单独保存），并应用于活动对话的未来回合。旧的固定 `context_compress_threshold` 设置不再使用。
 
-### Pro workspace
+### Pro 工作区
 
-Pro uses eight roles: main execution, reasoning, frontend completion, backend
-completion, independent approval, image generation (reserved), planning and
-modeling. Each role has a prompt under `assets/pro/`; the frontend prompt draws
-on the supplied component design guidance.
+Pro 使用八个角色：主执行、推理、前端补全、后端补全、独立审批、图像生成（预留）、规划和建模。每个角色在 `assets/pro/` 下都有一个提示词；前端提示词参考了提供的组件设计指南。
 
-On first use, `~/.neutrino/pro/model.json` is copied unchanged from the bundled
-example (`assets/pro/model-template.json`, sourced from
-`tmp-proproject/pro-model-example.json`). Provider endpoints and credentials
-still come from the ordinary `~/.neutrino/model.json`; the Pro file only refers
-to a provider/model pair and records its intensity and context window.
+首次使用时，`~/.neutrino/pro/model.json` 会从随附示例（`assets/pro/model-template.json`，源自 `tmp-proproject/pro-model-example.json`）原样复制。服务商端点和凭据仍来自普通的 `~/.neutrino/model.json`；Pro 文件只引用服务商/模型对，并记录其思考强度和上下文窗口。
 
-Use the card at the bottom-right of the composer to slide between the presets
-in the Pro file. Before every task, Pro makes a small authenticated completion
-request for every active role. If one fails, only that role tries successively
-lower presets in the file's order. Custom is a separate user-defined team,
-not a fallback tier. A popup lists unavailable models and their temporary
-replacements; the preset file remains unchanged. If no tier can supply a role,
-execution stops with the missing role listed. Image generation is not checked.
+使用输入框右下角的卡片可在 Pro 文件中的预设之间滑动切换。每个任务开始前，Pro 会为每个活动角色发起一次小型的带认证补全请求。如果某个角色的请求失败，只有该角色会按文件顺序依次尝试更低的预设。Custom 是单独的用户自定义团队，而不是降级层级。弹窗会列出不可用的模型及其临时替代项；预设文件保持不变。如果没有任何层级能提供某个角色，执行会停止并列出缺失的角色。图像生成不进行检查。
 
-The planning agent receives every request first, including a one-step task;
-then the main agent receives the request and plan. All active roles can consult
-other roles with `call_pro_agent`, sharing the same approval policy. Automatic
-reviews use the selected approval role and preserve the ordinary verdict format
-and review rounds. Initial planning and reviewer consultations are read-only,
-including nested calls. Settings controls the default preset and maximum
-recursion depth (`pro_max_recursion_depth`, default 10, range 1–100). Pausing
-cancels active model requests, including availability checks. Context compression
-uses each role's configured `context_window` at the 80% threshold.
+规划代理首先接收每个请求，包括单步任务；随后主代理接收请求和计划。所有活动角色都可以通过 `call_pro_agent` 咨询其他角色，并共享相同的审批策略。自动审查使用选定的审批角色，并保留通常的判定格式和审查轮次。初始规划和审查者咨询都是只读的，包括嵌套调用。设置控制默认预设和最大递归深度（`pro_max_recursion_depth`，默认 10，范围 1–100）。暂停会取消活动的模型请求，包括可用性检查。上下文压缩在 80% 阈值处使用每个角色配置的 `context_window`。
 
-The Web console has two workspaces with the same interface. The regular one is
-at `/`; **Pro** is at `/pro`. In the regular console, click the orbit badge to
-the left of the **Neutrino** title: a `#151515` curtain fades in over the page
-and plays the animated `web/neutrino-pro.gif` wordmark in the centre, then
-fades out onto `/pro` after three seconds. The blue hint pointing at the badge
-explains the switch; its X dismisses the hint permanently for that browser. Pro
-mode uses the static `web/neutrino.png` wordmark as its top-left logo, renames
-the sidebar brand to **Neutrino Pro**, titles the page **Neutrino Pro**, and
-adds an **Exit Pro mode / 返回普通模式** button at the top-right of the
-workspace. Its composer adds a professional-team preset card. The button returns to the
-regular workspace at `/`.
+Web 控制台有两个界面相同的工作区。常规工作区位于 `/`；**Pro** 位于 `/pro`。在常规控制台中，点击 **Neutrino** 标题左侧的轨道徽标：一层 `#151515` 幕布会在页面上淡入，并在中央播放动态 `web/neutrino-pro.gif` 字标，三秒后淡出并进入 `/pro`。指向徽标的蓝色提示会说明这一切换；点击其中的 X 可在该浏览器中永久关闭提示。Pro 模式使用静态 `web/neutrino.png` 字标作为左上角 Logo，将侧边栏品牌重命名为 **Neutrino Pro**，页面标题设为 **Neutrino Pro**，并在工作区右上角添加 **Exit Pro mode / 返回普通模式** 按钮。其输入框还会添加一张专业团队预设卡片。该按钮返回位于 `/` 的常规工作区。
 
-The terminal exposes the same entry point as a **启用Pro模式** box under the
-status bar on the start screen. Clicking it starts the Web console if it is
-not running and opens `/pro` in the default browser.
+终端在开始界面的状态栏下方提供了一个 **启用Pro模式** 框，作为相同的入口。点击它会在 Web 控制台未运行时启动控制台，并在默认浏览器中打开 `/pro`。
 
-The two workspaces never mix conversations or live sessions: Pro saves its
-transcripts under `~/.neutrino/pro/session/` and its settings under
-`~/.neutrino/pro/config.json`. Pro has its own interface language, sound alerts,
-default preset, maximum recursion depth and recent working directories.
-Role models, effort and context capacities live in `~/.neutrino/pro/model.json`. Only settings that describe the whole machine are shared: the Web
-password, the approval policy (default approval mode and extreme-risk
-auto-approval) and whether the console also listens on the LAN. They guard the
-machine, so both workspaces, the terminal and every browser read and write the
-same values. Login is therefore shared: signing in on one page signs you in on
-the other, and changing the password from either settings dialog changes it for
-both. English and 简体中文 are both available in Pro mode, remembered per
-workspace.
+两个工作区绝不会混用对话或活动会话：Pro 将会话记录保存在 `~/.neutrino/pro/session/` 下，将其设置保存在 `~/.neutrino/pro/config.json` 下。Pro 有自己的界面语言、声音提醒、默认预设、最大递归深度和最近工作目录。角色模型、思考强度和上下文容量保存在 `~/.neutrino/pro/model.json` 中。只有描述整台机器的设置会被共享：Web 密码、审批策略（默认审批模式和极高风险自动审批）以及控制台是否同时监听局域网。它们守护整台机器，因此两个工作区、终端和每个浏览器读写的都是相同的值。登录也因此共享：在一个页面登录后，另一个页面也会登录；在任一设置对话框中更改密码，两边都会生效。Pro 模式支持 English 和简体中文，并按工作区分别记住。
 
 ```sh
-# The terminal UI now brings the web UI up with it
+# 终端界面现在会同时启动 Web 界面
 neutrino
 
-# Pick a different port or interface
+# 选择其他端口或接口
 neutrino --port 9000
 neutrino --host 100.64.0.7
 
-# Or serve only the saved history, with no terminal
+# 或者仅提供已保存历史记录，不启动终端
 neutrino web --port 8765
 ```
 
-Then open <http://127.0.0.1:8765>. The site itself lives in [`web/`](./web) and
-needs no build step; see [`web/README.md`](./web/README.md) for the API.
+然后打开 <http://127.0.0.1:8765>。网站本身位于 [`web/`](./web)，无需构建步骤；API 参见 [`web/README.md`](./web/README.md)。
 
-The console is on by default; turn it off for one run with `--no-web`, or
-permanently in the terminal's **Settings → Web console**. The `--web-port` flag
-is still accepted as an alias for `--port`. If the default port is already taken
-(usually by another Neutrino instance), the terminal UI starts anyway and prints
-how to choose another port.
+控制台默认开启；单次运行可用 `--no-web` 关闭，或在终端的**设置 → Web 控制台**中永久关闭。`--web-port` 标志仍作为 `--port` 的别名被接受。如果默认端口已被占用（通常是另一个 Neutrino 实例），终端界面仍会启动，并打印如何选择其他端口。
 
-### Reaching it from another device
+### 从其他设备访问
 
-The server binds to loopback, so only this machine can open it. To use it from a
-phone, a tablet or another box on your LAN or VPN, bind an interface others can
-see:
+服务器绑定到回环地址，因此只有本机可以打开它。要从手机、平板或局域网/VPN 中的另一台机器访问，请绑定一个其他设备可见的接口：
 
 ```sh
-neutrino --lan                          # TUI + web UI on every interface (0.0.0.0)
-neutrino --host 100.64.0.7              # TUI + web UI on one specific address
-neutrino web --port 8765 --lan          # headless web UI on every interface
+neutrino --lan                          # 在所有接口上启用 TUI + Web 界面（0.0.0.0）
+neutrino --host 100.64.0.7              # 在指定地址上启用 TUI + Web 界面
+neutrino web --port 8765 --lan          # 在所有接口上启用无头 Web 界面
 ```
 
-`--lan` is shorthand for `--host 0.0.0.0`; the two cannot be combined.
+`--lan` 是 `--host 0.0.0.0` 的简写；两者不能同时使用。
 
-The same switch is available without a restart: **Settings → Web access → Allow
-access from other devices (LAN, 0.0.0.0)** re-binds the running console to
-`0.0.0.0` on the same port and saves the choice for later launches. Turning it
-off returns the console to `127.0.0.1`. An explicit `--host`/`--lan` picks the
-interface at startup; the in-page switch takes over from there for the running
-process.
+同一个开关无需重启即可使用：**设置 → Web 访问 → 允许其他设备访问（局域网，0.0.0.0）**会将正在运行的控制台重新绑定到同一端口的 `0.0.0.0`，并为后续启动保存该选择。关闭后会将控制台恢复为 `127.0.0.1`。显式的 `--host`/`--lan` 在启动时选择接口；此后，页面内开关会接管正在运行的进程。
 
-Startup prints every address that works, so you can copy the one matching the
-device you are on:
+启动时会打印所有可用地址，你可以复制与当前设备匹配的那个：
 
 ```
 Neutrino web UI listening on 0.0.0.0:8765
@@ -482,172 +282,135 @@ Open the address that matches your device:
   http://127.0.0.1:8765/
 ```
 
-Open the address and sign in with your permanent Web password. The initial
-password is **`114514`**. Change it in the browser's **Settings → Web access**
-or in the terminal's **Settings → Web password**. It is saved as a salted hash
-in `~/.neutrino/config.json` and survives restarts. While the site is running,
-its address is also shown in the terminal header and in the terminal's
-**Settings → Web console** row, which can start or stop it without a restart.
+打开该地址，并使用你设置的永久 Web 密码登录。初始密码是 **`114514`**。可在浏览器的**设置 → Web 访问**或终端的**设置 → Web 密码**中更改。密码会以加盐哈希的形式保存在 `~/.neutrino/config.json` 中，重启后仍然有效。网站运行时，其地址也会显示在终端标题栏和终端的**设置 → Web 控制台**行中，你可以在那里无需重启地启动或停止它。
 
-For automatic login, open `http://<host>:8765/?pwd=114514`. The page checks the
-password, remembers the login, and removes `pwd` from the address bar. If it is
-incorrect, the password login dialog lets you try again. URL-encode special
-characters in your password.
+要自动登录，请打开 `http://<host>:8765/?pwd=114514`。页面会校验密码、记住登录状态，并从地址栏中移除 `pwd`。如果密码不正确，密码登录对话框会让你重试。请对密码中的特殊字符进行 URL 编码。
 
-The browser remembers your login in an HttpOnly cookie for up to one year,
-including across server restarts. Changing the password signs out other
-browsers; the browser that saves the new password stays signed in. Addresses
-and startup output never contain your password or session credentials.
+浏览器会将你的登录状态保存在有效期最长一年的 HttpOnly Cookie 中，包括跨服务器重启。更改密码会使其他浏览器退出登录；保存新密码的浏览器会保持登录。地址和启动输出绝不会包含你的密码或会话凭据。
 
-- **`--no-auth`** explicitly disables password login.
-- Static files and the login endpoint remain public; all conversation and
-  settings APIs require a login, including when accessed through localhost.
-- **Firewall:** the first bind to `0.0.0.0` triggers an allow prompt on Windows
-  and macOS. Allow it for private networks, and check that your WLAN is not
-  marked "public", where incoming connections are blocked anyway.
-- **`127.0.0.1` is still the default interface.** The console starts with the
-  terminal UI, but it is not a network service until you pass `--host`/`--lan`
-  or turn on **Settings → Web access → Allow access from other devices**.
+- **`--no-auth`** 显式禁用密码登录。
+- 静态文件和登录端点仍然公开；所有对话和设置 API 都需要登录，包括通过 localhost 访问时。
+- **防火墙：** 首次绑定到 `0.0.0.0` 时，Windows 和 macOS 会弹出允许提示。请为专用网络允许它，并检查你的 WLAN 是否被标记为“公用”，在公用网络中传入连接本来就会被阻止。
+- **`127.0.0.1` 仍是默认接口。** 控制台会随终端界面启动，但在你传入 `--host`/`--lan` 或开启**设置 → Web 访问 → 允许其他设备访问**之前，它并不是网络服务。
 
-## Built-in tools
+## 内置工具
 
-The agent can call the following tools during a conversation:
+代理可以在对话过程中调用以下工具：
 
-- `run_command` — execute a shell command (120s timeout, output capped).
-- `read_file` — read a text file (capped at 200KB).
-- `write_file` — write content to a file.
-- `list_files` — list directory contents.
-- `delegate` — hand one self-contained sub-task to a sub-agent and return its report.
+- `run_command` — 执行 shell 命令（120 秒超时，输出有上限）。
+- `read_file` — 读取文本文件（上限 200KB）。
+- `write_file` — 将内容写入文件。
+- `list_files` — 列出目录内容。
+- `delegate` — 将一个自包含的子任务交给子代理并返回其报告。
 
-Every tool takes an additional `reason` argument: one sentence saying what the
-call is for and why it is needed now. It is what the approval card shows and what
-reviewers check the arguments against, so it is required even for calls that
-usually run without asking.
+每个工具都接受一个额外的 `reason` 参数：用一句话说明该调用的目的以及为什么现在需要它。审批卡片会显示它，审查者也会对照它检查参数，因此即使是通常无需询问的调用也必须提供。
 
-## Development
+## 开发
 
 ```sh
-npm run build    # compile TypeScript to dist/
-npm test         # build, then run every test below
+npm run build    # 将 TypeScript 编译到 dist/
+npm test         # 先构建，再运行下面的所有测试
 ```
 
-Individual tests:
+单项测试：
 
 ```sh
-node scripts/test-paste.mjs      # verify pasted newlines are flattened to spaces
-node scripts/test-mouse.mjs      # verify mouse escape-sequence parsing
-node scripts/test-cursor.mjs     # verify click-to-position-cursor math
-node scripts/test-selection.mjs  # verify selection highlighting & text extraction
-node scripts/test-drag-scroll.mjs # verify drag-select auto-scroll: edge scrolling, cross-screen copy
-node scripts/test-copy.mjs       # verify a copy never includes the scrollbar or trailing padding
-node scripts/test-scrollbar.mjs  # verify the conversation scrollbar size/position and drag maths
-node scripts/test-markdown.mjs   # verify markdown/table rendering (incl. ragged rows)
-node scripts/test-wrap.mjs       # verify indentation & spacing are preserved when wrapping
-node scripts/test-render.mjs     # fuzz the diff renderer + render the chat screen,
-                                 # asserting no stale/residual cells are left behind
-node scripts/test-sanitize.mjs   # verify ANSI/control codes never reach the screen
-node scripts/test-drift.mjs      # verify the input area self-heals after terminal drift
-node scripts/test-fetch.mjs      # verify streamed requests release aborts, retry drops and the 7-attempt backoff
-node scripts/test-compact.mjs    # verify context-compression planning
-node scripts/test-history-fold.mjs # verify full-history retention, folding and resume
-node scripts/test-web-history.mjs  # verify browser history disclosures and streaming state
-node scripts/test-web-default.mjs  # verify the web console starts and toggles by default
-node scripts/test-turn-fold.mjs    # verify folded turns keep their reply and every message
-node scripts/test-plan.mjs         # verify plan-first turns, step order, the step card and the fallback
-node scripts/test-subagent.mjs     # verify delegation: isolation, approvals, abort, round limits
-node scripts/test-tools.mjs      # verify tool-output folding
-node scripts/test-web.mjs        # verify the web server, API, SSE stream and path-traversal guards
-node scripts/test-web-settings.mjs # verify model switching, persistence, browser controls and defaults
-node scripts/test-web-settings-http.mjs # verify authenticated settings and model changes over HTTP
-node scripts/test-web-markdown.mjs # verify the browser markdown renderer and its XSS boundaries
-node scripts/test-web-i18n.mjs   # verify every console label has a Chinese translation and placeholders survive
-node scripts/test-web-workspaces.mjs # verify folder browsing/creation, new conversations, clear/delete and other-agent history
-node scripts/test-web-pro.mjs    # verify /pro routing, isolated history/live sessions/settings, shared password & approval policy
+node scripts/test-paste.mjs      # 验证粘贴的换行符会被压平为空格
+node scripts/test-mouse.mjs      # 验证鼠标转义序列解析
+node scripts/test-cursor.mjs     # 验证点击定位光标的计算
+node scripts/test-selection.mjs  # 验证选区高亮和文本提取
+node scripts/test-drag-scroll.mjs # 验证拖动选择自动滚动：边缘滚动、跨屏复制
+node scripts/test-copy.mjs       # 验证复制内容永远不会包含滚动条或尾部填充
+node scripts/test-scrollbar.mjs  # 验证对话滚动条的大小/位置和拖动计算
+node scripts/test-markdown.mjs   # 验证 markdown/表格渲染（包括参差不齐的行）
+node scripts/test-wrap.mjs       # 验证换行时保留缩进和间距
+node scripts/test-render.mjs     # 对 diff 渲染器进行模糊测试并渲染聊天界面，
+                                 # 断言没有留下过时/残留的单元格
+node scripts/test-sanitize.mjs   # 验证 ANSI/控制码永远不会到达屏幕
+node scripts/test-drift.mjs      # 验证输入区域在终端漂移后能自愈
+node scripts/test-fetch.mjs      # 验证流式请求会释放中止、断线时重试，以及 7 次尝试的退避
+node scripts/test-compact.mjs    # 验证上下文压缩规划
+node scripts/test-history-fold.mjs # 验证完整历史保留、折叠和恢复
+node scripts/test-web-history.mjs  # 验证浏览器历史记录披露和流式状态
+node scripts/test-web-default.mjs  # 验证 Web 控制台默认启动和切换
+node scripts/test-turn-fold.mjs    # 验证折叠回合保留回复和每条消息
+node scripts/test-plan.mjs         # 验证先规划后执行、步骤顺序、步骤卡片和回退
+node scripts/test-subagent.mjs     # 验证委派：隔离、审批、中止、轮次限制
+node scripts/test-tools.mjs      # 验证工具输出折叠
+node scripts/test-web.mjs        # 验证 Web 服务器、API、SSE 流和路径遍历防护
+node scripts/test-web-settings.mjs # 验证模型切换、持久化、浏览器控件和默认值
+node scripts/test-web-settings-http.mjs # 验证通过 HTTP 进行认证的设置和模型更改
+node scripts/test-web-markdown.mjs # 验证浏览器 markdown 渲染器及其 XSS 边界
+node scripts/test-web-i18n.mjs   # 验证每个控制台标签都有中文翻译且占位符得以保留
+node scripts/test-web-workspaces.mjs # 验证文件夹浏览/创建、新对话、清空/删除和其他代理历史记录
+node scripts/test-web-pro.mjs    # 验证 /pro 路由、隔离的历史记录/活动会话/设置、共享密码和审批策略
 ```
 
-### Rendering model
+### 渲染模型
 
-The screen is drawn into a `Buffer` of cells which is diffed against the previous frame, so only changed rows are emitted. Rows are erased to the end of the line before being repainted, and the buffer keeps double-width glyphs consistent (writing over one half of a wide character blanks the other half). Together these guarantee that a repainted row can never leave a stale cell behind.
+屏幕被绘制到一个由单元格组成的 `Buffer` 中，并与上一帧进行差异比较，因此只会输出发生变化的行。重绘前会将行清除到行尾，缓冲区还会保持双宽字形的一致性（覆盖宽字符的一半会清空另一半）。这些机制共同保证：重绘的行绝不会留下过时的单元格。
 
-Because only *changed* rows are emitted, a row whose contents happen to be identical from one frame to the next is never rewritten — so if the terminal shifts its own contents behind our back (ConPTY reflowing the buffer mid-resize, a size-race repaint, a stray scroll) that row would stay stale. Two defences cover this: the persistent chrome (input box, tabs, key hints) is repainted on every frame via `Screen.alwaysRepaintRows()`, and the app periodically re-emits the whole cached frame (`Renderer.repaint()`) as a safety net. Both are no-ops when nothing drifted.
+由于只输出*发生变化*的行，如果某一行的内容在相邻两帧中恰好完全相同，它就永远不会被重写——因此，如果终端在我们背后移动了自身内容（ConPTY 在调整大小期间重排缓冲区、大小竞争导致的重绘、意外的滚动），该行就会保持过时状态。为此有两道防线：持久界面元素（输入框、标签页、按键提示）通过 `Screen.alwaysRepaintRows()` 在每一帧重绘；应用还会定期重新输出整个缓存帧（`Renderer.repaint()`）作为安全网。当没有任何漂移时，两者都是空操作。
 
-### Text hygiene
+### 文本卫生
 
-A cell's glyph is copied straight into the output stream, so a cell holding a *control* character becomes a command the terminal executes — an ESC sequence can move the cursor, clear the screen or leave the alternate buffer, and a TAB shifts the rest of the row. Tool output (ANSI colours from `ls --color`, `git`, `npm`, progress bars, …), file contents and pasted text all carry such bytes, so they are neutralised in three places:
+单元格的字形会被直接复制到输出流中，因此保存*控制*字符的单元格会变成终端执行的命令——ESC 序列可以移动光标、清屏或退出备用缓冲区，TAB 会移动该行其余内容。工具输出（来自 `ls --color`、`git`、`npm` 的 ANSI 颜色，进度条……）、文件内容和粘贴文本都可能携带这类字节，因此会在三个位置进行中和：
 
-1. `src/sanitize.ts` — `sanitizeText()` removes whole escape sequences (not just the ESC byte, which would leave `[31m` behind as literal text), expands tabs so measured widths match what the terminal draws, and drops any remaining control code. It is applied where untrusted text enters the display (chat messages, tool results, pasted input).
-2. `Buffer` — writing a control character stores a space instead, preserving the column width the caller measured, so no cell can ever hold one.
-3. `Renderer` — a last-resort check when emitting a row, so the byte stream cannot carry a control code even if a cell were populated another way.
+1. `src/sanitize.ts` — `sanitizeText()` 会移除完整转义序列（而不仅是 ESC 字节，否则会留下 `[31m` 作为字面文本），展开制表符以使测量宽度与终端绘制一致，并丢弃任何剩余控制码。它应用于不受信任文本进入显示的位置（聊天消息、工具结果、粘贴输入）。
+2. `Buffer` — 写入控制字符时会改为存储一个空格，保留调用方测量的列宽，因此任何单元格都不可能保存控制字符。
+3. `Renderer` — 输出行时的最后一道检查，因此即使单元格通过其他方式被填充，字节流也不可能携带控制码。
 
-### Network resilience
+### 网络韧性
 
-Model responses arrive over a streamed connection that can drop at any point. A single blip must not end the session — a turn is minutes of work, and a proxy that resets an idle socket says nothing about the user's task — so a failed request is retried before anything is given up:
+模型响应通过流式连接到达，连接可能在任何时刻断开。一次短暂抖动绝不能结束会话——一个回合可能是数分钟的工作，而代理重置空闲连接并不能说明用户任务有任何问题——因此失败请求会在放弃之前重试：
 
-| Attempt | Wait before it |
+| 尝试 | 之前的等待 |
 | --- | --- |
 | 1 | — |
-| 2 | 5s |
-| 3 | 10s |
-| 4 | 20s |
-| 5 | 40s |
-| 6 | 80s |
-| 7 | 2m 40s |
+| 2 | 5 秒 |
+| 3 | 10 秒 |
+| 4 | 20 秒 |
+| 5 | 40 秒 |
+| 6 | 80 秒 |
+| 7 | 2 分 40 秒 |
 
-That is seven tries and roughly five minutes in total, doubling every time: a link that is merely flaky recovers long before the budget is spent, while a link that is genuinely down is not hammered. `NEUTRINO_NETWORK_ATTEMPTS` and `NEUTRINO_RETRY_DELAY_MS` tune both numbers. The policy lives in `src/llm/retry.ts`.
+也就是七次尝试，总计约五分钟，每次等待翻倍：只是偶尔抖动的链路会在预算耗尽前很久就恢复，而真正断开的链路也不会被反复冲击。`NEUTRINO_NETWORK_ATTEMPTS` 和 `NEUTRINO_RETRY_DELAY_MS` 可调整这两个数值。该策略位于 `src/llm/retry.ts`。
 
-What counts as worth retrying:
+哪些情况值得重试：
 
-- **Connection failures** — a reset (`ECONNRESET`), a refused or unreachable socket, `EPIPE`, DNS (`EAI_AGAIN`), a connect timeout, and undici's `UND_ERR_*` codes.
-- **A stream that dies before the first byte** — the server or a proxy closed the connection mid-flight (`TypeError: terminated`, `other side closed`, `socket hang up`, …). Nothing has reached the user, so the request is simply re-issued.
-- **A transient HTTP status** — 408/425, 429 and 5xx (502/503/504 from a load balancer, 529 "overloaded"). A bad request is different: 400/401/403/404/422 surface on the first answer, because re-sending them only delays the real message.
-- **A stream that dies after output has started** is *not* retried: replaying it would duplicate the reply, so the error is surfaced with the real reason expanded out of the `error.cause` chain (`fetch failed` alone says nothing useful) and the partial text is kept.
+- **连接失败**——重置（`ECONNRESET`）、连接被拒绝或不可达、`EPIPE`、DNS（`EAI_AGAIN`）、连接超时，以及 undici 的 `UND_ERR_*` 错误码。
+- **在收到第一个字节前就中断的流**——服务器或代理在传输中途关闭连接（`TypeError: terminated`、`other side closed`、`socket hang up` 等）。用户还没有收到任何内容，因此直接重新发起请求。
+- **暂时性的 HTTP 状态**——408/425、429 和 5xx（负载均衡器返回的 502/503/504，529“过载”）。错误请求则不同：400/401/403/404/422 会在第一次回答时直接暴露，因为重发只会延迟真正的错误信息。
+- **已经开始输出后中断的流** *不会*重试：重放会导致回复重复，因此会展示错误，并从 `error.cause` 链中展开真实原因（单纯显示 `fetch failed` 没有任何有用信息），同时保留已输出的部分文本。
 
-A retry can leave the stream silent for up to 160s, so it is never silent *about* being silent: the terminal status line and the web badge name the attempt and the delay ("Network hiccup — retrying in 40s (attempt 4/7)"). The wait is also polled, so pausing the turn, sending a newer message or quitting drops it immediately instead of sitting out the backoff.
+重试可能让流静默长达 160 秒，因此它绝不会对静默本身保持沉默：终端状态行和 Web 徽标会说明尝试次数和延迟（例如 `Network hiccup — retrying in 40s (attempt 4/7)`）。等待过程也会被轮询，因此暂停回合、发送更新的消息或退出会立即放弃等待，而不会一直等到退避结束。
 
-Any stream the consumer walks away from (pause, or a newer turn taking over) always has its body cancelled, so sockets are not leaked.
+任何被放弃的流（暂停，或被更新的回合接管）都会取消其响应体，因此套接字不会泄漏。
 
-### Crash safety
+### 崩溃安全
 
-The TUI takes over the terminal: raw mode, the alternate screen and mouse
-reporting. If the process ever dies without undoing those, the shell inherits a
-terminal that types `[<b>;<x>;<y>M` mouse reports at every cursor move.
+TUI 会接管终端：原始模式、备用屏幕和鼠标报告。如果进程在未恢复这些设置的情况下退出，shell 会继承一个在每次光标移动时都会输入 `[<b>;<x>;<y>M` 鼠标报告的终端。
 
-So the teardown sequence is registered three ways — normal quit, a
-`process.on("exit")` hook that writes synchronously to fd 1, and
-`uncaughtException` / `unhandledRejection` handlers. Normal quit uses the same
-synchronous teardown, so pending frame output cannot swallow the cleanup.
-Catchable exits also flush the latest conversation snapshot, including a partial
-reply. Uncaught errors are appended to `~/.neutrino/crash.log` and exit with
-status 1. SIGHUP and Windows Ctrl+Break also restore and checkpoint before exit.
+因此清理序列通过三种方式注册——正常退出、向 fd 1 同步写入的 `process.on("exit")` 钩子，以及 `uncaughtException` / `unhandledRejection` 处理器。正常退出使用相同的同步清理，因此待处理的帧输出不会吞掉清理逻辑。可捕获的退出还会刷新最新的对话快照，包括部分回复。未捕获的错误会追加到 `~/.neutrino/crash.log` 并以状态码 1 退出。SIGHUP 和 Windows Ctrl+Break 也会在退出前恢复终端并建立检查点。
 
-Session snapshots are written to a temporary file in the session directory,
-synced, then atomically renamed over the previous snapshot. A failed write
-preserves the previous history, reports an error in the UI and crash log, and
-is retried at the next checkpoint. Partial replies are replaced by the completed
-reply in the saved snapshot, so reopening history does not duplicate them.
+会话快照会写入会话目录中的临时文件，同步后再原子重命名覆盖之前的快照。写入失败会保留之前的历史记录，在界面和崩溃日志中报告错误，并在下一个检查点重试。保存的快照中，部分回复会被完整回复替换，因此重新打开历史记录时不会出现重复。
 
-Key handlers and the render loop are also wrapped: they run inside `stdin`
-callbacks and timers, where a throw is an uncaught exception that used to end
-the session. A failed frame is now retried, and only a screen that cannot be
-drawn at all stops the app.
+按键处理器和渲染循环也被包裹起来：它们运行在 `stdin` 回调和定时器中，在这些地方抛出异常会成为未捕获异常，过去会结束会话。现在失败的帧会重试，只有完全无法绘制的屏幕才会停止应用。
 
-An uncatchable kill (SIGKILL, TerminateProcess or a runtime/OS failure) cannot
-run cleanup. Already-written snapshots survive; with a writable disk, streamed
-output since the last one-second checkpoint may be lost. If a shell is stuck
-in mouse mode, run this in Bash:
+无法捕获的终止（SIGKILL、TerminateProcess 或运行时/操作系统故障）无法执行清理。已写入的快照会保留；如果磁盘可写，自上一个一秒检查点以来的流式输出可能会丢失。如果 shell 卡在鼠标模式，请在 Bash 中运行：
 
 ```sh
 printf '\033[?2004l\033[?1000l\033[?1002l\033[?1003l\033[?1006l\033[?1015l\033[?25h\033[0m\033[?1049l'
 stty sane
 ```
 
-In PowerShell:
+在 PowerShell 中：
 
 ```powershell
 $esc = [char]27
 [Console]::Write("${esc}[?2004l${esc}[?1000l${esc}[?1002l${esc}[?1003l${esc}[?1006l${esc}[?1015l${esc}[?25h${esc}[0m${esc}[?1049l")
 ```
 
-## License
+## 许可证
 
-Apache-2.0. See [LICENSE](./LICENSE).
+Apache-2.0。参见 [LICENSE](./LICENSE)。
