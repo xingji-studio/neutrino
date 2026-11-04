@@ -23,7 +23,9 @@ A small, dependency-free single page app that is served by the Neutrino CLI at
 - drive the running conversation: pause / resume the current turn and send new
   messages (they queue while the agent is busy);
 - pick up a saved conversation in the browser and keep chatting, even when no
-  terminal is running.
+  terminal is running;
+- run the console as a detached background service, so conversations started in
+  the browser survive closing the terminal and the CLI process.
 
 Nothing needs to be built — these are plain `.html`, `.css` and `.js` files.
 
@@ -40,6 +42,10 @@ permanently in the terminal's **Settings → Web console**. LAN access can be
 switched on and off at any time in the browser's **Settings → Web access**
 without restarting anything.
 
+To keep the console alive after the terminal exits, turn on **Settings →
+Background residency** in either workspace, or use `neutrino background` — see
+[Background residency](#background-residency).
+
 Or serve only the saved history, without a terminal:
 
 ```sh
@@ -49,6 +55,42 @@ npm run web
 ```
 
 Then open <http://127.0.0.1:8765>.
+
+## Background residency
+
+Background residency is off by default. It is a property of the process, so the
+regular and Pro workspaces share it; changing it in either page (or in the
+terminal's **Settings → Background residency**) applies to the next CLI launch.
+
+With it on, `neutrino` starts the Web console as a detached process and prints
+its address instead of mounting a listener in the terminal process. Conversations
+started from the browser belong to that process, so closing the terminal or
+exiting the CLI does not interrupt them. The terminal's own conversations remain
+local to the terminal. A ready service can be managed without a terminal:
+
+```sh
+neutrino background start     # detach the web console
+neutrino background status    # show its pid and address
+neutrino background open      # open it in the default browser
+neutrino background stop      # stop it
+```
+
+On Windows the service adds a notification-area icon using the same orbit badge
+as the regular console's top-left logo. Click it to open the console; its menu
+opens or stops the service. `--no-tray` suppresses it, and `NEUTRINO_NO_TRAY=1`
+does the same for automation. The service records its pid, address and a random
+management token in `~/.neutrino/background.json` (mode `0600`) and appends
+startup/stop diagnostics to `~/.neutrino/background.log`. The token protects
+`/api/background/ping` and `/api/background/stop`; it is never sent to a
+browser.
+
+When a console is mounted by the terminal and the setting is off, the first
+browser to open it is offered **建议开启后台常驻，避免误触中断任务** with a
+highlighted **开启** and **取消**. Either answer consumes the invitation for
+that CLI run — a reload does not ask again. **开启** saves the setting for the
+next launch; the current console keeps running in-process until then. The
+invitation is never shown by a detached service (it is already in the
+background) or by a bare `neutrino web` server.
 
 ## Using it from another device
 
@@ -193,15 +235,16 @@ removed can still be continued.
 The **Settings** (gear) button in the sidebar opens the interface language,
 plan-first turns, the default approval mode, defaults for new conversations, the
 context compression threshold, the approval reviewer model, sound alerts, the
-extreme-risk automatic approval option, LAN access, and the Web password. Save
-settings explicitly; cancelling leaves the saved values intact. Conversation
-model changes are separate from these defaults. Models come from the same
-catalog as the terminal, and API keys stay on the server. Configure missing keys
-in the terminal model screen first. Intensity uses the same Low–Ultra sampling
-settings as the terminal, and both only offer the levels the selected model
-declares in `model.json`. The regular and [Pro](#pro-workspace) workspaces keep
-their own copy of every setting here except the approval policy, the Web password
-and LAN access, which belong to the whole process.
+extreme-risk automatic approval option, background residency, LAN access, and
+the Web password. Save settings explicitly; cancelling leaves the saved values
+intact. Conversation model changes are separate from these defaults. Models come
+from the same catalog as the terminal, and API keys stay on the server. Configure
+missing keys in the terminal model screen first. Intensity uses the same
+Low–Ultra sampling settings as the terminal, and both only offer the levels the
+selected model declares in `model.json`. The regular and [Pro](#pro-workspace)
+workspaces keep their own copy of every setting here except the approval policy,
+the Web password, LAN access and background residency, which belong to the whole
+process.
 
 ## New conversations and working directories
 
@@ -336,8 +379,11 @@ to know whether a conversation is driven by the terminal or by the server.
 | GET | `/api/fs?path=…` | Folder listing for the picker (folders only, roots, parent) |
 | POST | `/api/fs/mkdir` | Create `{ "path": "…" }` and return the new path |
 | POST | `/api/conversations` | Start `{ cwd, selection?, approval_mode? }`, returns `{ key, snapshot }` |
-| GET | `/api/settings` | Model catalog (each model lists its supported intensities), languages, public settings, and the live bind address (`web_host`, `web_urls`); no credentials |
-| POST | `/api/settings` | Save validated `{ selection?, settings? }`, including `language`, `plan_first`, `approval_mode`, `web_lan` and `web_password` |
+| GET | `/api/settings` | Model catalog (each model lists its supported intensities), languages, public settings, the live bind address (`web_host`, `web_urls`) and the background state (`background`, `background_running`, `background_url`, one-time `background_prompt`); no credentials |
+| POST | `/api/settings` | Save validated `{ selection?, settings? }`, including `language`, `plan_first`, `approval_mode`, `web_lan`, `background` and `web_password` |
+| POST | `/api/background/dismiss` | Consume the one-time background-residency invitation for this console run |
+| GET | `/api/background/ping` | Management probe of a detached service; requires `Authorization: Bearer <background.json token>` |
+| POST | `/api/background/stop` | Ask a detached service to shut down; same bearer token |
 | GET | `/api/session/:id` | One saved transcript |
 | POST | `/api/session/:id/continue` | Resume a transcript with optional `{ selection }`, returns `{ key }` |
 | POST | `/api/session/:id/delete` | Delete a saved, non-running transcript |
@@ -360,7 +406,10 @@ to know whether a conversation is driven by the terminal or by the server.
 
 Conversation and settings routes require the login cookie; see
 [Authentication](#authentication). `OPTIONS` is answered unauthenticated so
-preflights are not blocked, and it returns no data.
+preflights are not blocked, and it returns no data. The `/api/background/*`
+management routes are the exception: they exist only in a detached service and
+authenticate with the bearer token from `background.json`, because the CLI and
+the tray icon have no browser cookie.
 
 ### Approval requests
 

@@ -16,6 +16,8 @@ export interface AppState {
   approval: { tool: string; level: "high" | "extreme" } | null;
   /** URL of the running browser UI, or null when it is not mounted. */
   webUrl: string | null;
+  /** True when that console is owned by the detached background service. */
+  webBackground: boolean;
   /** Active mouse text selection, or null when nothing is selected. */
   selection: Selection | null;
 }
@@ -33,6 +35,7 @@ export function defaultState(): AppState {
     cursorOn: true,
     approval: null,
     webUrl: null,
+    webBackground: false,
     selection: null,
   };
 }

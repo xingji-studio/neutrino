@@ -21,7 +21,7 @@ import { centerVertically, drawHint } from "../ui.js";
 import { hashWebPassword } from "../web/auth.js";
 
 /** The settings that can be changed here, top to bottom. */
-const ROWS = ["intensity", "compress", "approval_model", "extreme_approval", "sound", "web_console", "web_password"] as const;
+const ROWS = ["intensity", "compress", "approval_model", "extreme_approval", "sound", "web_console", "background", "web_password"] as const;
 type RowId = (typeof ROWS)[number];
 
 export class SettingsScreen extends Screen {
@@ -38,8 +38,11 @@ export class SettingsScreen extends Screen {
   private soundIdx = 1;
   /** 0 = web UI off, 1 = mounted alongside the terminal. */
   private webIdx = 1;
+  /** 0 = terminal only, 1 = the Web console is run by a detached service. */
+  private backgroundIdx = 0;
   /** Only a row the user actually touched rewrites the saved default. */
   private webChanged = false;
+  private backgroundChanged = false;
   private models: string[] = [];
   private rowIdx = 0;
   private lastHoverX = -1;
@@ -69,6 +72,8 @@ export class SettingsScreen extends Screen {
     // off, so reflect what is actually running first.
     this.webIdx = (this.app.state.webUrl || config.web_console !== false) ? 1 : 0;
     this.webChanged = false;
+    this.backgroundIdx = config.background === true ? 1 : 0;
+    this.backgroundChanged = false;
   }
 
   /** Change the value of a row by `delta` steps and persist it immediately. */
@@ -97,6 +102,20 @@ export class SettingsScreen extends Screen {
       // Mount or unmount immediately; a failed bind is shown as a toast and
       // the saved preference stays on so the next launch tries again.
       void this.app.setWebConsole(this.webIdx === 1);
+      return;
+    } else if (row === "background") {
+      this.backgroundIdx = this.backgroundIdx === 1 ? 0 : 1;
+      this.backgroundChanged = true;
+      this.save();
+      // A launch-time mode: the current process already owns its console (or
+      // deliberately does not), so the new value applies to the next launch.
+      this.app.showToast?.(
+        this.backgroundIdx === 1
+          ? "Background residency on: starts with the next CLI launch"
+          : "Background residency off: applies to the next launch",
+        "top",
+      );
+      this.app.render();
       return;
     } else {
       const options = [...new Set([...CONTEXT_WINDOW_OPTIONS, this.contextTokens])].sort((a, b) => a - b);
@@ -241,8 +260,18 @@ export class SettingsScreen extends Screen {
         value: this.webIdx === 0
           ? "Off"
           : this.app.state.webUrl
-            ? `On · ${this.app.state.webUrl}`
+            ? this.app.state.webBackground
+              ? `On (background) · ${this.app.state.webUrl}`
+              : `On · ${this.app.state.webUrl}`
             : "On (not running)",
+      },
+      {
+        label: "Background residency",
+        value: this.backgroundIdx === 0
+          ? "Off"
+          : this.app.state.webBackground
+            ? "On (running)"
+            : "On (next CLI launch)",
       },
       {
         label: "Web password",
@@ -283,6 +312,10 @@ export class SettingsScreen extends Screen {
     if (this.webChanged) {
       config.web_console = this.webIdx === 1;
       this.webChanged = false;
+    }
+    if (this.backgroundChanged) {
+      config.background = this.backgroundIdx === 1;
+      this.backgroundChanged = false;
     }
     saveConfig(config);
   }

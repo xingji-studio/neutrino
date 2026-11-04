@@ -147,6 +147,7 @@ function showGate(message = "") {
   closeStream();
   setStatus("locked", "offline");
   document.getElementById("settings-dialog").close();
+  document.getElementById("background-dialog")?.close?.();
 
   // A modal dialog stays above streaming repaints and traps keyboard focus.
   const gate = document.createElement("dialog");
@@ -184,6 +185,77 @@ function showGate(message = "") {
   gate.showModal();
 }
 
+// -------------------------------------------------------- background invite
+//
+// A console mounted by the terminal dies with it. The server offers this
+// one-time invitation before the user has invested a long turn; accepting
+// saves the process-wide setting, which the next CLI launch applies. The
+// detached service itself never offers it (it is already in the background).
+
+let backgroundPromptAnswered = false;
+
+function showBackgroundPrompt() {
+  if (backgroundPromptAnswered || !el.backgroundDialog?.showModal) return;
+  if (el.backgroundDialog.open) return;
+  if (el.backgroundFeedback) {
+    el.backgroundFeedback.textContent = "";
+    el.backgroundFeedback.classList.remove("error");
+  }
+  try {
+    el.backgroundDialog.showModal();
+  } catch {
+    // An embedder without dialog support still gets the setting in Settings.
+  }
+}
+
+function maybePromptBackground(config) {
+  if (!config?.settings?.background_prompt) return;
+  if (config.settings.background === true) return;
+  showBackgroundPrompt();
+}
+
+async function answerBackgroundPrompt(enable) {
+  if (backgroundPromptAnswered) return;
+  backgroundPromptAnswered = true;
+  const feedback = el.backgroundFeedback;
+  const cancel = el.backgroundCancel;
+  const confirm = el.backgroundEnable;
+  if (cancel) cancel.disabled = true;
+  if (confirm) confirm.disabled = true;
+  if (feedback) {
+    feedback.textContent = "";
+    feedback.classList.remove("error");
+  }
+  try {
+    if (enable) {
+      const response = await apiFetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings: { background: true } }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+      try { await preferences.load(); } catch { /* The saved flag is enough. */ }
+    } else {
+      // Consume the invitation for this CLI run. A failed dismissal is
+      // harmless: the prompt simply returns on the next page load.
+      try {
+        await apiFetch("/api/background/dismiss", { method: "POST" });
+      } catch { /* Keep the close local. */ }
+    }
+    el.backgroundDialog?.close?.();
+  } catch (error) {
+    backgroundPromptAnswered = false;
+    if (feedback) {
+      feedback.textContent = tr(error.message);
+      feedback.classList.add("error");
+    }
+  } finally {
+    if (cancel) cancel.disabled = false;
+    if (confirm) confirm.disabled = false;
+  }
+}
+
 const el = {
   app: document.getElementById("app"),
   back: document.getElementById("back-to-menu"),
@@ -195,6 +267,7 @@ const el = {
   proTip: document.getElementById("pro-tip"),
   proTipClose: document.getElementById("pro-tip-close"),
   proExit: document.getElementById("pro-exit"),
+  header: document.getElementById("main-header"),
   title: document.getElementById("session-title"),
   sub: document.getElementById("session-sub"),
   controls: document.getElementById("controls"),
@@ -255,7 +328,24 @@ const el = {
   agentActions: document.getElementById("agent-actions"),
   agentMigrate: document.getElementById("agent-migrate"),
   agentMigrateFeedback: document.getElementById("agent-migrate-feedback"),
+  backgroundDialog: document.getElementById("background-dialog"),
+  backgroundFeedback: document.getElementById("background-feedback"),
+  backgroundCancel: document.getElementById("background-cancel"),
+  backgroundEnable: document.getElementById("background-enable"),
 };
+
+if (el.backgroundCancel) {
+  el.backgroundCancel.addEventListener("click", () => { void answerBackgroundPrompt(false); });
+}
+if (el.backgroundEnable) {
+  el.backgroundEnable.addEventListener("click", () => { void answerBackgroundPrompt(true); });
+}
+if (el.backgroundDialog) {
+  el.backgroundDialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    void answerBackgroundPrompt(false);
+  });
+}
 
 const state = {
   overview: null,
@@ -750,12 +840,14 @@ function openStream(key) {
 
   source.onopen = () => setStatus("live", "live");
   source.onerror = () => {
-    // EventSource retries automatically; just surface the state.
+    // EventSource retries automatically; wait for a fresh snapshot to flash.
+    el.header?.classList.remove("is-thinking");
     setStatus("reconnecting…", "offline");
   };
 }
 
 function closeStream() {
+  el.header?.classList.remove("is-thinking");
   if (state.eventSource) {
     state.eventSource.close();
     state.eventSource = null;
@@ -876,6 +968,24 @@ function setComposerMode(mode) {
     : mode === "new"
       ? tr("Message Neutrino in this folder…")
       : tr("Message Neutrino…");
+  renderComposerAction();
+}
+
+function canPauseFromComposer() {
+  const selection = state.selection;
+  const snapshot = state.snapshot;
+  return Boolean(selection?.kind === "live" && snapshot?.key === selection.key
+    && snapshot.busy && !snapshot.paused && !el.input.value.trim());
+}
+
+function renderComposerAction() {
+  const pause = canPauseFromComposer();
+  const label = pause ? "Pause" : "Send message";
+  el.send.classList.toggle("is-pause", pause);
+  el.send.setAttribute("data-i18n-title", label);
+  el.send.setAttribute("data-i18n-aria-label", label);
+  el.send.title = tr(label);
+  el.send.setAttribute("aria-label", tr(label));
 }
 
 function hideComposer() {
@@ -1033,6 +1143,8 @@ function decideApproval(approved) {
 function renderLive() {
   const snapshot = state.snapshot;
   if (!snapshot) return;
+  renderComposerAction();
+  el.header?.classList.toggle("is-thinking", Boolean(snapshot.busy && !snapshot.paused && !snapshot.approval));
   state.fileData = null;
   state.agentData = null;
   el.title.textContent = snapshot.title || tr("New conversation");
@@ -1399,6 +1511,11 @@ async function postAction(key, action, body) {
   }
 }
 
+function activateComposer() {
+  if (canPauseFromComposer()) return postAction(state.selection.key, "pause");
+  return sendMessage();
+}
+
 async function sendMessage() {
   const selection = state.selection;
   if (!selection) return;
@@ -1450,6 +1567,7 @@ async function sendMessage() {
 function autosize() {
   el.input.style.height = "auto";
   el.input.style.height = `${Math.min(el.input.scrollHeight, 220)}px`;
+  renderComposerAction();
 }
 
 // ------------------------------------------------------- workspaces & dialogs
@@ -2556,7 +2674,7 @@ function initializeProWorkspace() {
 
 el.refresh.addEventListener("click", () => loadOverview());
 el.back.addEventListener("click", () => setConversationView(false));
-el.send.addEventListener("click", sendMessage);
+el.send.addEventListener("click", activateComposer);
 el.input.addEventListener("input", autosize);
 el.input.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
@@ -2661,10 +2779,14 @@ window.addEventListener("beforeunload", closeStream);
 initializeLanguage();
 initializeProWorkspace();
 preferences.load()
-  .then((config) => {
+  .then(async (config) => {
     const language = config?.settings?.language;
-    if (language && language !== uiLanguage()) return changeInterfaceLanguage(language, { persist: false });
-    return undefined;
+    if (language && language !== uiLanguage()) {
+      await changeInterfaceLanguage(language, { persist: false });
+    }
+    // Offer background residency only after the interface language is settled,
+    // so the invitation is never briefly shown in the wrong language.
+    maybePromptBackground(config);
   })
   .catch(error => console.error(error));
 loadOverview().then(() => {

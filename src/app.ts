@@ -27,6 +27,7 @@ import { ModelSelectScreen } from "./screens/modelSelect.js";
 import { SettingsScreen } from "./screens/settings.js";
 import { StartScreen } from "./screens/start.js";
 import { startWebServer, type WebServerHandle } from "./web/server.js";
+import { startBackgroundService, stopBackgroundService, type BackgroundStatus } from "./background.js";
 
 const CURSOR_BLINK_MS = 530;
 const TOAST_MS = 1600;
@@ -106,6 +107,10 @@ export class App {
   private webHandle: WebServerHandle | null = null;
   /** Where the web UI lives; kept even while it is switched off. */
   private webOptions: { port: number; host?: string; auth: boolean } = { port: 8765, auth: true };
+  /** Offer the background-residency prompt when this process mounts the UI. */
+  private webPromptBackground = true;
+  /** True while the Web console is owned by the detached background service. */
+  private webBackground = false;
   /** True while a click is bringing the Web console up, so double clicks are safe. */
   private proOpening = false;
 
@@ -153,9 +158,24 @@ export class App {
   /**
    * Remember where the browser UI should listen. Called at startup even when
    * the console is disabled, so Settings can mount it later without guessing.
+   * `backgroundPrompt` is false when the console is meant to run detached.
    */
-  configureWeb(port: number, host: string | undefined, auth: boolean): void {
+  configureWeb(port: number, host: string | undefined, auth: boolean, backgroundPrompt = true): void {
     this.webOptions = { port, host, auth };
+    this.webPromptBackground = backgroundPrompt;
+  }
+
+  /**
+   * Adopt a Web console that another process owns. No socket is opened here:
+   * the terminal only records the address, so Settings and the Pro button can
+   * reach it later.
+   */
+  attachBackground(status: BackgroundStatus): void {
+    this.webBackground = true;
+    this.webHandle = null;
+    this.webOptions = { port: status.port, host: status.host, auth: status.auth_required };
+    this.state.webUrl = status.url;
+    this.state.webBackground = true;
   }
 
   /**
@@ -165,10 +185,38 @@ export class App {
   async enableWeb(port: number, host?: string, auth = true): Promise<WebServerHandle> {
     if (this.webHandle) return this.webHandle;
     this.webOptions = { port, host, auth };
-    const handle = await startWebServer({ port, host, auth });
+    const handle = await startWebServer({ port, host, auth, backgroundPrompt: this.webPromptBackground });
     this.webHandle = handle;
+    this.webBackground = false;
     this.state.webUrl = handle.url;
+    this.state.webBackground = false;
     return handle;
+  }
+
+  /**
+   * The address the console is reachable at right now: the local socket, the
+   * detached service, or nothing.
+   */
+  private currentWebUrl(): string | null {
+    return this.webHandle?.url ?? (this.webBackground ? this.state.webUrl : null);
+  }
+
+  /**
+   * Start the Web console when it is not up yet, whether it is configured to
+   * run in-process or in the background. Returns the URL to open.
+   */
+  private async ensureWebConsole(): Promise<string> {
+    const existing = this.currentWebUrl();
+    if (existing) return existing;
+    if (loadConfig().background === true) {
+      const started = await startBackgroundService({ ...this.webOptions, tray: true });
+      if (started.ok) {
+        this.attachBackground(started.status);
+        return started.status.url;
+      }
+    }
+    const handle = await this.enableWeb(this.webOptions.port, this.webOptions.host, this.webOptions.auth);
+    return handle.url;
   }
 
   /**
@@ -178,17 +226,27 @@ export class App {
    */
   async setWebConsole(enabled: boolean): Promise<{ ok: boolean; error?: string }> {
     if (enabled) {
-      if (this.webHandle) return { ok: true };
+      if (this.webHandle || this.webBackground) return { ok: true };
       try {
-        await this.enableWeb(this.webOptions.port, this.webOptions.host, this.webOptions.auth);
-        this.showToast(`Web console: ${this.state.webUrl}`);
+        const url = await this.ensureWebConsole();
+        this.showToast(`Web console: ${url}`);
         return { ok: true };
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
         this.state.webUrl = null;
+        this.state.webBackground = false;
         this.showToast(`Web console failed: ${error}`, "top");
         return { ok: false, error };
       }
+    }
+    if (this.webBackground) {
+      this.webBackground = false;
+      this.state.webUrl = null;
+      this.state.webBackground = false;
+      this.render();
+      const stopped = await stopBackgroundService();
+      this.showToast(stopped.ok ? "Background console stopped" : "Background console could not be stopped", stopped.ok ? "bottom" : "top");
+      return stopped.ok ? { ok: true } : { ok: false, error: stopped.error };
     }
     const handle = this.webHandle;
     this.webHandle = null;
@@ -209,13 +267,10 @@ export class App {
     if (this.proOpening) return;
     this.proOpening = true;
     try {
-      let handle = this.webHandle;
-      if (!handle) {
-        handle = await this.enableWeb(this.webOptions.port, this.webOptions.host, this.webOptions.auth);
-      }
-      const url = proModeUrl(handle.url);
-      openInBrowser(url);
-      this.showToast(`Opening Pro mode: ${url}`);
+      const url = await this.ensureWebConsole();
+      const target = proModeUrl(url);
+      openInBrowser(target);
+      this.showToast(`Opening Pro mode: ${target}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.showToast(`Pro mode failed: ${message}`, "top");

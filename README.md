@@ -16,6 +16,7 @@ Neutrino 是由 XINGJI 工作室开发的一款跨生态跨平台的全新架构
 - 配置文件条目清晰，想怎么用就怎么用，相比于 OpenCode 更加方便。
 - 更严谨更方便的自动审批系统，**一键切换**，多智能体评审，保证数据安全。
 - 超级轻量，总代码量仅 3 万行。
+- 兼容 ClaudeCode、OpenCode、Codex 等多种 Agent 的对话格式，无缝迁移。
 - 1000 万以内最好的 Agent！（绝对没有嘲讽某公司的意思）
 
 ## 相比于 OpenCode 的优势
@@ -40,6 +41,7 @@ npm install -g @xingjisoft/neutrino
 ## 使用小技巧
 
 - Web 控制台配合 Tailscale 等软件，可以直接实现外网安全远控！而且无需下载，打开即用！
+- 支持后台常驻（默认关闭）：在 Web 控制台或终端设置中开启后，关闭终端也不会中断浏览器里开始的任务。也可以用 `neutrino background start|stop|status|open` 管理后台控制台。
 
 ---
 

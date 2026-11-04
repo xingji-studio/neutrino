@@ -162,7 +162,7 @@
                 </div>
               </details>
               <button id="send" class="primary" type="button" title="Send message" aria-label="Send message" data-i18n-title="Send message" data-i18n-aria-label="Send message">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="send-icon" d="M12 19V5M5 12l7-7 7 7" /><rect class="pause-icon" x="5" y="5" width="14" height="14" rx="2" fill="currentColor" stroke="none" /></svg>
               </button>
             </div>
             <div class="composer-hint">
@@ -227,6 +227,9 @@
           <label class="checkbox-label"><input id="settings-sound" type="checkbox" /> <span data-i18n="Sound alerts (turn finished, approval waiting)">Sound alerts (turn finished, approval waiting)</span></label>
           <label class="checkbox-label"><input id="settings-web-console" type="checkbox" /> <span data-i18n="Start the Web console with the terminal">Start the Web console with the terminal</span></label>
           <p class="settings-note" data-i18n="Safety determines automatic approval; task relevance only blocks unanimously confirmed, extreme mismatches. Delete-class automatic approval also requires this setting.">Safety determines automatic approval; task relevance only blocks unanimously confirmed, extreme mismatches. Delete-class automatic approval also requires this setting.</p>
+          <h3 data-i18n="Background residency">Background residency</h3>
+          <label class="checkbox-label"><input id="settings-background" type="checkbox" /> <span data-i18n="Run the Web console in the background and keep browser tasks alive after the CLI exits">Run the Web console in the background and keep browser tasks alive after the CLI exits</span></label>
+          <p class="settings-note" data-i18n="Off by default. Takes effect on the next CLI launch; the regular and Pro workspaces share this setting. Closing the terminal then cannot interrupt tasks started in the browser.">Off by default. Takes effect on the next CLI launch; the regular and Pro workspaces share this setting. Closing the terminal then cannot interrupt tasks started in the browser.</p>
           <h3 data-i18n="Web access">Web access</h3>
           <label class="checkbox-label"><input id="settings-web-lan" type="checkbox" /> <span data-i18n="Allow access from other devices (LAN, 0.0.0.0)">Allow access from other devices (LAN, 0.0.0.0)</span></label>
           <p class="settings-note" data-i18n="Binds the Web console to 0.0.0.0 so other devices on your network can open it, like --lan. Takes effect immediately; turning it off returns the console to 127.0.0.1. Keep the Web password on: anyone who can reach this port can drive the agent.">Binds the Web console to 0.0.0.0 so other devices on your network can open it, like --lan. Takes effect immediately; turning it off returns the console to 127.0.0.1. Keep the Web password on: anyone who can reach this port can drive the agent.</p>
@@ -242,6 +245,27 @@
           <button id="settings-save" class="primary" type="submit" data-i18n="Save changes">Save changes</button>
         </footer>
       </form>
+    </dialog>
+
+    <dialog id="background-dialog" class="sheet-dialog background-dialog" aria-labelledby="background-title">
+      <div class="sheet background-sheet">
+        <header class="sheet-header background-header">
+          <span class="background-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <ellipse cx="12" cy="12" rx="9.4" ry="3.8" transform="rotate(-30 12 12)" stroke="currentColor" stroke-width="1.7" />
+              <circle cx="12" cy="12" r="3.1" stroke="currentColor" stroke-width="1.7" />
+            </svg>
+          </span>
+          <div class="background-copy">
+            <h2 id="background-title" data-i18n="Enable background residency to avoid accidentally interrupting tasks">Enable background residency to avoid accidentally interrupting tasks</h2>
+          </div>
+        </header>
+        <p id="background-feedback" class="form-feedback background-feedback" role="status" aria-live="polite"></p>
+        <footer class="sheet-actions background-actions">
+          <button id="background-cancel" class="control" type="button" data-i18n="Cancel">Cancel</button>
+          <button id="background-enable" class="primary" type="button" data-i18n="Enable" autofocus>Enable</button>
+        </footer>
+      </div>
     </dialog>
 
     <dialog id="new-chat-dialog" class="sheet-dialog" aria-labelledby="new-chat-title">

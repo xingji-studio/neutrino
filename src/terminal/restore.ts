@@ -101,7 +101,16 @@ export function writeCrashLog(kind: string, err: unknown): string | null {
  * `[<b>;<x>;<y>M` mouse reports at the shell prompt, because the shell now
  * receives the mouse events the TUI asked the terminal to send.
  */
-export function installCrashGuard(): void {
+export interface CrashGuardOptions {
+  /**
+   * Keep SIGHUP for the caller. A detached background service must survive the
+   * terminal that started it closing (on POSIX that arrives as SIGHUP), while
+   * the terminal UI still wants a hangup to end the process.
+   */
+  surviveHangup?: boolean;
+}
+
+export function installCrashGuard(options: CrashGuardOptions = {}): void {
   if (installed) return;
   installed = true;
 
@@ -124,7 +133,7 @@ export function installCrashGuard(): void {
 
   // These signals otherwise bypass Node's exit hook, including Ctrl+Break on
   // Windows. The app handles SIGINT as an interrupt and SIGTERM as a quit.
-  process.on("SIGHUP", () => process.exit(129));
+  if (!options.surviveHangup) process.on("SIGHUP", () => process.exit(129));
   process.on("SIGBREAK", () => process.exit(149));
 
   const fatal = (kind: string, err: unknown): void => {

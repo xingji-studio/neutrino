@@ -31,10 +31,10 @@ export const PRO_SESSION_DIR = path.join(PRO_DIR, "session");
 
 /**
  * Settings that intentionally apply to both workspaces. The Web password, the
- * approval policy and the console's interface are properties of this process,
- * not of a conversation workspace.
+ * approval policy, the console's interface/LAN access and background residency
+ * are properties of this process, not of a conversation workspace.
  */
-export const SHARED_CONFIG_KEYS = ["web_password_hash", "approval_mode", "auto_approve_extreme_risk", "web_lan"] as const;
+export const SHARED_CONFIG_KEYS = ["web_password_hash", "approval_mode", "auto_approve_extreme_risk", "web_lan", "background"] as const;
 
 export function normalizeMode(value: unknown): Mode {
   return typeof value === "string" && value.trim().toLowerCase() === "pro" ? "pro" : "standard";
@@ -201,6 +201,10 @@ export const DEFAULT_CONFIG: Record<string, unknown> = {
   // Listen on every interface (the equivalent of --lan) instead of loopback.
   // The listener belongs to the process, so both workspaces share this value.
   web_lan: false,
+  // Keep the Web console and the conversations it runs alive after the
+  // terminal UI exits. This is a property of the machine, not of a workspace,
+  // so the regular site and Pro share it.
+  background: false,
   // Working directories opened from the browser, newest first. They remain
   // listed even when they hold no conversations yet.
   web_workspaces: [],

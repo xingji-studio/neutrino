@@ -228,13 +228,17 @@ try {
   node("settings-reviewer").value = "b-only";
   node("settings-extreme").checked = false;
   node("settings-web-lan").checked = true;
+  assert.equal(node("settings-background").checked, false, "background residency starts off");
+  node("settings-background").checked = true;
   await node("settings-form").fire("submit");
   assert.equal(loadConfig().selected_provider, a.provider);
   assert.equal(loadConfig().default_intensity, "Medium");
   assert.equal(getWebSettings().settings.model_context_window, 64000);
   assert.equal(loadConfig().auto_approve_extreme_risk, false);
   assert.equal(loadConfig().web_lan, true, "the LAN switch is saved with the other settings");
+  assert.equal(loadConfig().background, true, "the background switch is saved with the other settings");
   assert.match(node("settings-feedback").textContent, /saved/);
+  assert.match(node("settings-feedback").textContent, /Background residency will start/);
   assert.match(node("settings-feedback").textContent, /LAN access is on/);
   await node("settings-cancel").fire("click");
   assert.equal(node("settings-dialog").open, false);
@@ -266,7 +270,7 @@ try {
   // Strip every module import: the test injects the same bindings into the vm
   // context above (settings.js and turns.js are real ES modules).
   const source = fs.readFileSync(new URL("../web/app.js", import.meta.url), "utf8").replace(/^import .*;\r?\n/gm, "");
-  vm.runInContext(source + "\nglobalThis.appTest = { state, preferences, loadOverview, selectLive, renderLive, syncSelection };", browser);
+  vm.runInContext(source + "\nglobalThis.appTest = { state, preferences, loadOverview, selectLive, renderLive, syncSelection, maybePromptBackground };", browser);
   const appTest = browser.appTest;
   await appTest.preferences.load();
   await appTest.loadOverview();
@@ -288,6 +292,19 @@ try {
   assert.ok(node("composer").classes.has("hidden"));
   assert.deepEqual(browserErrors, []);
   console.log("ok browser entry point: live model requests, response rendering and ended-session cleanup");
+
+  // The one-time background invitation: shown only when the server asks for it,
+  // and its primary action saves the shared setting and closes the dialog.
+  appTest.maybePromptBackground({ settings: { background: false, background_prompt: true } });
+  assert.equal(node("background-dialog").open, true, "the invitation opens");
+  await node("background-enable").fire("click");
+  await new Promise(resolve => setTimeout(resolve, 25));
+  const backgroundRequest = browserRequests.find(request =>
+    request.url === "/api/settings" && request.init?.method === "POST"
+    && String(request.init.body ?? "").includes('"background":true'));
+  assert.ok(backgroundRequest, "the highlighted Enable button saves background residency");
+  assert.equal(node("background-dialog").open, false, "the invitation closes after Enable");
+  console.log("ok background invitation: shown on request, highlighted Enable saves the setting");
 } finally {
   LLMClient.prototype.streamTurn = originalStream;
   if (previousDocument === undefined) delete globalThis.document; else globalThis.document = previousDocument;

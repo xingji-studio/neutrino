@@ -23,6 +23,7 @@ A CLI coding agent that lives in your terminal. Neutrino gives you an interactiv
 - **Agent history browser** — view past sessions from other CLI agents (Claude Code, Codex, OpenCode), or migrate them into a new Neutrino conversation in the same working directory.
 - **Approval gate** — risky commands and paths outside the working directory need your sign-off. The header turns orange and reads **Request Approval**; press `Y` or `N`. Delete-class commands always ask, unless you explicitly granted full trust, and there is an opt-in reviewer agent for automatic decisions.
 - **Browser UI on by default** — every `neutrino` launch also mounts a local website at <http://127.0.0.1:8765> that lists every saved conversation grouped by working directory, streams the running one in real time, and lets you pause/resume it, send messages, start new conversations, open or create working directories, switch provider/model/intensity, edit every terminal setting, and switch the interface between English and 简体中文. Use `--port`/`--host` to move it, `--lan` to share it, or `--no-web` to keep the terminal only.
+- **Background residency (off by default)** — let the Web console and the conversations started in it keep running after the terminal or CLI exits, with a Windows tray icon, a shared regular/Pro setting, and a one-time invitation in the console. Start or stop it with `neutrino background start|stop|status|open`.
 - **Pro workspace** — click the orbit badge in the Web UI (or the **启用Pro模式** box under the terminal's status bar) to switch to an isolated workspace at `/pro`, introduced by a three-second animated wordmark. Pro coordinates eight model roles with a preset slider, mandatory planning, temporary per-role fallback and configurable recursion; only machine-wide settings (the Web password, approval policy and LAN binding) are shared. See [Pro workspace](#pro-workspace).
 
 ## Requirements
@@ -54,7 +55,9 @@ neutrino
 
 Type a message on the start screen and press `Enter` to begin a new chat.
 The browser UI is mounted at <http://127.0.0.1:8765> at the same time; see
-[Web UI](#web-ui) below for `--port`, `--lan` and `--no-web`.
+[Web UI](#web-ui) below for `--port`, `--lan`, `--no-web` and background
+residency. `neutrino background start` detaches the console so browser tasks
+survive the terminal.
 
 ### Keys
 
@@ -449,6 +452,40 @@ permanently in the terminal's **Settings → Web console**. The `--web-port` fla
 is still accepted as an alias for `--port`. If the default port is already taken
 (usually by another Neutrino instance), the terminal UI starts anyway and prints
 how to choose another port.
+
+### Background residency
+
+Background residency is **off by default**. Turn it on in the browser's
+**Settings → Background residency** (the regular and Pro workspaces share the
+setting) or in the terminal's **Settings → Background residency**. It applies to
+the next CLI launch: `neutrino` then starts the Web console as a detached
+process and prints its address instead of opening a listener in the terminal
+process. Conversations started from the browser live in that process, so closing
+the terminal or exiting the CLI cannot interrupt them. Terminal conversations
+stay local to the terminal.
+
+A detached console can be managed without a terminal:
+
+```sh
+neutrino background start     # detach the Web console
+neutrino background status    # show its pid and address
+neutrino background open      # open it in the default browser
+neutrino background stop      # stop it
+```
+
+On Windows it shows a notification-area icon using the regular console's orbit
+badge: click it to open the console, or use its menu to open or stop the
+service. `--no-tray` keeps the icon out (also `NEUTRINO_NO_TRAY=1`). Startup and
+stop diagnostics go to `~/.neutrino/background.log`; the pid, address and a
+random management token are kept in `~/.neutrino/background.json` (mode `0600`).
+The token protects the service's ping/stop endpoints and is never exposed to a
+browser.
+
+When the console is running in-process and background residency is off, the
+first browser to open it gets a one-time invitation: **建议开启后台常驻，避免误触中断任务**
+with a highlighted **开启** and **取消**. Either answer consumes it for that CLI
+run; **开启** saves the setting for the next launch. A detached console and a
+bare `neutrino web` server never show it.
 
 ### Reaching it from another device
 

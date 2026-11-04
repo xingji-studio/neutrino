@@ -32,7 +32,8 @@ export function drawHeader(buf: Buffer, state: AppState): void {
   if (state.webUrl) {
     // A short reminder that the browser console is live; the startup message
     // prints the full addresses when more than one works.
-    text += `  ·  web ${state.webUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")}`;
+    const label = state.webBackground ? "web (background)" : "web";
+    text += `  ·  ${label} ${state.webUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")}`;
   }
   text = truncateByWidth(text, w);
   buf.centerText(0, text, { fg: C.accent, bg: C.highlightBg, bold: true });

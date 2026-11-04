@@ -73,6 +73,7 @@ export function getWebSettings(mode: Mode = "standard") {
       approval_mode: normalizeApprovalMode(config.approval_mode),
       web_console: config.web_console !== false,
       web_lan: config.web_lan === true,
+      background: config.background === true,
     },
   };
 }
@@ -137,6 +138,9 @@ export function updateWebSettings(value: unknown, mode: Mode = "standard"): void
       } else if (key === "web_lan") {
         if (typeof val !== "boolean") throw new Error("LAN access must be a boolean");
         config.web_lan = val;
+      } else if (key === "background") {
+        if (typeof val !== "boolean") throw new Error("background residency must be a boolean");
+        config.background = val;
       } else if (key === "web_password") {
         validateWebPassword(val);
       } else {

@@ -597,6 +597,16 @@ svg {
   border-bottom: 1px solid var(--border-soft);
 }
 
+/* Match the CLI's 500ms thinking phases across the full title bar. */
+.main-header.is-thinking {
+  background-color: #28393d;
+  animation: header-thinking 1s steps(1, end) infinite;
+}
+
+.main-header.is-thinking .main-title h1 {
+  color: #99d9ea;
+}
+
 .main-title {
   flex: 1;
   min-width: 0;
@@ -1572,6 +1582,15 @@ svg {
 #send svg {
   width: 18px;
   height: 18px;
+}
+
+#send .pause-icon,
+#send.is-pause .send-icon {
+  display: none;
+}
+
+#send.is-pause .pause-icon {
+  display: block;
 }
 
 #send:hover {
@@ -2679,6 +2698,56 @@ select option {
   flex: 1;
 }
 
+/* One-time background-residency invitation. The orbit badge is the regular
+   console's own mark, so the offer reads as part of the same product. */
+.background-dialog {
+  width: min(460px, calc(100vw - 24px));
+}
+
+.background-header {
+  align-items: center;
+  justify-content: flex-start;
+  gap: 14px;
+  border-bottom: 0;
+  padding-bottom: 18px;
+}
+
+.background-mark {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  color: var(--accent);
+  background: var(--surface-1);
+  border: 1px solid var(--border-soft);
+  border-radius: 13px;
+}
+
+.background-mark svg {
+  width: 24px;
+  height: 24px;
+}
+
+.background-copy {
+  min-width: 0;
+}
+
+.background-copy h2 {
+  font-size: 15px;
+  line-height: 1.55;
+  font-weight: 600;
+}
+
+.background-feedback:empty {
+  display: none;
+}
+
+.background-actions {
+  border-top: 1px solid var(--border-soft);
+}
+
 /* Folder picker */
 .folder-sheet {
   max-height: calc(100vh - 32px);
@@ -3051,6 +3120,18 @@ html.pro-transitioning body::before {
 }
 
 /* -------------------------------------------------------------- animations */
+
+@keyframes header-thinking {
+  0%,
+  100% {
+    background-color: #28393d;
+    border-bottom-color: rgba(153, 217, 234, 0.45);
+  }
+  50% {
+    background-color: var(--bg);
+    border-bottom-color: var(--border-soft);
+  }
+}
 
 @keyframes blink {
   0%,

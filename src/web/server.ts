@@ -15,6 +15,7 @@ import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import {
   deleteSession, listSessions, loadConfig, normalizeApprovalMode, resolveModelSelection, saveConfig, sessionDir,
@@ -29,6 +30,7 @@ import { createWebSession, proInitialSelection, resumeSession, WebSession } from
 import { defaultProPreset, requireProPreset } from "../pro/config.js";
 import { listAgentSessions, loadAgentMessages, loadAgentSession, safeAgentSessionId, type AgentId } from "../agents.js";
 import { migrateAgentSession, SessionMigrationError } from "../migration.js";
+import { runningBackground } from "../background.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // dist/web -> package root (mirrors the same trick used in config.ts).
@@ -56,6 +58,16 @@ export interface WebServerOptions {
   host?: string;
   /** Require password login by default. `false` explicitly disables authentication. */
   auth?: boolean;
+  /**
+   * Offer the background-residency prompt to the first browser that opens this
+   * console. Only a console started by the terminal UI sets this.
+   */
+  backgroundPrompt?: boolean;
+  /**
+   * Present only in the detached background service: the token that authorizes
+   * `/api/background/{ping,stop}` and the callback that shuts the process down.
+   */
+  backgroundService?: { token: string; onStop: () => void };
 }
 
 export interface WebServerHandle {
@@ -158,6 +170,10 @@ interface WebBinding {
   host: string;
   port: number;
   setHost(host: string): Promise<void>;
+  /** One-time background-residency prompt, consumed by the first browser. */
+  prompt: { pending: boolean };
+  /** Management token of the detached service, or absent in a terminal run. */
+  service?: { token: string; onStop: () => void };
 }
 
 /**
@@ -169,6 +185,7 @@ function settingsPayload(mode: Mode, binding: WebBinding) {
   const payload = getWebSettings(mode);
   const lan = isWildcardHost(binding.host);
   const { urls } = webUrls(binding.host, binding.port);
+  const background = runningBackground();
   return {
     ...payload,
     settings: {
@@ -177,6 +194,11 @@ function settingsPayload(mode: Mode, binding: WebBinding) {
       web_host: binding.host,
       // Addresses another device can open; empty unless every interface is bound.
       web_urls: lan ? urls.filter((url) => !url.includes("//127.0.0.1:")) : [],
+      // The background service is a process, not a workspace: both pages report
+      // the same state. The prompt is never shown once the setting is on.
+      background_running: Boolean(background),
+      background_url: background?.url ?? "",
+      background_prompt: binding.prompt.pending && payload.settings.background !== true,
     },
   };
 }
@@ -555,6 +577,16 @@ function isSameOrigin(req: http.IncomingMessage): boolean {
   }
 }
 
+/** Constant-time comparison of the service's management token. */
+function hasServiceToken(req: http.IncomingMessage, token: string): boolean {
+  const header = String(req.headers.authorization ?? "");
+  const prefix = "Bearer ";
+  if (!header.startsWith(prefix)) return false;
+  const supplied = Buffer.from(header.slice(prefix.length));
+  const expected = Buffer.from(token);
+  return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+}
+
 function serveStatic(res: http.ServerResponse, pathname: string): void {
   let rel = pathname === "/" ? "/index.html" : pathname;
   try {
@@ -660,6 +692,32 @@ async function handleApi(
     return true;
   }
 
+  // Management endpoints of the detached service. They are called by the CLI
+  // and the tray icon, which have the token from ~/.neutrino/background.json
+  // but not necessarily a browser login cookie.
+  if (pathname === "/api/background/ping" || pathname === "/api/background/stop") {
+    if (req.method !== "GET" && req.method !== "POST") {
+      sendJson(res, 405, { error: "method not allowed" });
+      return true;
+    }
+    if (!binding.service) {
+      sendJson(res, 404, { error: "this console is not running in the background" });
+      return true;
+    }
+    if (!hasServiceToken(req, binding.service.token)) {
+      sendJson(res, 401, { error: "background service token required" });
+      return true;
+    }
+    if (pathname.endsWith("/ping")) {
+      sendJson(res, 200, { ok: true, pid: process.pid, url: webUrls(binding.host, binding.port).url });
+      return true;
+    }
+    sendJson(res, 200, { ok: true, stopping: true });
+    // Let the response reach the caller before the socket closes.
+    setImmediate(() => binding.service?.onStop());
+    return true;
+  }
+
   if (pathname === "/api/auth/login" || pathname === "/api/auth/logout") {
     if (req.method !== "POST") {
       sendJson(res, 405, { error: "method not allowed" });
@@ -689,6 +747,20 @@ async function handleApi(
     return true;
   }
 
+  // The first browser to see the background-residency prompt consumes it for
+  // this console run, whether it accepted or dismissed it.
+  if (pathname === "/api/background/dismiss") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "method not allowed" });
+    } else if (!isSameOrigin(req)) {
+      sendJson(res, 403, { error: "cross-origin request rejected" });
+    } else {
+      binding.prompt.pending = false;
+      sendJson(res, 200, { ok: true });
+    }
+    return true;
+  }
+
   if (pathname === "/api/settings") {
     if (req.method === "GET") {
       sendJson(res, 200, settingsPayload(mode, binding));
@@ -712,6 +784,8 @@ async function handleApi(
         if (desired !== isWildcardHost(binding.host)) {
           await binding.setHost(desired ? WILDCARD_HOST : LOOPBACK_HOST);
         }
+        // Turning background residency on answers the prompt by definition.
+        if (patch?.background === true) binding.prompt.pending = false;
         if ((body as { settings?: { web_password?: unknown } }).settings?.web_password !== undefined) {
           auth.remember(res);
         }
@@ -1251,6 +1325,8 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
     host,
     port,
     setHost: (next) => rebind(next),
+    prompt: { pending: options.backgroundPrompt === true },
+    service: options.backgroundService,
   };
 
   const server = http.createServer((req, res) => {

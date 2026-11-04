@@ -7,7 +7,7 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, proMo
     "settings-open", "settings-dialog", "settings-form", "settings-close", "settings-cancel", "settings-save", "settings-feedback",
     "default-provider", "default-model", "default-intensity", "settings-context", "settings-compress-note", "settings-reviewer",
     "settings-extreme", "settings-sound", "settings-password", "settings-password-confirm",
-    "settings-language", "settings-plan", "settings-approval", "settings-web-console", "settings-web-lan",
+    "settings-language", "settings-plan", "settings-approval", "settings-web-console", "settings-web-lan", "settings-background",
     "settings-pro", "settings-pro-preset", "settings-pro-depth"];
   const el = Object.fromEntries(ids.map(id => [id, document.getElementById(id)]));
   let config = null;
@@ -21,6 +21,9 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, proMo
   // saved, so editing another setting never pins an interface that came from
   // --lan/--host on the command line.
   let lanInitial = false;
+  // Same idea for background residency: the dialog must not overwrite a value
+  // changed from the terminal while it was open.
+  let backgroundInitial = false;
 
   async function json(path, body) {
     const response = await apiFetch(path, body === undefined ? { cache: "no-store" } : {
@@ -178,6 +181,8 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, proMo
     el["settings-sound"].checked = config.settings.sound_alerts !== false;
     el["settings-web-console"].checked = config.settings.web_console !== false;
     el["settings-web-lan"].checked = config.settings.web_lan === true;
+    el["settings-background"].checked = config.settings.background === true;
+    backgroundInitial = el["settings-background"].checked;
     lanInitial = el["settings-web-lan"].checked;
   }
   function renderContextWindow() {
@@ -260,6 +265,7 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, proMo
     el["settings-save"].disabled = true;
     const wasLan = config?.settings?.web_lan === true;
     const lanChanged = el["settings-web-lan"].checked !== lanInitial;
+    const backgroundChanged = el["settings-background"].checked !== backgroundInitial;
     const selection = { provider: el["default-provider"].value, model: el["default-model"].value, intensity: el["default-intensity"].value };
     const settings = {
       ...(!proMode ? {
@@ -275,6 +281,7 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, proMo
       sound_alerts: el["settings-sound"].checked,
       web_console: el["settings-web-console"].checked,
       ...(lanChanged ? { web_lan: el["settings-web-lan"].checked } : {}),
+      ...(backgroundChanged ? { background: el["settings-background"].checked } : {}),
       language: el["settings-language"].value,
       approval_mode: el["settings-approval"].value,
     };
@@ -289,16 +296,24 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, proMo
       // server bound and (when available) the address to open elsewhere.
       el["settings-web-lan"].checked = config.settings.web_lan === true;
       lanInitial = el["settings-web-lan"].checked;
+      el["settings-background"].checked = config.settings.background === true;
+      backgroundInitial = el["settings-background"].checked;
       const urls = Array.isArray(config.settings.web_urls) ? config.settings.web_urls : [];
       const lanNote = config.settings.web_lan === wasLan ? "" : config.settings.web_lan
         ? urls.length
           ? t("LAN access is on. Open {urls} from another device.", { urls: urls.join(" · ") })
           : t("LAN access is on, but no network address was found. Only this machine can connect.")
         : t("LAN access is off. Only this machine can connect.");
+      const backgroundNote = !backgroundChanged
+        ? ""
+        : config.settings.background
+          ? t("Background residency will start with the next CLI launch.")
+          : t("Background residency is off. The next CLI launch keeps the console in this process.");
       const savedText = password
         ? t("Settings saved. Web password updated permanently.")
         : t("Settings saved.");
-      message(el["settings-feedback"], lanNote ? `${savedText} ${lanNote}` : savedText);
+      const notes = [lanNote, backgroundNote].filter(Boolean).join(" ");
+      message(el["settings-feedback"], notes ? `${savedText} ${notes}` : savedText);
     } catch (error) { message(el["settings-feedback"], t(error.message), true); }
     finally { el["settings-save"].disabled = false; }
   });
