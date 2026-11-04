@@ -276,8 +276,8 @@
                 {
                     "type": "backend_output_model",
                     "provider": "xingji-neutrino-plus",
-                    "model": "gpt-6-astra",
-                    "intensity": "xhigh",
+                    "model": "gpt-6.1-sol",
+                    "intensity": "max",
                     "context_window": 1000000
                 },
                 {
@@ -338,8 +338,8 @@
                 {
                     "type": "backend_output_model",
                     "provider": "xingji-neutrino-plus",
-                    "model": "claude-opus-5-5",
-                    "intensity": "max",
+                    "model": "gpt-6-astra",
+                    "intensity": "xhigh",
                     "context_window": 272000
                 },
                 {
