@@ -4,9 +4,10 @@ import type { Key, MouseEvent } from "../terminal/input.js";
 import { C, type Style } from "../colors.js";
 import {
   findModel,
+  findConfiguredModel,
+  intensityForModel,
   contextCompressionThreshold,
   loadConfig,
-  loadModels,
   loadPlannerPrompt,
   loadStepPrompt,
   loadSubAgentPrompt,
@@ -271,11 +272,16 @@ export class ChatScreen extends Screen implements LiveAgent {
     };
     // The selected-state snapshot has no room for provider options; re-read the
     // thinking-mode flag from model.json so a hand-configured endpoint keeps it.
-    const configured = loadModels().providers
-      .find((provider) => provider.name === this.modelProvider)?.models
-      .find((model) => model.name === this.model.name);
-    if (configured && typeof configured.reasoning === "boolean") this.model.reasoning = configured.reasoning;
-    this.intensity = this.loadedIntensity ?? st.selectedIntensity;
+    const configured = findConfiguredModel(this.modelProvider, this.model.name);
+    if (configured) {
+      if (typeof configured.reasoning === "boolean") this.model.reasoning = configured.reasoning;
+      this.model.intensity = configured.intensity;
+    }
+    const savedIntensity = this.loadedIntensity ?? st.selectedIntensity;
+    this.intensity = intensityForModel(configured, savedIntensity, loadConfig().default_intensity);
+    // A resumed transcript can carry a level its model no longer accepts; the
+    // header and the next request must show and use the level actually in use.
+    if (this.intensity !== savedIntensity) this.app.state.selectedIntensity = this.intensity;
     if (this.loadedTokens) {
       this.tokens = { prompt: this.loadedTokens.prompt, completion: this.loadedTokens.completion };
     }
@@ -324,7 +330,7 @@ export class ChatScreen extends Screen implements LiveAgent {
     }
     this.modelProvider = selection.provider;
     this.model = { ...selection.model };
-    this.intensity = selection.intensity;
+    this.intensity = intensityForModel(this.model, selection.intensity, loadConfig().default_intensity);
     Object.assign(this.app.state, {
       selectedProvider: this.modelProvider, selectedModelName: this.model.name,
       selectedModelUrl: this.model.url, selectedModelApiKey: this.model.api_key,

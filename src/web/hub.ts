@@ -17,6 +17,7 @@ import type { ConversationContext } from "../compact.js";
 import { normalizeMode, type ApprovalMode, type Mode, type ResolvedModelSelection } from "../config.js";
 import type { RiskAssessment } from "../llm/risk.js";
 import type { PlanState } from "../llm/plan.js";
+import type { ProFallback } from "../pro/config.js";
 
 export type ModelChangeResult = { ok: true } | { ok: false; error: string };
 
@@ -83,6 +84,14 @@ export interface LiveMeta {
   /** What a running sub-agent is doing right now, or null when none is running. */
   subagent?: string | null;
   approvalMode?: ApprovalMode;
+  pro?: {
+    preset: string;
+    checking: boolean;
+    checkId: string;
+    models: Array<{ role: string; provider: string; model: string; intensity: string; tier: string }>;
+    fallbacks: ProFallback[];
+    error?: string;
+  };
 }
 
 /** Everything a browser needs to render a live conversation. */
@@ -123,6 +132,7 @@ export interface LiveAgent {
   liveClear?(): void;
   /** Apply a server-resolved choice to future turns, while idle or paused. */
   liveConfigure?(selection: ResolvedModelSelection): ModelChangeResult;
+  liveSetProPreset?(preset: string): ModelChangeResult;
 }
 
 /** Summary of a live session, as shown in the sidebar. */
@@ -294,6 +304,14 @@ class LiveHub {
     const entry = this.entries.get(key);
     if (!entry?.agent.liveConfigure) return { ok: false, error: "this session cannot change models" };
     const result = entry.agent.liveConfigure(selection);
+    if (result.ok) this.notify(key);
+    return result;
+  }
+
+  setProPreset(key: string, preset: string): ModelChangeResult {
+    const entry = this.entries.get(key);
+    if (!entry?.agent.liveSetProPreset) return { ok: false, error: "this session cannot change Pro presets" };
+    const result = entry.agent.liveSetProPreset(preset);
     if (result.ok) this.notify(key);
     return result;
   }

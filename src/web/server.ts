@@ -25,7 +25,8 @@ import { WebAuth } from "./auth.js";
 import { normalizeCwd, sameCwd } from "../cwd.js";
 import { hub, type LiveEntrySummary, type LiveSnapshot } from "./hub.js";
 import { writeCrashLog } from "../terminal/restore.js";
-import { createWebSession, resumeSession, type WebSession } from "./session.js";
+import { createWebSession, proInitialSelection, resumeSession, type WebSession } from "./session.js";
+import { defaultProPreset, requireProPreset } from "../pro/config.js";
 import { listAgentSessions, loadAgentMessages, type AgentId } from "../agents.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -837,7 +838,8 @@ async function handleApi(
       const requested = input.selection === undefined
         ? getWebSettings(mode).selection
         : input.selection;
-      const selection = resolveModelSelection(requested, false);
+      const preset = mode === "pro" ? requireProPreset(input.pro_preset ?? defaultProPreset()) : undefined;
+      const selection = mode === "pro" ? proInitialSelection(preset) : resolveModelSelection(requested, false);
       let approvalMode: ApprovalMode | undefined;
       if (input.approval_mode !== undefined) {
         if (input.approval_mode !== "request" && input.approval_mode !== "auto") {
@@ -845,7 +847,7 @@ async function handleApi(
         }
         approvalMode = normalizeApprovalMode(input.approval_mode);
       }
-      const session = createWebSession(cwd, selection, approvalMode, mode);
+      const session = createWebSession(cwd, selection, approvalMode, mode, preset);
       const key = session.start();
       webSessions.set(key, session);
       recordWorkspace(cwd, mode);
@@ -937,11 +939,14 @@ async function handleApi(
     }
 
     let selection: ResolvedModelSelection | undefined;
+    let preset: string | undefined;
     try {
       const body = await readJsonBody(req);
       if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("invalid JSON body");
       const requested = (body as { selection?: unknown }).selection;
-      if (requested !== undefined) selection = resolveModelSelection(requested);
+      if (requested !== undefined && mode !== "pro") selection = resolveModelSelection(requested);
+      const requestedPreset = (body as { pro_preset?: unknown }).pro_preset;
+      if (requestedPreset !== undefined && mode === "pro") preset = requireProPreset(requestedPreset);
     } catch (err) {
       sendJson(res, 400, { error: err instanceof Error ? err.message : "invalid model selection" });
       return true;
@@ -950,6 +955,10 @@ async function handleApi(
     // Already running (TUI or another tab)? Attach instead of duplicating.
     const existing = hub.list(mode).find((entry) => entry.sessionId === id);
     if (existing) {
+      if (preset !== undefined) {
+        const changed = hub.setProPreset(existing.key, preset);
+        if (!changed.ok) { sendJson(res, 409, { error: changed.error }); return true; }
+      }
       if (selection) {
         const changed = hub.configure(existing.key, selection);
         if (!changed.ok) {
@@ -966,6 +975,7 @@ async function handleApi(
       sendJson(res, 404, { error: "session not found" });
       return true;
     }
+    if (preset !== undefined) data.pro_preset = preset;
 
     const requested: ModelSelection | undefined = selection ? {
       provider: selection.provider, model: selection.model.name, intensity: selection.intensity,
@@ -995,7 +1005,7 @@ async function handleApi(
     return true;
   }
 
-  const liveMatch = /^\/api\/live\/([^/]+)(?:\/(pause|resume|message|approve|close|model|approval-mode|clear))?$/.exec(pathname);
+  const liveMatch = /^\/api\/live\/([^/]+)(?:\/(pause|resume|message|approve|close|model|pro-preset|approval-mode|clear))?$/.exec(pathname);
   if (liveMatch) {
     const key = decodeURIComponent(liveMatch[1]);
     const action = liveMatch[2];
@@ -1017,6 +1027,17 @@ async function handleApi(
       }
       if (!hub.has(key, mode)) {
         sendJson(res, 404, { error: "unknown live session" });
+        return true;
+      }
+      if (action === "pro-preset") {
+        if (mode !== "pro") { sendJson(res, 404, { error: "Pro presets are only available in Pro mode" }); return true; }
+        try {
+          const body = await readJsonBody(req);
+          const preset = requireProPreset((body as { preset?: unknown } | null)?.preset);
+          const changed = hub.setProPreset(key, preset);
+          if (!changed.ok) sendJson(res, 409, { error: changed.error });
+          else sendJson(res, 200, { ok: true, snapshot: hub.snapshot(key) });
+        } catch (error) { sendJson(res, 400, { error: error instanceof Error ? error.message : "invalid Pro preset" }); }
         return true;
       }
       if (action === "approval-mode") {

@@ -132,6 +132,30 @@
           <div class="composer-inner">
             <div class="composer-card">
               <textarea id="input" rows="1" placeholder="Message Neutrino…" aria-label="Message" data-i18n-placeholder="Message Neutrino…"></textarea>
+              <details id="pro-preset-control" class="pro-preset-control hidden">
+                <summary aria-label="Pro preset" data-i18n-aria-label="Pro preset"><span id="pro-preset-label">Pro</span><svg class="pro-preset-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg></summary>
+                <div class="pro-preset-card">
+                  <div class="pro-preset-heading"><span data-i18n="Neutrino Pro">Neutrino Pro</span><strong id="pro-preset-name"></strong></div>
+                  <label class="pro-slider-label" for="pro-preset-range" data-i18n="Preset">Preset</label>
+                  <div id="pro-preset-slider" class="pro-preset-slider">
+                    <div class="pro-slider-track" aria-hidden="true">
+                      <div class="pro-slider-fill"></div>
+                      <div class="pro-slider-meteors">
+                        <span class="pro-slider-meteor"></span><span class="pro-slider-meteor"></span><span class="pro-slider-meteor"></span><span class="pro-slider-meteor"></span>
+                      </div>
+                    </div>
+                    <div id="pro-slider-stops" class="pro-slider-stops" aria-hidden="true"></div>
+                    <input id="pro-preset-range" type="range" min="0" max="0" step="1" value="0" aria-label="Pro preset" data-i18n-aria-label="Pro preset" />
+                  </div>
+                  <div id="pro-preset-ticks" class="pro-preset-ticks"></div>
+                  <details class="pro-model-details" id="pro-model-details">
+                    <summary><span data-i18n="Model details">Model details</span><svg class="pro-model-details-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg></summary>
+                    <div id="pro-preset-models" class="pro-preset-models"></div>
+                  </details>
+                  <p id="pro-preset-note" class="settings-note"></p>
+                  <p id="pro-preset-feedback" class="form-feedback error" role="status" aria-live="polite"></p>
+                </div>
+              </details>
               <button id="send" class="primary" type="button" title="Send message" aria-label="Send message" data-i18n-title="Send message" data-i18n-aria-label="Send message">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
               </button>
@@ -173,18 +197,27 @@
               </select>
             </label>
           </div>
-          <label class="checkbox-label"><input id="settings-plan" type="checkbox" /> <span data-i18n="Plan-first turns">Plan-first turns</span></label>
-          <p class="settings-note" data-i18n="Split multi-step requests into a plan before answering.">Split multi-step requests into a plan before answering.</p>
-          <h3 data-i18n="Defaults for new conversations">Defaults for new conversations</h3>
-          <div class="settings-grid">
+          <label class="checkbox-label standard-only"><input id="settings-plan" type="checkbox" /> <span data-i18n="Plan-first turns">Plan-first turns</span></label>
+          <p class="settings-note standard-only" data-i18n="Split multi-step requests into a plan before answering.">Split multi-step requests into a plan before answering.</p>
+          <h3 class="standard-only" data-i18n="Defaults for new conversations">Defaults for new conversations</h3>
+          <div class="settings-grid standard-only">
             <label><span data-i18n="Provider">Provider</span><select id="default-provider"></select></label>
             <label><span data-i18n="Model">Model</span><select id="default-model"></select></label>
             <label><span data-i18n="Thinking intensity">Thinking intensity</span><select id="default-intensity"></select></label>
           </div>
+          <section id="settings-pro" class="hidden">
+            <h3 data-i18n="Pro orchestration">Pro orchestration</h3>
+            <div class="settings-grid">
+              <label><span data-i18n="Default Pro preset">Default Pro preset</span><select id="settings-pro-preset"></select></label>
+              <label><span data-i18n="Maximum delegation depth">Maximum delegation depth</span><input id="settings-pro-depth" type="number" min="1" max="100" step="1" value="10" /></label>
+            </div>
+            <p class="settings-note" data-i18n="Every Pro task is planned first. All roles share the regular provider configuration. Image generation is reserved.">Every Pro task is planned first. All roles share the regular provider configuration. Image generation is reserved.</p>
+            <p class="settings-note" data-i18n="Edit role models, intensity and context windows in ~/.neutrino/pro/model.json. Default delegation depth: 10.">Edit role models, intensity and context windows in ~/.neutrino/pro/model.json. Default delegation depth: 10.</p>
+          </section>
           <h3 data-i18n="Conversation and approvals">Conversation and approvals</h3>
-          <label><span data-i18n="Model context window (tokens)">Model context window (tokens)</span><input id="settings-context" type="number" min="1" max="9007199254740991" step="1" required /></label>
-          <p id="settings-compress-note" class="settings-note" data-i18n="Auto-compress at 80% of this model's context window. Default: 1,000,000 tokens.">Auto-compress at 80% of this model's context window. Default: 1,000,000 tokens.</p>
-          <label><span data-i18n="Approval reviewer model">Approval reviewer model</span><select id="settings-reviewer"></select></label>
+          <label class="standard-only"><span data-i18n="Model context window (tokens)">Model context window (tokens)</span><input id="settings-context" type="number" min="1" max="9007199254740991" step="1" required /></label>
+          <p id="settings-compress-note" class="settings-note standard-only" data-i18n="Auto-compress at 80% of this model's context window. Default: 1,000,000 tokens.">Auto-compress at 80% of this model's context window. Default: 1,000,000 tokens.</p>
+          <label class="standard-only"><span data-i18n="Approval reviewer model">Approval reviewer model</span><select id="settings-reviewer"></select></label>
           <label class="checkbox-label"><input id="settings-extreme" type="checkbox" /> <span data-i18n="Extreme-risk auto-approval (del class, 3 separate review rounds)">Extreme-risk auto-approval (del class, 3 separate review rounds)</span></label>
           <label class="checkbox-label"><input id="settings-sound" type="checkbox" /> <span data-i18n="Sound alerts (turn finished, approval waiting)">Sound alerts (turn finished, approval waiting)</span></label>
           <label class="checkbox-label"><input id="settings-web-console" type="checkbox" /> <span data-i18n="Start the Web console with the terminal">Start the Web console with the terminal</span></label>
@@ -211,7 +244,8 @@
         <header class="sheet-header">
           <div>
             <h2 id="new-chat-title" data-i18n="New conversation">New conversation</h2>
-            <p class="sheet-sub" data-i18n="Choose a working directory and a model.">Choose a working directory and a model.</p>
+            <p class="sheet-sub standard-only" data-i18n="Choose a working directory and a model.">Choose a working directory and a model.</p>
+            <p class="sheet-sub pro-only" data-i18n="Choose a working directory and a professional team preset.">Choose a working directory and a professional team preset.</p>
           </div>
           <button id="new-chat-close" class="icon-btn" type="button" aria-label="Close" data-i18n-aria-label="Close">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
@@ -229,19 +263,20 @@
             <div id="new-chat-recents" class="workspace-recents"></div>
           </section>
           <section class="field-group">
-            <h3 data-i18n="Model">Model</h3>
-            <div class="settings-grid">
+            <h3 class="standard-only" data-i18n="Model">Model</h3>
+            <div class="settings-grid standard-only">
               <label><span data-i18n="Provider">Provider</span><select id="new-chat-provider"></select></label>
               <label><span data-i18n="Model">Model</span><select id="new-chat-model"></select></label>
               <label><span data-i18n="Thinking">Thinking</span><select id="new-chat-intensity"></select></label>
             </div>
+            <label class="pro-only"><span data-i18n="Pro preset">Pro preset</span><select id="new-chat-pro-preset"></select></label>
             <label><span data-i18n="Default approval mode">Default approval mode</span>
               <select id="new-chat-approval">
                 <option value="request" data-i18n="Request Approval">Request Approval</option>
                 <option value="auto" data-i18n="Auto Approval">Auto Approval</option>
               </select>
             </label>
-            <p id="new-chat-note" class="settings-note"></p>
+            <p id="new-chat-note" class="settings-note standard-only"></p>
           </section>
           <p id="new-chat-feedback" class="form-feedback" role="status" aria-live="polite"></p>
         </div>
@@ -325,6 +360,18 @@
           <span class="sheet-spacer"></span>
           <button id="workspace-add" class="primary" type="button" data-i18n="Open folder…">Open folder…</button>
         </footer>
+      </div>
+    </dialog>
+
+    <dialog id="pro-fallback-dialog" class="sheet-dialog pro-fallback-dialog" aria-labelledby="pro-fallback-title">
+      <div class="sheet">
+        <header class="sheet-header"><h2 id="pro-fallback-title" data-i18n="Professional model availability">Professional model availability</h2></header>
+        <div class="sheet-body">
+          <p class="settings-note" data-i18n="These model substitutions apply only to this task in this conversation. Your preset configuration is unchanged.">These model substitutions apply only to this task in this conversation. Your preset configuration is unchanged.</p>
+          <div id="pro-fallback-rows" class="pro-fallback-rows"></div>
+          <p id="pro-fallback-error" class="form-feedback error hidden" role="alert"></p>
+        </div>
+        <footer class="sheet-actions"><button id="pro-fallback-close" class="primary" type="button" data-i18n="Got it">Got it</button></footer>
       </div>
     </dialog>
 

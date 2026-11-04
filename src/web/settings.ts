@@ -1,10 +1,12 @@
 import {
-  DEFAULT_CONFIG, INTENSITY_LEVELS, WEB_LANGUAGES, contextWindow, isContextWindow,
-  loadConfig, loadModels, modelContextWindow, modelContextWindowKey, normalizeApprovalMode, normalizeWebLanguage,
-  resolveModelSelection, saveConfig, saveModels, type Mode,
+  DEFAULT_CONFIG, INTENSITY_LEVELS, WEB_LANGUAGES, contextWindow, intensityForModel, isContextWindow,
+  loadConfig, loadModels, modelContextWindow, modelContextWindowKey, modelIntensities, normalizeApprovalMode,
+  normalizeIntensity, normalizeWebLanguage, resolveModelSelection, saveConfig, saveModels,
+  type Mode, type ResolvedModelSelection,
 } from "../config.js";
 
 import { hashWebPassword, validateWebPassword } from "./auth.js";
+import { defaultProPreset, loadProModels, proMaxRecursionDepth, requireProPreset } from "../pro/config.js";
 
 /**
  * Public settings use a whitelist: API keys and cached credentials stay on disk.
@@ -16,30 +18,52 @@ import { hashWebPassword, validateWebPassword } from "./auth.js";
  */
 export function getWebSettings(mode: Mode = "standard") {
   const config = { ...DEFAULT_CONFIG, ...loadConfig(mode) };
-  const providers = loadModels().providers.map((provider) => ({
+  const catalog = loadModels();
+  const providers = catalog.providers.map((provider) => ({
     name: provider.name,
     models: provider.models.map((model) => ({
       name: model.name,
       configured: Boolean(model.api_key?.trim()),
       context_window: modelContextWindow(provider.name, model, mode),
+      // The browser only offers these, so it cannot submit a level the model
+      // does not declare. Missing field = every intensity.
+      intensities: modelIntensities(model),
     })),
   }));
   const preferred = providers.find((p) => p.name === config.selected_provider);
   const provider = preferred ?? providers.find((p) => p.models.some((m) => m.configured)) ?? providers[0];
   const model = provider?.models.find((m) => m.name === config.selected_model) ??
     provider?.models.find((m) => m.configured) ?? provider?.models[0];
-  const intensity = String(config.selected_intensity ?? config.default_intensity);
+  const configuredModel = provider && model
+    ? catalog.providers.find((p) => p.name === provider.name)?.models.find((m) => m.name === model.name) ?? null
+    : null;
+  const intensity = intensityForModel(
+    configuredModel,
+    config.selected_intensity ?? config.default_intensity,
+    config.default_intensity,
+  );
   return {
+    ...(mode === "pro" ? { pro: {
+      presets: loadProModels().tier.map((preset) => ({
+        name: preset.name, chinese_name: preset.chinese_name,
+        "model-setting": preset["model-setting"].map((setting) => ({
+          type: setting.type, provider: setting.provider, model: setting.model,
+          intensity: setting.intensity, context_window: setting.context_window,
+        })),
+      })),
+      preset: defaultProPreset(),
+      max_recursion_depth: proMaxRecursionDepth(),
+    } } : {}),
     providers,
     intensities: INTENSITY_LEVELS,
     languages: WEB_LANGUAGES.map((value) => ({ value, label: value === "zh" ? "简体中文" : "English" })),
     selection: {
       provider: provider?.name ?? "",
       model: model?.name ?? "",
-      intensity: INTENSITY_LEVELS.includes(intensity) ? intensity : "High",
+      intensity,
     },
     settings: {
-      default_intensity: String(config.default_intensity),
+      default_intensity: intensityForModel(configuredModel, config.default_intensity, "High"),
       model_context_window: model?.context_window ?? contextWindow(undefined),
       approval_model: String(config.approval_model ?? ""),
       auto_approve_extreme_risk: config.auto_approve_extreme_risk === true,
@@ -59,14 +83,32 @@ export function updateWebSettings(value: unknown, mode: Mode = "standard"): void
   const body = value as Record<string, unknown>;
   if (Object.keys(body).some((key) => key !== "selection" && key !== "settings")) throw new Error("unknown settings field");
   const config = loadConfig(mode);
+  // Resolve the requested model first: its declared intensities decide which
+  // default level can be saved with this patch. Settings that do not touch a
+  // model stay editable even when the catalogue is empty.
+  const chosen = body.selection !== undefined ? resolveModelSelection(body.selection, false) : undefined;
+  let target: ResolvedModelSelection | null = chosen ?? null;
+  const settingsTarget = (): ResolvedModelSelection => {
+    target ??= resolveModelSelection(getWebSettings(mode).selection, false);
+    return target;
+  };
   if (body.settings !== undefined) {
     if (!body.settings || typeof body.settings !== "object" || Array.isArray(body.settings)) throw new Error("invalid settings");
     const patch = body.settings as Record<string, unknown>;
     for (const [key, val] of Object.entries(patch)) {
-      if (key === "default_intensity") {
-        if (typeof val !== "string" || !INTENSITY_LEVELS.includes(val)) throw new Error("invalid default intensity");
-        config.default_intensity = val;
-        config.selected_intensity = val;
+      if (key === "pro_preset" && mode === "pro") {
+        config.pro_preset = requireProPreset(val);
+      } else if (key === "pro_max_recursion_depth" && mode === "pro") {
+        if (typeof val !== "number" || !Number.isSafeInteger(val) || val < 1 || val > 100) {
+          throw new Error("Pro recursion depth must be a whole number from 1 to 100");
+        }
+        config.pro_max_recursion_depth = val;
+      } else if (key === "default_intensity") {
+        const level = normalizeIntensity(val);
+        if (!level) throw new Error("invalid default intensity");
+        if (!modelIntensities(settingsTarget().model).includes(level)) throw new Error("this model does not support that thinking intensity");
+        config.default_intensity = level;
+        config.selected_intensity = level;
       } else if (key === "model_context_window") {
         if (!isContextWindow(val)) throw new Error("invalid model context window");
       } else if (key === "approval_model") {
@@ -102,8 +144,7 @@ export function updateWebSettings(value: unknown, mode: Mode = "standard"): void
       }
     }
   }
-  if (body.selection !== undefined) {
-    const chosen = resolveModelSelection(body.selection, false);
+  if (chosen) {
     config.selected_provider = chosen.provider;
     config.selected_model = chosen.model.name;
     config.selected_model_url = chosen.model.url;
@@ -116,8 +157,7 @@ export function updateWebSettings(value: unknown, mode: Mode = "standard"): void
   if (password !== undefined) config.web_password_hash = hashWebPassword(password);
   const window = (body.settings as Record<string, unknown> | undefined)?.model_context_window;
   if (window !== undefined) {
-    const selection = body.selection ?? getWebSettings(mode).selection;
-    const chosen = resolveModelSelection(selection, false);
+    const selected = settingsTarget();
     if (mode === "pro") {
       // Context capacity is part of a workspace's compression settings. Pro
       // stores its own copy instead of editing the shared model catalog.
@@ -125,11 +165,11 @@ export function updateWebSettings(value: unknown, mode: Mode = "standard"): void
       const overrides = current && typeof current === "object" && !Array.isArray(current)
         ? { ...(current as Record<string, unknown>) }
         : {};
-      overrides[modelContextWindowKey(chosen.provider, chosen.model.name)] = window;
+      overrides[modelContextWindowKey(selected.provider, selected.model.name)] = window;
       config.model_context_windows = overrides;
     } else {
       const models = loadModels();
-      const model = models.providers.find((p) => p.name === chosen.provider)!.models.find((m) => m.name === chosen.model.name)!;
+      const model = models.providers.find((p) => p.name === selected.provider)!.models.find((m) => m.name === selected.model.name)!;
       model.context_window = window as number;
       saveModels(models);
     }

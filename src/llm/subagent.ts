@@ -31,6 +31,7 @@ export interface SubAgentMessage {
     function: { name: string; arguments: string };
   }>;
   tool_call_id?: string;
+  anthropic_content?: unknown[];
 }
 
 export interface SubAgentOptions {
@@ -54,6 +55,8 @@ export interface SubAgentOptions {
   /** True once the parent turn was paused, superseded or cleared. */
   cancelled?(): boolean;
   maxRounds?: number;
+  /** Pro role capacity; ordinary sub-agents retain the historical behaviour. */
+  contextWindow?: number;
 }
 
 export interface SubAgentRun {
@@ -110,10 +113,40 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRun
   ];
   let report = "";
   let calls = 0;
+  let lastPromptTokens = 0;
   const aborted = (rounds: number): SubAgentRun => ({ report, aborted: true, exhausted: false, rounds, calls });
 
   for (let round = 1; round <= maxRounds; round++) {
     if (options.cancelled?.()) return aborted(round - 1);
+    const capacity = options.contextWindow;
+    if (capacity && messages.length > 2 &&
+        Math.max(lastPromptTokens, Math.ceil(JSON.stringify(messages).length / 3)) >= capacity * 0.8) {
+      // Only split at an assistant boundary: every retained tool result must
+      // still have the assistant/tool_calls message that produced it.
+      const starts = messages.flatMap((message, index) => index >= 2 && message.role === "assistant" ? [index] : []);
+      let keep = starts.length > 1 ? starts.at(-1)! : messages.length;
+      if (JSON.stringify(messages.slice(keep)).length > capacity) keep = messages.length;
+      const head = messages.slice(2, keep);
+      if (head.length) {
+        options.onProgress?.("compressing context");
+        const compressor = options.createClient();
+        const transcript = JSON.stringify(head);
+        // A single tool can produce more text than the role can hold. Bound
+        // the compression request itself, retaining its beginning and end.
+        const budget = Math.max(256, Math.floor(capacity * 0.6));
+        const input = transcript.length > budget
+          ? `${transcript.slice(0, Math.floor(budget / 2))}\n[Earlier activity truncated for compression]\n${transcript.slice(-Math.floor(budget / 2))}`
+          : transcript;
+        const summary = await compressor.summarize(input, { cancelled: options.cancelled, onRetry: options.onRetry });
+        if (compressor.usage) options.onUsage?.(compressor.usage);
+        if (options.cancelled?.()) return aborted(round - 1);
+        messages.splice(2, keep - 2, {
+          role: "assistant",
+          content: summary || "Earlier specialist activity was compressed. Inspect the working directory for any evidence needed to continue.",
+        });
+        lastPromptTokens = 0;
+      }
+    }
     options.onProgress?.("thinking");
 
     const client = options.createClient();
@@ -125,7 +158,10 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRun
       if (options.cancelled?.()) return aborted(round - 1);
       content += chunk;
     }
-    if (client.usage) options.onUsage?.(client.usage);
+    if (client.usage) {
+      options.onUsage?.(client.usage);
+      lastPromptTokens = client.usage.prompt;
+    }
 
     const toolCalls = client.toolCalls;
     if (content.trim()) report = content.trim();
@@ -136,6 +172,7 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRun
         // A tool-call turn must carry the thinking that produced it back to a
         // thinking-mode endpoint, or its next request is rejected.
         ...(client.reasoningContent ? { reasoning_content: client.reasoningContent } : {}),
+        ...(client.anthropicContent?.length ? { anthropic_content: client.anthropicContent } : {}),
         ...(toolCalls.length > 0
           ? {
             tool_calls: toolCalls.map((call) => ({

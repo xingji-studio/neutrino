@@ -124,8 +124,27 @@ disables password login.
 
 ## Pro workspace
 
-The console has two workspaces. The regular one lives at `/`; the reserved,
-fully isolated **Pro** workspace lives at `/pro`. Both use the same page, the
+The composer has a preset card at its bottom-right. Open it and drag the slider
+to select a team. There are eight roles: main, reasoning, frontend, backend,
+approval, planning, modeling and reserved image generation. Presets are copied
+unchanged from the supplied example into `~/.neutrino/pro/model.json` on first
+use. Edit role assignments there; **Settings** controls the default preset and
+maximum delegation depth (10 by default).
+
+Every task checks all active models with a small completion request. Unavailable
+roles recurse down to lower presets independently, and a popup shows the
+replacements. These changes are task-local. The planner then writes the plan
+before main execution; nested specialist calls and commands use the same
+approval gate, with the approval role providing automated reviews.
+
+Pro API additions: settings return `pro.presets`, `pro.preset` and
+`pro.max_recursion_depth`; settings patches accept `pro_preset` and
+`pro_max_recursion_depth`. New and resumed conversations accept `pro_preset`.
+`POST /pro/api/live/:key/pro-preset` with `{"preset":"medium"}` changes an idle
+or paused conversation. Snapshots include `pro.checking`, effective `pro.models`,
+`pro.fallbacks`, `pro.checkId` and any `pro.error`.
+
+The console has two workspaces. The regular one lives at `/`; the isolated **Pro** workspace lives at `/pro`. Both use the same page, the
 same login cookie and the same model catalog, but nothing else is shared:
 
 - **Conversations** — Pro transcripts are saved under
@@ -133,9 +152,9 @@ same login cookie and the same model catalog, but nothing else is shared:
   workspace's history. Live sessions are separated too: a Pro tab cannot read,
   stream, drive or close a regular session, and vice versa.
 - **Settings** — Pro has its own `~/.neutrino/pro/config.json` with its own
-  language, plan-first choice, sound alerts, defaults for new conversations,
-  approval reviewer model, context compression threshold and recent folders.
-  Changing the compression threshold in one workspace does not move the other.
+  language, sound alerts, default preset, delegation depth and recent folders.
+  `~/.neutrino/pro/model.json` records role models, effort and context capacities;
+  provider credentials stay in the shared ordinary model catalog.
 - **Shared on purpose** — the Web password, the approval policy (default
   approval mode, extreme-risk auto-approval) and the console's LAN access. They
   protect or configure the whole machine, so both workspaces, the terminal and
@@ -179,7 +198,8 @@ settings explicitly; cancelling leaves the saved values intact. Conversation
 model changes are separate from these defaults. Models come from the same
 catalog as the terminal, and API keys stay on the server. Configure missing keys
 in the terminal model screen first. Intensity uses the same Low–Ultra sampling
-settings as the terminal. The regular and [Pro](#pro-workspace) workspaces keep
+settings as the terminal, and both only offer the levels the selected model
+declares in `model.json`. The regular and [Pro](#pro-workspace) workspaces keep
 their own copy of every setting here except the approval policy, the Web password
 and LAN access, which belong to the whole process.
 
@@ -308,7 +328,7 @@ to know whether a conversation is driven by the terminal or by the server.
 | GET | `/api/fs?path=…` | Folder listing for the picker (folders only, roots, parent) |
 | POST | `/api/fs/mkdir` | Create `{ "path": "…" }` and return the new path |
 | POST | `/api/conversations` | Start `{ cwd, selection?, approval_mode? }`, returns `{ key, snapshot }` |
-| GET | `/api/settings` | Model catalog, languages, public settings, and the live bind address (`web_host`, `web_urls`); no credentials |
+| GET | `/api/settings` | Model catalog (each model lists its supported intensities), languages, public settings, and the live bind address (`web_host`, `web_urls`); no credentials |
 | POST | `/api/settings` | Save validated `{ selection?, settings? }`, including `language`, `plan_first`, `approval_mode`, `web_lan` and `web_password` |
 | GET | `/api/session/:id` | One saved transcript |
 | POST | `/api/session/:id/continue` | Resume a transcript with optional `{ selection }`, returns `{ key }` |

@@ -1,4 +1,4 @@
-import { INTENSITY_PARAMS, modelUsesReasoning, type ModelInfo } from "../config.js";
+import { INTENSITY_PARAMS, intensityForModel, modelUsesReasoning, type ModelInfo } from "../config.js";
 import type { ToolDefinition } from "./tools.js";
 import {
   HttpStatusError,
@@ -35,12 +35,16 @@ interface ApiMessage {
   tool_calls?: unknown[];
   tool_call_id?: string;
   name?: string;
+  /** Original Anthropic blocks, including signed thinking between tool calls. */
+  anthropic_content?: unknown[];
 }
 
 /** Give up if the server has not started to respond within this window. */
 const CONNECT_TIMEOUT_MS = 120_000;
 
 export interface StreamOptions {
+  /** Cancels both the connection and an in-progress response body. */
+  signal?: AbortSignal;
   /**
    * Reported before each wait so the UI can explain why the stream went quiet
    * for up to 160s instead of looking hung.
@@ -76,6 +80,9 @@ const SUMMARY_SYSTEM_PROMPT =
  */
 async function postStream(url: string, init: RequestInit): Promise<Response> {
   const controller = new AbortController();
+  const abort = () => controller.abort(init.signal?.reason);
+  if (init.signal?.aborted) abort();
+  else init.signal?.addEventListener("abort", abort, { once: true });
   const timer = setTimeout(
     () => controller.abort(new Error(`request timed out after ${CONNECT_TIMEOUT_MS / 1000}s`)),
     CONNECT_TIMEOUT_MS,
@@ -84,6 +91,9 @@ async function postStream(url: string, init: RequestInit): Promise<Response> {
     return await fetch(url, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timer);
+    // The caller's stream controller is aborted in streamTurn's finally, so
+    // this listener also covers cancellation after the response headers.
+    if (controller.signal.aborted) init.signal?.removeEventListener("abort", abort);
   }
 }
 
@@ -108,6 +118,7 @@ async function pauseForRetry(
 }
 
 export class LLMClient {
+  readonly professional: boolean;
   model: ModelInfo;
   provider: string;
   intensity: string;
@@ -121,12 +132,19 @@ export class LLMClient {
    * call, so the agent loops attach it to that message.
    */
   reasoningContent = "";
+  anthropicContent: unknown[] = [];
 
-  constructor(model: ModelInfo, provider: string, intensity: string) {
+  constructor(model: ModelInfo, provider: string, intensity: string, options: { professional?: boolean } = {}) {
     this.model = model;
     this.provider = provider;
-    this.intensity = intensity;
-    const params = INTENSITY_PARAMS[intensity] ?? INTENSITY_PARAMS["High"];
+    this.professional = options.professional === true;
+    // Final safety net: even a stale UI, a saved session or a hand-edited
+    // selection can never send a level this model does not declare.
+    this.intensity = this.professional ? intensity.trim().toLowerCase() || "high" : intensityForModel(model, intensity);
+    const sampling = this.professional
+      ? this.intensity.charAt(0).toUpperCase() + this.intensity.slice(1)
+      : this.intensity;
+    const params = INTENSITY_PARAMS[sampling] ?? INTENSITY_PARAMS["High"];
     this.temperature = params.temperature;
     this.top_p = params.top_p;
   }
@@ -176,14 +194,29 @@ export class LLMClient {
     this.toolCalls = [];
     this.usage = null;
     this.reasoningContent = "";
+    this.anthropicContent = [];
+    const controller = new AbortController();
+    const abort = () => controller.abort(options.signal?.reason);
+    if (options.signal?.aborted) abort();
+    else options.signal?.addEventListener("abort", abort, { once: true });
+    const cancelled = () => controller.signal.aborted || options.cancelled?.() === true;
+    const timer = options.cancelled ? setInterval(() => {
+      if (options.cancelled?.()) controller.abort();
+    }, 100) : null;
+    const requestOptions = { ...options, signal: controller.signal, cancelled };
     try {
+      if (controller.signal.aborted) return;
       if (this.provider === "Anthropic") {
-        yield* this.streamAnthropic(messages, options);
+        yield* this.streamAnthropic(messages, tools, requestOptions);
         return;
       }
-      yield* this.streamOpenAI(messages, tools, options);
+      yield* this.streamOpenAI(messages, tools, requestOptions);
     } catch (e) {
-      yield `\n[Error: ${describeError(e)}]`;
+      if (!cancelled()) yield `\n[Error: ${describeError(e)}]`;
+    } finally {
+      if (timer) clearInterval(timer);
+      options.signal?.removeEventListener("abort", abort);
+      controller.abort();
     }
   }
 
@@ -210,7 +243,7 @@ export class LLMClient {
       this.reasoningContent = "";
       let produced = false;
       try {
-        for await (const token of this.openAIAttempt(messages, tools)) {
+        for await (const token of this.openAIAttempt(messages, tools, options)) {
           produced = true;
           yield token;
         }
@@ -247,7 +280,7 @@ export class LLMClient {
   }
 
   /** A single streaming attempt; see `streamOpenAI` for the retry policy. */
-  private async *openAIAttempt(messages: ApiMessage[], tools?: ToolDefinition[]): AsyncGenerator<string> {
+  private async *openAIAttempt(messages: ApiMessage[], tools: ToolDefinition[] | undefined, options: StreamOptions): AsyncGenerator<string> {
     const url = this.model.url.replace(/\/+$/, "") + "/chat/completions";
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -256,10 +289,12 @@ export class LLMClient {
     const payload: Record<string, unknown> = {
       model: this.model.name,
       messages: this.wireMessages(messages),
-      temperature: this.temperature,
-      top_p: this.top_p,
-      stream: true,
-      stream_options: { include_usage: true },
+      ...(this.professional ? { reasoning_effort: this.intensity } : {
+        temperature: this.temperature,
+        top_p: this.top_p,
+      }),
+      stream: this.model.supports_streaming !== false,
+      ...(this.model.supports_streaming !== false ? { stream_options: { include_usage: true } } : {}),
     };
     if (tools && tools.length) payload.tools = tools;
 
@@ -267,6 +302,7 @@ export class LLMClient {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
+      signal: options.signal,
     });
 
     if (!resp.ok) {
@@ -275,6 +311,26 @@ export class LLMClient {
       // once. `streamTurn` renders the final failure into the transcript.
       const body = await resp.text().catch(() => "");
       throw new HttpStatusError(resp.status, body.slice(0, 500));
+    }
+    if (this.model.supports_streaming === false || resp.headers.get("content-type")?.includes("application/json")) {
+      const body = await resp.json() as {
+        choices?: Array<{ message?: { content?: string; reasoning_content?: string; reasoning?: string;
+          tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> } }>;
+        usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+      };
+      const message = body.choices?.[0]?.message;
+      if (!message) throw new Error("endpoint did not return a valid model completion");
+      this.reasoningContent = message.reasoning_content ?? message.reasoning ?? "";
+      this.toolCalls = (message.tool_calls ?? []).map((call) => ({
+        id: call.id, name: call.function.name, arguments: call.function.arguments,
+      }));
+      if (body.usage) {
+        const prompt = body.usage.prompt_tokens ?? 0;
+        const completion = body.usage.completion_tokens ?? 0;
+        this.usage = { prompt, completion, total: body.usage.total_tokens ?? prompt + completion };
+      }
+      if (message.content) yield message.content;
+      return;
     }
     if (!resp.body) {
       yield "\n[Error: empty response body]";
@@ -361,13 +417,14 @@ export class LLMClient {
   }
 
   /** Anthropic counterpart of `streamOpenAI`, with the same retry policy. */
-  private async *streamAnthropic(messages: ApiMessage[], options: StreamOptions): AsyncGenerator<string> {
+  private async *streamAnthropic(messages: ApiMessage[], tools: ToolDefinition[] | undefined, options: StreamOptions): AsyncGenerator<string> {
     const policy = resolvePolicy(options);
     for (let attempt = 1; ; attempt++) {
       this.toolCalls = [];
+      this.anthropicContent = [];
       let produced = false;
       try {
-        for await (const token of this.anthropicAttempt(messages)) {
+        for await (const token of this.anthropicAttempt(messages, tools, options)) {
           produced = true;
           yield token;
         }
@@ -380,7 +437,7 @@ export class LLMClient {
   }
 
   /** A single streaming attempt; see `streamAnthropic` for the retry policy. */
-  private async *anthropicAttempt(messages: ApiMessage[]): AsyncGenerator<string> {
+  private async *anthropicAttempt(messages: ApiMessage[], tools: ToolDefinition[] | undefined, options: StreamOptions): AsyncGenerator<string> {
     const url = this.model.url.replace(/\/+$/, "") + "/messages";
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -388,26 +445,53 @@ export class LLMClient {
       "anthropic-version": "2023-06-01",
     };
 
-    let systemMsg: string | undefined;
-    const chatMessages: ApiMessage[] = [];
+    const systemMessages: string[] = [];
+    const chatMessages: Array<{ role: "user" | "assistant"; content: unknown[] }> = [];
     for (const m of messages) {
-      if (m.role === "system") systemMsg = m.content ?? "";
-      else chatMessages.push({ role: m.role, content: m.content ?? "" });
+      if (m.role === "system") {
+        if (m.content) systemMessages.push(m.content);
+        continue;
+      }
+      let blocks: unknown[];
+      const role = m.role === "assistant" ? "assistant" : "user";
+      if (m.role === "tool") {
+        blocks = [{ type: "tool_result", tool_use_id: m.tool_call_id, content: m.content ?? "" }];
+      } else if (m.role === "assistant" && m.anthropic_content?.length) {
+        blocks = m.anthropic_content;
+      } else {
+        blocks = m.content ? [{ type: "text", text: m.content }] : [];
+        for (const raw of m.tool_calls ?? []) {
+          const call = raw as { id: string; function: { name: string; arguments: string } };
+          let input: unknown;
+          try { input = JSON.parse(call.function.arguments); } catch { input = { value: call.function.arguments }; }
+          blocks.push({ type: "tool_use", id: call.id, name: call.function.name, input });
+        }
+      }
+      if (!blocks.length) continue;
+      const previous = chatMessages.at(-1);
+      if (previous?.role === role) previous.content.push(...blocks);
+      else chatMessages.push({ role, content: [...blocks] });
     }
 
     const payload: Record<string, unknown> = {
       model: this.model.name,
       messages: chatMessages,
       max_tokens: 4096,
-      temperature: this.temperature,
-      stream: true,
+      ...(this.professional ? { output_config: { effort: this.intensity } } : { temperature: this.temperature }),
+      stream: this.model.supports_streaming !== false,
     };
-    if (systemMsg) payload.system = systemMsg;
+    if (systemMessages.length) payload.system = systemMessages.join("\n\n");
+    if (tools?.length) payload.tools = tools.map((tool) => ({
+      name: tool.function.name,
+      description: tool.function.description,
+      input_schema: tool.function.parameters,
+    }));
 
     const resp = await postStream(url, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
+      signal: options.signal,
     });
     if (!resp.ok) {
       // Thrown rather than printed: a 502/503/504/429 is as transient as a
@@ -415,6 +499,21 @@ export class LLMClient {
       // once. `streamTurn` renders the final failure into the transcript.
       const body = await resp.text().catch(() => "");
       throw new HttpStatusError(resp.status, body.slice(0, 500));
+    }
+    if (this.model.supports_streaming === false || resp.headers.get("content-type")?.includes("application/json")) {
+      const body = await resp.json() as {
+        content?: Array<Record<string, unknown>>;
+        usage?: { input_tokens?: number; output_tokens?: number };
+      };
+      if (!Array.isArray(body.content)) throw new Error("endpoint did not return a valid model completion");
+      this.captureAnthropicContent(body.content);
+      if (body.usage) {
+        const prompt = body.usage.input_tokens ?? 0;
+        const completion = body.usage.output_tokens ?? 0;
+        this.usage = { prompt, completion, total: prompt + completion };
+      }
+      for (const block of body.content) if (block.type === "text" && typeof block.text === "string") yield block.text;
+      return;
     }
     if (!resp.body) {
       yield "\n[Error: empty response body]";
@@ -425,6 +524,8 @@ export class LLMClient {
     const decoder = new TextDecoder();
     let buf = "";
     let stopped = false;
+    const blocks: Record<number, Record<string, unknown>> = {};
+    const toolArguments: Record<number, string> = {};
 
     try {
       while (!stopped) {
@@ -448,10 +549,41 @@ export class LLMClient {
           } catch {
             continue;
           }
-          const type = (chunk as { type?: string }).type;
+          const event = chunk as {
+            type?: string; index?: number; content_block?: Record<string, unknown>;
+            delta?: { text?: string; partial_json?: string; thinking?: string; signature?: string };
+            message?: { usage?: { input_tokens?: number; output_tokens?: number } };
+            usage?: { output_tokens?: number };
+            error?: { message?: string };
+          };
+          const type = event.type;
+          if (type === "error") throw new Error(event.error?.message ?? "Anthropic stream failed");
+          if (type === "message_start") {
+            const input = event.message?.usage?.input_tokens ?? 0;
+            const output = event.message?.usage?.output_tokens ?? 0;
+            this.usage = { prompt: input, completion: output, total: input + output };
+          } else if (type === "message_delta" && event.usage) {
+            const prompt = this.usage?.prompt ?? 0;
+            const completion = event.usage.output_tokens ?? this.usage?.completion ?? 0;
+            this.usage = { prompt, completion, total: prompt + completion };
+          } else if (type === "content_block_start") {
+            blocks[event.index ?? 0] = { ...event.content_block };
+            if (event.content_block?.type === "tool_use") toolArguments[event.index ?? 0] = "";
+            if (typeof event.content_block?.text === "string" && event.content_block.text) yield event.content_block.text;
+          }
           if (type === "content_block_delta") {
-            const text = (chunk as { delta?: { text?: string } }).delta?.text;
-            if (text) yield text;
+            const index = event.index ?? 0;
+            const block = blocks[index] ??= { type: "text", text: "" };
+            if (event.delta?.text) {
+              block.text = String(block.text ?? "") + event.delta.text;
+              yield event.delta.text;
+            }
+            if (event.delta?.partial_json) toolArguments[index] = (toolArguments[index] ?? "") + event.delta.partial_json;
+            if (event.delta?.thinking) {
+              block.thinking = String(block.thinking ?? "") + event.delta.thinking;
+              this.reasoningContent += event.delta.thinking;
+            }
+            if (event.delta?.signature) block.signature = String(block.signature ?? "") + event.delta.signature;
           } else if (type === "message_stop") {
             stopped = true;
             break;
@@ -465,5 +597,24 @@ export class LLMClient {
         // Already closed / errored; nothing left to release.
       }
     }
+    const content = Object.keys(blocks).map(Number).sort((a, b) => a - b).map((index) => {
+      const block = blocks[index];
+      if (block.type === "tool_use") {
+        const raw = toolArguments[index];
+        if (raw) {
+          try { block.input = JSON.parse(raw); } catch { block.input = { value: raw }; }
+        }
+      }
+      return block;
+    });
+    this.captureAnthropicContent(content);
+  }
+
+  private captureAnthropicContent(blocks: Array<Record<string, unknown>>): void {
+    this.anthropicContent = blocks;
+    this.reasoningContent = blocks.filter((block) => block.type === "thinking").map((block) => String(block.thinking ?? "")).join("");
+    this.toolCalls = blocks.filter((block) => block.type === "tool_use").map((block) => ({
+      id: String(block.id ?? ""), name: String(block.name ?? ""), arguments: JSON.stringify(block.input ?? {}),
+    }));
   }
 }

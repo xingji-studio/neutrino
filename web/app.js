@@ -1,4 +1,5 @@
 import { createSettingsUI } from "./settings.js";
+import { createProUI } from "./pro.js";
 import { renderMarkdown as renderMarkdownHtml } from "./markdown.js";
 import { turnAnswerIndex, turnFolds, turnPreview, turnRanges } from "./turns.js";
 import { applyTranslations, getLanguage as currentLanguage, locale as currentLocale, setLanguage as setI18nLanguage, t as translate } from "./i18n.js";
@@ -290,8 +291,11 @@ function storedWorkspace() {
   return { key: pathKey(path), path };
 }
 
+let proUI = null;
 const preferences = createSettingsUI({
   apiFetch,
+  proMode: PRO_MODE,
+  onCatalogChange: (catalog) => proUI?.load(catalog),
   onLanguageChange: (language) => changeInterfaceLanguage(language),
   async applyModel(selection) {
     const current = state.selection;
@@ -311,6 +315,37 @@ const preferences = createSettingsUI({
     }
   },
 });
+
+if (PRO_MODE && typeof createProUI === "function") {
+  proUI = createProUI({
+    async changePreset(preset) {
+      const current = state.selection;
+      if (current?.kind === "live") {
+        const response = await apiFetch(`/api/live/${encodeURIComponent(current.key)}/pro-preset`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preset }),
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+        if (state.selection?.kind === "live" && state.selection.key === current.key) {
+          state.snapshot = body.snapshot;
+          renderLive();
+        }
+      } else if (current?.kind !== "file") {
+        const response = await apiFetch("/api/settings", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ settings: { pro_preset: preset } }),
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+        await preferences.load();
+      }
+    },
+  });
+}
+
+function currentProPreset() {
+  return proUI?.preset() || preferences.catalog?.()?.pro?.preset;
+}
 
 // ------------------------------------------------------------------- sounds
 //
@@ -764,6 +799,7 @@ function renderFile(data) {
   el.title.textContent = firstUserMessage(messages) || tr("Conversation");
   el.sub.textContent = [data.cwd, data.model, data.provider].filter(Boolean).join(" · ");
   preferences.showConversation(data, `file:${data.id}`);
+  proUI?.show(data, `file:${data.id}`);
   renderMessageList(messages, null, { readOnly: true, context: data.context, active: false });
   renderFileControls(data);
   maybeOpenPlan(data.plan);
@@ -815,10 +851,11 @@ function renderFileControls(data) {
 
 /** Attach to a resumed conversation, creating it server-side when needed. */
 async function continueSession(id, selection = preferences.selectionForFile(id)) {
+  const payload = PRO_MODE ? { pro_preset: currentProPreset() } : selection ? { selection } : undefined;
   const response = await apiFetch(`/api/session/${encodeURIComponent(id)}/continue`, {
     method: "POST",
-    headers: selection ? { "Content-Type": "application/json" } : undefined,
-    body: selection ? JSON.stringify({ selection }) : undefined,
+    headers: payload ? { "Content-Type": "application/json" } : undefined,
+    body: payload ? JSON.stringify(payload) : undefined,
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
@@ -995,6 +1032,7 @@ function renderLive() {
   el.title.textContent = snapshot.title || tr("New conversation");
   el.sub.textContent = [snapshot.cwd, snapshot.model, snapshot.provider].filter(Boolean).join(" · ");
   preferences.showConversation(snapshot, `live:${snapshot.key}`);
+  proUI?.show(snapshot, `live:${snapshot.key}`);
   renderControls(snapshot);
   renderApproval(snapshot);
   renderMessageList(snapshot.messages ?? [], snapshot.streamingContent, {
@@ -1360,6 +1398,10 @@ async function sendMessage() {
   if (!selection) return;
   const text = el.input.value;
   if (!text.trim()) return;
+  if (PRO_MODE) {
+    try { await proUI?.flush(); }
+    catch (error) { el.sub.textContent = error.message; return; }
+  }
 
   if (selection.kind === "live") {
     el.input.value = "";
@@ -1503,6 +1545,7 @@ function renderWorkspaceLanding(path) {
   el.title.textContent = workspaceName(path) || tr("Working directory");
   el.sub.textContent = path;
   setComposerMode("new");
+  proUI?.show(null, `new:${path}`);
   el.messages.innerHTML = "";
 
   const empty = document.createElement("div");
@@ -1652,6 +1695,19 @@ function fillNewChatModels(catalog, selectedModel) {
   })), selectedModel);
 }
 
+/** Offer only the levels the chosen model declares, keeping the draft if valid. */
+function fillNewChatIntensities(catalog, selected) {
+  const provider = catalog.providers.find((entry) => entry.name === el.newChatProvider.value) ?? catalog.providers[0];
+  const model = provider?.models.find((entry) => entry.name === el.newChatModel.value);
+  const levels = Array.isArray(model?.intensities) && model.intensities.length ? model.intensities : catalog.intensities;
+  let wanted = selected;
+  if (!levels.includes(wanted)) {
+    const fallback = catalog.settings?.default_intensity;
+    wanted = levels.includes(fallback) ? fallback : levels.includes("High") ? "High" : levels[0] ?? "";
+  }
+  fillSelect(el.newChatIntensity, levels.map((value) => ({ value, label: value })), wanted);
+}
+
 function updateNewChatNote(catalog) {
   const provider = catalog?.providers.find((entry) => entry.name === el.newChatProvider.value);
   const model = provider?.models.find((entry) => entry.name === el.newChatModel.value);
@@ -1660,6 +1716,15 @@ function updateNewChatNote(catalog) {
   } else {
     el.newChatNote.textContent = "";
   }
+}
+
+function renderProNewChatPresets(catalog, selected = catalog.pro?.preset) {
+  if (!PRO_MODE) return;
+  const select = document.getElementById("new-chat-pro-preset");
+  if (!select) return;
+  fillSelect(select, (catalog.pro?.presets || []).map(preset => ({
+    value: preset.name, label: uiLanguage() === "zh" ? preset.chinese_name || preset.name : preset.name,
+  })), selected);
 }
 
 /** Relabel the open new-conversation sheet without losing its selections. */
@@ -1673,9 +1738,10 @@ function refreshNewChatTexts() {
   const approval = el.newChatApproval.value;
   fillSelect(el.newChatProvider, catalog.providers.map((entry) => ({ value: entry.name, label: entry.name })), provider);
   fillNewChatModels(catalog, model);
-  fillSelect(el.newChatIntensity, catalog.intensities.map((value) => ({ value, label: value })), intensity);
+  fillNewChatIntensities(catalog, intensity);
   el.newChatApproval.value = approval;
   updateNewChatNote(catalog);
+  renderProNewChatPresets(catalog, document.getElementById("new-chat-pro-preset")?.value);
   renderNewChatRecents();
 }
 
@@ -1695,13 +1761,14 @@ async function openNewChatDialog(options = {}) {
   const defaults = catalog.selection;
   fillSelect(el.newChatProvider, catalog.providers.map((provider) => ({ value: provider.name, label: provider.name })), defaults.provider);
   fillNewChatModels(catalog, defaults.model);
-  fillSelect(el.newChatIntensity, catalog.intensities.map((value) => ({ value, label: value })), defaults.intensity);
+  fillNewChatIntensities(catalog, defaults.intensity);
   el.newChatApproval.value = catalog.settings.approval_mode === "auto" ? "auto" : "request";
 
   const start = String(options.cwd || selectionCwd() || state.workspace?.path || state.workspaces?.cwd || "").trim();
   el.newChatCwd.value = start;
   renderNewChatRecents();
   updateNewChatNote(catalog);
+  renderProNewChatPresets(catalog);
   if (typeof el.newChatCwd.focus === "function") el.newChatCwd.focus();
 }
 
@@ -1722,7 +1789,8 @@ async function submitNewChat() {
   el.newChatStart.textContent = tr("Creating…");
   el.newChatFeedback.textContent = "";
   try {
-    const created = await createConversation(cwd, selection, el.newChatApproval.value);
+    const created = await createConversation(cwd, selection, el.newChatApproval.value,
+      PRO_MODE ? document.getElementById("new-chat-pro-preset")?.value : undefined);
     el.newChatDialog.close();
     await selectLive(created.key);
     setConversationView(true);
@@ -1736,9 +1804,10 @@ async function submitNewChat() {
 }
 
 /** Create a browser-owned conversation in `cwd` and reveal its folder. */
-async function createConversation(cwd, selection, approvalMode) {
+async function createConversation(cwd, selection, approvalMode, proPreset = currentProPreset()) {
   const payload = { cwd };
-  if (selection && selection.provider && selection.model) payload.selection = selection;
+  if (PRO_MODE) payload.pro_preset = proPreset;
+  else if (selection && selection.provider && selection.model) payload.selection = selection;
   if (approvalMode === "request" || approvalMode === "auto") payload.approval_mode = approvalMode;
   const response = await apiFetch("/api/conversations", {
     method: "POST",
@@ -2218,6 +2287,7 @@ async function changeInterfaceLanguage(language, { persist = true } = {}) {
   syncLanguageSelects(normalized);
   if (state.status) setStatus(state.status.key, state.status.kind);
   preferences.refreshTexts?.();
+  proUI?.refresh();
   refreshNewChatTexts();
   renderWorkspaceChrome();
   renderSidebar();
@@ -2489,12 +2559,16 @@ el.newChatProvider.addEventListener("change", () => {
   const catalog = preferences.catalog?.();
   if (catalog) {
     fillNewChatModels(catalog, "");
+    fillNewChatIntensities(catalog, el.newChatIntensity.value);
     updateNewChatNote(catalog);
   }
 });
 el.newChatModel.addEventListener("change", () => {
   const catalog = preferences.catalog?.();
-  if (catalog) updateNewChatNote(catalog);
+  if (catalog) {
+    fillNewChatIntensities(catalog, el.newChatIntensity.value);
+    updateNewChatNote(catalog);
+  }
 });
 
 el.folderClose.addEventListener("click", () => el.folderDialog.close());

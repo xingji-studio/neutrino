@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
 import {
   findModel,
   contextCompressionThreshold,
+  intensityForModel,
   loadConfig,
   loadPlannerPrompt,
   loadStepPrompt,
@@ -44,6 +45,9 @@ import {
   type ConversationContext,
 } from "../compact.js";
 import { LLMClient, describeError } from "../llm/client.js";
+import { defaultProPreset, loadProModels, loadProPrompt, proMaxRecursionDepth, requireProPreset, type ProRole } from "../pro/config.js";
+import { resolveProTeam, ProPreflightError } from "../pro/preflight.js";
+import { ProAgentTeam, getProToolDefinitions } from "../pro/agents.js";
 import type { RetryNotice } from "../llm/retry.js";
 import {
   advancePlan,
@@ -91,6 +95,7 @@ interface ApiMessage {
   content: string;
   /** Thinking text echoed back on an assistant tool-call message. */
   reasoning_content?: string;
+  anthropic_content?: unknown[];
   tool_calls?: Array<{
     id: string;
     type: "function";
@@ -136,6 +141,7 @@ export function createWebSession(
   selection: ResolvedModelSelection,
   approvalMode?: ApprovalMode,
   mode: Mode = "standard",
+  proPreset?: string,
 ): WebSession {
   const now = new Date();
   const source: SessionData = {
@@ -150,8 +156,23 @@ export function createWebSession(
     messages: [],
     tokens: { prompt: 0, completion: 0 },
     approval_mode: normalizeApprovalMode(approvalMode ?? loadConfig(mode).approval_mode),
+    ...(mode === "pro" ? { pro_preset: requireProPreset(proPreset ?? defaultProPreset()) } : {}),
   };
   return new WebSession(source, selection.model, mode);
+}
+
+/** A preset may need fallback; defer model credentials/availability to preflight. */
+export function proInitialSelection(preset = defaultProPreset()): ResolvedModelSelection {
+  const tier = loadProModels().tier.find((entry) => entry.name === requireProPreset(preset))!;
+  const setting = tier["model-setting"].find((entry) => entry.type === "main_model");
+  const provider = setting?.provider ?? "";
+  const name = setting?.model ?? "";
+  const model = loadModels().providers.find((entry) => entry.name === provider)?.models.find((entry) => entry.name === name);
+  return {
+    provider,
+    model: model ? { ...model } : { name, url: "", api_key: "", supports_streaming: true },
+    intensity: setting?.intensity || "high",
+  };
 }
 
 function parseArguments(raw: string): Record<string, unknown> {
@@ -189,6 +210,15 @@ export function resolveModel(
 
 /** Build a web session from a saved transcript, or explain why we cannot. */
 export function resumeSession(source: SessionData, selection?: ModelSelection, mode: Mode = "standard"): ResumeOutcome {
+  if (mode === "pro") {
+    try {
+      const initial = proInitialSelection(source.pro_preset ?? defaultProPreset());
+      return { ok: true, session: new WebSession({ ...source, provider: initial.provider,
+        model: initial.model.name, intensity: initial.intensity }, initial.model, mode) };
+    } catch (error) {
+      return { ok: false, error: describeError(error) };
+    }
+  }
   const updated = selection ? { ...source, ...selection } : source;
   const resolved = resolveModel(updated.model, updated.provider);
   if (!resolved.ok) return resolved;
@@ -219,6 +249,10 @@ export class WebSession implements LiveAgent {
   private plan: PlanState | null = null;
   /** True while the planner agent is writing the steps. */
   private planning = false;
+  private proPreset: string | null = null;
+  private proTeam: ProAgentTeam | null = null;
+  private proState: LiveMeta["pro"];
+  private proAbort: AbortController | null = null;
   /** What the sub-agent is doing, or null when none is running. */
   private subagent: string | null = null;
   private saveError: string | null = null;
@@ -246,10 +280,13 @@ export class WebSession implements LiveAgent {
 
   constructor(source: SessionData, model: ModelInfo, mode: Mode = "standard") {
     this.mode = mode;
+    if (mode === "pro") this.proPreset = requireProPreset(source.pro_preset ?? defaultProPreset());
     this.model = model;
     this.approvalMode = normalizeApprovalMode(source.approval_mode ?? loadConfig(this.mode).approval_mode);
     this.provider = source.provider;
-    this.intensity = source.intensity;
+    // A transcript saved before the model's limits existed (or before the model
+    // itself was narrowed) must not replay an unsupported sampling level.
+    this.intensity = mode === "pro" ? source.intensity : intensityForModel(model, source.intensity, loadConfig(this.mode).default_intensity);
     this.dir = source.cwd;
     this.sessionId = source.id;
     this.messages = (source.messages as Msg[]).slice();
@@ -275,6 +312,7 @@ export class WebSession implements LiveAgent {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.proAbort?.abort();
     this.turnToken++;
     this.busy = false;
     if (this.pendingApproval) {
@@ -294,20 +332,41 @@ export class WebSession implements LiveAgent {
   }
 
   liveConfigure(selection: ResolvedModelSelection): ModelChangeResult {
+    if (this.mode === "pro") return { ok: false, error: "choose a Pro preset to change professional models" };
     if (this.disposed) return { ok: false, error: "this session has ended" };
     if (this.busy || this.pendingApproval) {
       return { ok: false, error: "pause the current turn before changing models" };
     }
     this.model = { ...selection.model };
     this.provider = selection.provider;
-    this.intensity = selection.intensity;
+    this.intensity = intensityForModel(this.model, selection.intensity, loadConfig(this.mode).default_intensity);
     this.save();
     this.publishLive();
     return { ok: true };
   }
 
+  liveSetProPreset(preset: string): ModelChangeResult {
+    if (this.mode !== "pro" || this.disposed) return { ok: false, error: "this is not an active Pro session" };
+    if (this.busy || this.pendingApproval) return { ok: false, error: "pause the current turn before changing presets" };
+    try {
+      this.proPreset = requireProPreset(preset);
+      const initial = proInitialSelection(this.proPreset);
+      this.model = initial.model;
+      this.provider = initial.provider;
+      this.intensity = initial.intensity;
+      this.proTeam = null;
+      this.proState = undefined;
+      this.save();
+      this.publishLive();
+      return { ok: true };
+    } catch (error) { return { ok: false, error: describeError(error) }; }
+  }
+
   liveMeta(): LiveMeta {
     return {
+      ...(this.mode === "pro" ? { pro: this.proState ?? {
+        preset: this.proPreset!, checking: false, checkId: "", models: [], fallbacks: [],
+      } } : {}),
       sessionId: this.sessionId,
       title: this.title(),
       provider: this.provider,
@@ -361,6 +420,7 @@ export class WebSession implements LiveAgent {
   livePause(): void {
     if (this.paused || (!this.busy && !this.queued)) return;
     this.paused = true;
+    this.proAbort?.abort();
     this.turnToken++;
     // A queued decision would otherwise keep the promise (and the gate) alive.
     if (this.pendingApproval) {
@@ -371,6 +431,12 @@ export class WebSession implements LiveAgent {
     this.busy = false;
     this.retainStreamingContent();
     this.subagent = null;
+    if (this.proState) this.proState.checking = false;
+    if (this.mode === "pro") {
+      this.reviewing = null;
+      this.retrying = null;
+      this.planning = false;
+    }
     stopPlan(this.plan);
     this.save();
     this.publishLive();
@@ -417,6 +483,9 @@ export class WebSession implements LiveAgent {
   liveClear(): void {
     if (this.disposed) return;
     if (!this.checkpoint.flush()) return;
+    this.proAbort?.abort();
+    this.proTeam = null;
+    this.proState = undefined;
     this.turnToken++;
     if (this.pendingApproval) {
       const pending = this.pendingApproval;
@@ -487,6 +556,7 @@ export class WebSession implements LiveAgent {
    * pass, exactly as it did before planning existed.
    */
   private async runTurn(token: number, turnMessages: Msg[], approvalContext: ApprovalContext): Promise<void> {
+    if (this.mode === "pro") return this.runProTurn(token, turnMessages, approvalContext);
     await this.autoCompress(token);
     if (token !== this.turnToken || this.paused) return;
 
@@ -516,6 +586,104 @@ export class WebSession implements LiveAgent {
       if (token !== this.turnToken || this.paused) return;
     }
     this.onTurnFinished();
+  }
+
+  /** Freeze one resolved team per task, plan first, then give the whole brief to main. */
+  private async runProTurn(token: number, turnMessages: Msg[], approvalContext: ApprovalContext): Promise<void> {
+    const cancelled = () => token !== this.turnToken || this.paused || this.disposed;
+    const controller = new AbortController();
+    this.proAbort = controller;
+    this.proTeam = null;
+    this.plan = null;
+    this.proState = { preset: this.proPreset!, checking: true, checkId: randomUUID(), models: [], fallbacks: [] };
+    this.publishLive();
+    try {
+      const resolved = await resolveProTeam(this.proPreset!, {
+        signal: controller.signal,
+        onUsage: (usage) => {
+          if (!cancelled()) { this.tokens.prompt += usage.prompt; this.tokens.completion += usage.completion; }
+        },
+      });
+      if (cancelled()) return;
+      this.proState.models = Object.values(resolved.models).map((entry) => ({
+        role: entry!.role, provider: entry!.provider, model: entry!.model.name, intensity: entry!.intensity, tier: entry!.tier,
+      }));
+      this.proState.fallbacks = resolved.fallbacks;
+      this.proState.checking = false;
+      const team = new ProAgentTeam({
+        models: resolved.models, maxDepth: proMaxRecursionDepth(), cwd: this.dir, cancelled,
+        approve: (name, args) => this.requestApproval(name, args, {
+          ...approvalContext, context: captureApprovalContext(this.turnView(turnMessages)).context,
+        }),
+        execute: (name, args) => executeTool(name, args, this.dir),
+        onProgress: (label) => { if (!cancelled()) { this.subagent = label; this.publishLive(); } },
+        onUsage: (usage) => {
+          if (!cancelled()) { this.tokens.prompt += usage.prompt; this.tokens.completion += usage.completion; }
+        },
+        onRetry: (notice) => { if (!cancelled()) { this.retrying = notice; this.publishLive(); } },
+      });
+      this.proTeam = team;
+      const main = resolved.models.main_model!;
+      this.model = main.model;
+      this.provider = main.provider;
+      this.intensity = main.intensity;
+      this.publishLive();
+      this.planning = true;
+      this.publishLive();
+      const planning = await team.call("plan_model", buildPlannerInput({
+        request: approvalContext.prompt, cwd: this.dir, transcript: planTranscript(turnMessages),
+      }), "Plan the task before execution. Do not modify files or execute commands.", 0, true);
+      if (cancelled()) return;
+      this.planning = false;
+      this.subagent = null;
+      this.retrying = null;
+      if (!planning.trim() || /\[Error:|\[Sub-agent .*without.*report/.test(planning)) {
+        throw new Error(`Pro planning failed: ${planning}`);
+      }
+      this.plan = parsePlan(planning);
+      if (!this.plan) {
+        // Standard planning skips single actions; Pro plans every task.
+        try {
+          const single = JSON.parse(planning.trim().replace(/^```(?:json)?\s*|\s*```$/g, "")) as {
+            goal?: string; steps?: Array<{ title?: string; detail?: string }>;
+          };
+          if (single.steps?.length === 1 && typeof single.steps[0].title === "string" && single.steps[0].title.trim()) {
+            this.plan = { goal: String(single.goal ?? "").slice(0, 240), steps: [{
+              title: single.steps[0].title.slice(0, 160), detail: String(single.steps[0].detail ?? "").slice(0, 400), status: "pending",
+            }] };
+          }
+        } catch { /* A useful prose plan can still guide the main agent. */ }
+      }
+      await this.autoCompress(token);
+      if (cancelled()) return;
+      this.messages.push({ role: "assistant", content: this.plan ? planMessage(this.plan) : planning });
+      this.save();
+      this.publishLive();
+      const directive = `The planning agent produced this plan for the current user request:\n${planning}\n\n` +
+        "Execute the complete task, using the appropriate professional agents for reasoning, frontend, backend and modeling work. Verify the result and report the outcome.";
+      if (this.plan?.steps.length) this.setStep(0, "active");
+      const finished = await this.agentLoop(this.buildApiMessages(this.turnView(turnMessages), directive), token, approvalContext);
+      if (cancelled()) return;
+      if (this.plan) {
+        if (finished) for (let i = 0; i < this.plan.steps.length; i++) this.setStep(i, "done");
+        else this.setStep(0, "failed");
+      }
+    } catch (error) {
+      if (cancelled()) return;
+      this.proState!.checking = false;
+      this.proState!.error = describeError(error);
+      if (error instanceof ProPreflightError) this.proState!.fallbacks = error.fallbacks;
+      throw error;
+    } finally {
+      if (!cancelled()) {
+        this.planning = false;
+        this.subagent = null;
+        this.retrying = null;
+        this.proState!.checking = false;
+        this.publishLive();
+      }
+    }
+    if (!cancelled()) this.onTurnFinished();
   }
 
   /**
@@ -598,8 +766,9 @@ export class WebSession implements LiveAgent {
   private buildApiMessages(messages = this.messages, directive = ""): ApiMessage[] {
     // A step directive extends the system prompt: the plan is an instruction, not
     // something the user just said.
+    const prompt = this.mode === "pro" ? loadProPrompt("main_model") : loadPrompt();
     const api: ApiMessage[] = [
-      { role: "system", content: directive ? `${loadPrompt()}\n\n${directive}` : loadPrompt() },
+      { role: "system", content: directive ? `${prompt}\n\n${directive}` : prompt },
     ];
     for (const m of modelHistory(messages, this.context)) {
       if (m.role === "user" || m.role === "assistant") {
@@ -617,11 +786,12 @@ export class WebSession implements LiveAgent {
    * the caller owns the turn's end because a planned turn runs this per step.
    */
   private async agentLoop(apiMessages: ApiMessage[], token: number, approvalContext: ApprovalContext): Promise<boolean> {
-    const tools = getToolDefinitions();
+    const tools = this.mode === "pro" ? getProToolDefinitions() : getToolDefinitions();
+    const team = this.proTeam;
     try {
       for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
         if (token !== this.turnToken || this.paused) return false;
-        const client = new LLMClient(this.model, this.provider, this.intensity);
+        const client = team ? team.client("main_model") : new LLMClient(this.model, this.provider, this.intensity);
         let text = "";
         this.streamingContent = "";
         this.publishLive();
@@ -660,6 +830,7 @@ export class WebSession implements LiveAgent {
             role: "assistant",
             content: text,
             reasoning_content: client.reasoningContent ?? "",
+            ...(client.anthropicContent.length ? { anthropic_content: client.anthropicContent } : {}),
             ...(toolCalls.length > 0
               ? {
                 tool_calls: toolCalls.map((call) => ({
@@ -674,7 +845,13 @@ export class WebSession implements LiveAgent {
         this.save();
         this.publishLive();
 
-        if (toolCalls.length === 0) break;
+        if (toolCalls.length === 0) {
+          if (this.mode === "pro" && !text.trim()) {
+            this.messages.push({ role: "assistant", content: "[Error: Pro main model returned an empty completion.]" });
+            return false;
+          }
+          return !/\[Error:/.test(text);
+        }
         for (const call of toolCalls) {
           if (token !== this.turnToken || this.paused) return false;
           const args = parseArguments(call.arguments);
@@ -724,7 +901,8 @@ export class WebSession implements LiveAgent {
         }
         this.save();
       }
-      return true;
+      if (this.mode === "pro") this.messages.push({ role: "assistant", content: "[Error: Pro main agent reached its tool round limit before completion.]" });
+      return false;
     } catch (err) {
       if (token !== this.turnToken) return false;
       if (this.streamingContent) {
@@ -760,16 +938,28 @@ export class WebSession implements LiveAgent {
   ): Promise<ApprovalDecision> {
     const risk = assessToolCall(tool, args, this.dir);
     if (!risk) return { approved: true, source: "prompt", reason: "routine call" };
+    const approvalToken = this.turnToken;
+    const team = this.proTeam;
     const gate = new ApprovalGate({
       askHuman: () =>
         new Promise<boolean | null>((resolve) => {
+          if (this.mode === "pro" && (approvalToken !== this.turnToken || this.paused || this.disposed)) {
+            resolve(false);
+            return;
+          }
           this.pendingApproval = { tool, args, risk, resolve };
           this.publishLive();
         }),
       reviewer: () => this.reviewerModel(),
+      ...(this.mode === "pro" && team ? {
+        createReviewerClient: () => team.client("confirm_model"),
+        reviewerSystemPrompt: () => loadProPrompt("confirm_model"),
+        cancelled: () => approvalToken !== this.turnToken || this.paused || this.disposed,
+      } : {}),
       autoApprovalEnabled: () => this.approvalMode === "auto",
       extremeAutoApprovalEnabled: () => loadConfig(this.mode).auto_approve_extreme_risk === true,
       onReview: (info) => {
+        if (this.mode === "pro" && (approvalToken !== this.turnToken || this.paused || this.disposed)) return;
         this.reviewing = info
           ? {
             total: info.total, round: info.round ?? 1, rounds: info.rounds ?? 1,
@@ -810,6 +1000,13 @@ export class WebSession implements LiveAgent {
     apiMessages: ApiMessage[],
     approvalContext: ApprovalContext,
   ): Promise<string> {
+    if (this.mode === "pro" && (name === "call_pro_agent" || name === DELEGATE_TOOL)) {
+      const team = this.proTeam;
+      if (!team) return "[Error: Pro models have not passed preflight]";
+      return team.call(String(args.role ?? "backend_output_model") as ProRole, String(args.task ?? ""),
+        `${typeof args.context === "string" ? args.context : ""}\n\nCurrent user request: ${approvalContext.prompt}\n` +
+        captureApprovalContext(apiMessages).context, 1);
+    }
     if (name !== DELEGATE_TOOL) return executeTool(name, args, this.dir);
     return this.delegate(args, toolMsg, token, apiMessages, approvalContext);
   }
@@ -865,6 +1062,12 @@ export class WebSession implements LiveAgent {
   // ---- compression -----------------------------------------------------
 
   private compressThreshold(): number {
+    if (this.mode === "pro") {
+      const setting = this.proState?.models.find((entry) => entry.role === "main_model");
+      const tier = loadProModels().tier.find((entry) => entry.name === setting?.tier);
+      const capacity = tier?.["model-setting"].find((entry) => entry.type === "main_model")?.context_window;
+      if (capacity) return Math.max(1, Math.floor(capacity * 0.8));
+    }
     return contextCompressionThreshold(this.provider, this.model, this.mode);
   }
 
@@ -890,7 +1093,7 @@ export class WebSession implements LiveAgent {
     this.publishLive();
     let summary = "";
     try {
-      summary = await new LLMClient(this.model, this.provider, this.intensity).summarize(transcript, {
+      summary = await (this.proTeam?.client("main_model") ?? new LLMClient(this.model, this.provider, this.intensity)).summarize(transcript, {
         cancelled: () => token !== this.turnToken || this.paused,
       });
     } catch {
@@ -955,6 +1158,7 @@ export class WebSession implements LiveAgent {
         this.approvalMode,
         this.plan,
         this.mode,
+        this.proPreset ?? undefined,
       );
       this.saveError = null;
       return true;

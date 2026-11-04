@@ -67,6 +67,13 @@ export interface ModelInfo {
    * explicitly for a differently named endpoint (or to opt out).
    */
   reasoning?: boolean;
+  /**
+   * Thinking intensities this model accepts, e.g. `["low", "high", "max"]`.
+   * Names are matched case-insensitively and normalised to the canonical
+   * `INTENSITY_LEVELS` spelling. Omitted or empty means every level is allowed,
+   * which keeps hand-written catalogues backwards compatible.
+   */
+  intensity?: string[];
 }
 
 /**
@@ -211,6 +218,58 @@ export const INTENSITY_PARAMS: Record<string, { temperature: number; top_p: numb
   Ultra: { temperature: 1.5, top_p: 1.0 },
 };
 
+/** Canonical spelling of a configured intensity name, or null when unknown. */
+export function normalizeIntensity(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const wanted = value.trim().toLowerCase();
+  return INTENSITY_LEVELS.find((level) => level.toLowerCase() === wanted) ?? null;
+}
+
+/**
+ * The intensities a model accepts, in the canonical Low → Ultra order.
+ *
+ * An absent or empty list keeps the historical behaviour: every level is
+ * allowed. Unknown names are ignored rather than making the model unusable, so
+ * a typo in `model.json` falls back to the remaining valid entries (or to all
+ * levels when none is valid).
+ */
+export function modelIntensities(model: ModelInfo | null | undefined): string[] {
+  const raw: unknown = model?.intensity;
+  const entries: unknown[] = Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : [];
+  const allowed = new Set<string>();
+  for (const entry of entries) {
+    const level = normalizeIntensity(entry);
+    if (level) allowed.add(level);
+  }
+  if (allowed.size === 0) return [...INTENSITY_LEVELS];
+  return INTENSITY_LEVELS.filter((level) => allowed.has(level));
+}
+
+/**
+ * Pick a usable intensity for a model. The preferred value wins when the model
+ * accepts it; otherwise the configured fallback, then High, then the first
+ * supported level. This is the one place stale UI state, a saved session or a
+ * hand-edited `config.json` is reconciled with the model's limits.
+ */
+export function intensityForModel(
+  model: ModelInfo | null | undefined,
+  preferred?: unknown,
+  fallback?: unknown,
+): string {
+  const allowed = modelIntensities(model);
+  for (const candidate of [preferred, fallback, "High"]) {
+    const level = normalizeIntensity(candidate);
+    if (level && allowed.includes(level)) return level;
+  }
+  return allowed[0] ?? "High";
+}
+
+/** Exact model lookup within a provider (names may repeat across providers). */
+export function findConfiguredModel(providerName: string, modelName: string): ModelInfo | null {
+  return loadModels().providers.find((provider) => provider.name === providerName)
+    ?.models.find((model) => model.name === modelName) ?? null;
+}
+
 export interface SessionMeta {
   id: string;
   created_at: string;
@@ -258,6 +317,8 @@ export interface SessionData {
   approval_mode?: ApprovalMode;
   /** The plan of the turn being worked on, so reopening shows the same steps. */
   plan?: PlanState | null;
+  /** Pro preset selection; resolved fallback models are always task-local. */
+  pro_preset?: string;
 }
 
 export type ApprovalMode = "request" | "auto";
@@ -378,13 +439,15 @@ export function resolveModelSelection(value: unknown, requireKey = true): Resolv
   const input = value as Partial<ModelSelection>;
   if (typeof input.provider !== "string" || typeof input.model !== "string" ||
       typeof input.intensity !== "string") throw new Error("provider, model and intensity are required");
-  if (!INTENSITY_LEVELS.includes(input.intensity)) throw new Error("invalid thinking intensity");
+  const intensity = normalizeIntensity(input.intensity);
+  if (!intensity) throw new Error("invalid thinking intensity");
   const provider = loadModels().providers.find((p) => p.name === input.provider);
   if (!provider) throw new Error("unknown provider");
   const model = provider.models.find((m) => m.name === input.model);
   if (!model) throw new Error("unknown model for this provider");
+  if (!modelIntensities(model).includes(intensity)) throw new Error("this model does not support that thinking intensity");
   if (requireKey && !model.api_key?.trim()) throw new Error("this model has no API key configured");
-  return { provider: provider.name, model: { ...model }, intensity: input.intensity };
+  return { provider: provider.name, model: { ...model }, intensity };
 }
 
 export function saveSession(
@@ -399,6 +462,7 @@ export function saveSession(
   approvalMode?: ApprovalMode,
   plan?: PlanState | null,
   mode: Mode = "standard",
+  proPreset?: string,
 ): string {
   ensureDirs(mode);
   const now = new Date();
@@ -426,6 +490,8 @@ export function saveSession(
     messages,
     tokens,
     approval_mode: normalizeApprovalMode(approvalMode ?? existing?.approval_mode),
+    ...(mode === "pro" && (proPreset ?? existing?.pro_preset)
+      ? { pro_preset: proPreset ?? existing?.pro_preset } : {}),
   };
   const validContext = normalizeContext(context, messages.filter((m) => m.role !== "system").length);
   if (validContext) session.context = validContext;

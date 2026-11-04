@@ -8,6 +8,8 @@ import {
   contextWindow,
   CONFIG_FILE,
   INTENSITY_LEVELS,
+  intensityForModel,
+  modelIntensities,
   getModelsByProvider,
   loadConfig,
   loadModels,
@@ -24,6 +26,8 @@ type RowId = (typeof ROWS)[number];
 
 export class SettingsScreen extends Screen {
   private intensityIdx = 2;
+  /** Levels the current chat model accepts, in canonical order. */
+  private intensityLevels: string[] = [...INTENSITY_LEVELS];
   private contextTokens = DEFAULT_CONTEXT_WINDOW;
   private contextChanged = false;
   /** 0 = same model as the chat, otherwise index + 1 into `models`. */
@@ -46,12 +50,12 @@ export class SettingsScreen extends Screen {
 
   onActivate(): void {
     const config = loadConfig();
-    const current = String(config.default_intensity ?? "High");
-    const i = INTENSITY_LEVELS.indexOf(current);
-    this.intensityIdx = i >= 0 ? i : 2;
-
     const state = this.app.state;
     const model = getModelsByProvider()[state.selectedProvider]?.find((m) => m.name === state.selectedModelName);
+    this.intensityLevels = modelIntensities(model);
+    const current = intensityForModel(model, config.default_intensity);
+    this.intensityIdx = Math.max(0, this.intensityLevels.indexOf(current));
+
     this.contextTokens = contextWindow(model?.context_window);
     this.contextChanged = false;
 
@@ -76,7 +80,7 @@ export class SettingsScreen extends Screen {
       return;
     }
     if (row === "intensity") {
-      const n = INTENSITY_LEVELS.length;
+      const n = this.intensityLevels.length;
       this.intensityIdx = (this.intensityIdx + delta + n) % n;
     } else if (row === "approval_model") {
       const n = this.models.length + 1;
@@ -216,7 +220,7 @@ export class SettingsScreen extends Screen {
 
   private rowTexts(): { label: string; value: string }[] {
     return [
-      { label: "Default intensity", value: INTENSITY_LEVELS[this.intensityIdx] },
+      { label: "Default intensity", value: this.intensityLevels[this.intensityIdx] },
       { label: "Model context (80%)", value: `${this.contextTokens.toLocaleString("en-US")} tokens` },
       {
         label: "Approval reviewer model",
@@ -262,7 +266,7 @@ export class SettingsScreen extends Screen {
 
   private save(): void {
     const config = loadConfig();
-    config.default_intensity = INTENSITY_LEVELS[this.intensityIdx];
+    config.default_intensity = this.intensityLevels[this.intensityIdx] ?? "High";
     if (this.contextChanged) {
       const data = loadModels();
       const state = this.app.state;

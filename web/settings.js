@@ -1,13 +1,14 @@
 // Settings and model controls share the same server-side catalog. No API keys
 // are returned to this controller or kept in browser storage.
-import { t } from "./i18n.js";
+import { t, getLanguage } from "./i18n.js";
 
-export function createSettingsUI({ apiFetch, applyModel, onLanguageChange }) {
+export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, proMode = false, onCatalogChange }) {
   const ids = ["model-picker", "model-provider", "model-name", "model-intensity", "model-apply", "model-feedback",
     "settings-open", "settings-dialog", "settings-form", "settings-close", "settings-cancel", "settings-save", "settings-feedback",
     "default-provider", "default-model", "default-intensity", "settings-context", "settings-compress-note", "settings-reviewer",
     "settings-extreme", "settings-sound", "settings-password", "settings-password-confirm",
-    "settings-language", "settings-plan", "settings-approval", "settings-web-console", "settings-web-lan"];
+    "settings-language", "settings-plan", "settings-approval", "settings-web-console", "settings-web-lan",
+    "settings-pro", "settings-pro-preset", "settings-pro-depth"];
   const el = Object.fromEntries(ids.map(id => [id, document.getElementById(id)]));
   let config = null;
   let target = null;
@@ -52,23 +53,52 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange }) {
       value: model.name, label: model.name + (model.configured ? "" : ` ${t("(API key missing)")}`),
     })), selected);
   }
-  function intensities(select, selected) {
-    options(select, config.intensities.map(value => ({ value, label: value })), selected);
+  function intensities(select, selected, providerName, modelName) {
+    options(select, intensitiesFor(providerName, modelName).map(value => ({ value, label: value })),
+      pickIntensity(providerName, modelName, selected));
+  }
+  function modelEntry(providerName, modelName) {
+    const provider = config?.providers.find(entry => entry.name === providerName);
+    return provider?.models.find(entry => entry.name === modelName);
+  }
+  // Servers that do not know per-model limits omit the list; offer every level.
+  function intensitiesFor(providerName, modelName) {
+    const model = modelEntry(providerName, modelName);
+    return Array.isArray(model?.intensities) && model.intensities.length ? model.intensities : config?.intensities ?? [];
+  }
+  /** Keep the current level when the model accepts it, else its fallback. */
+  function pickIntensity(providerName, modelName, selected) {
+    const levels = intensitiesFor(providerName, modelName);
+    if (levels.includes(selected)) return selected;
+    const fallback = config?.settings?.default_intensity;
+    if (levels.includes(fallback)) return fallback;
+    if (levels.includes("High")) return "High";
+    return levels[0] ?? "";
   }
   function reviewerOptions(selected) {
     const reviewers = [...new Set(config.providers.flatMap(provider => provider.models.map(model => model.name)))];
     options(el["settings-reviewer"], [{ value: "", label: t("Same as conversation") }, ...reviewers.map(value => ({ value, label: value }))], selected);
   }
+  function proPresets(selected) {
+    options(el["settings-pro-preset"], (config.pro?.presets || []).map(preset => ({
+      value: preset.name, label: getLanguage() === "zh" ? preset.chinese_name || preset.name : preset.name,
+    })), selected);
+  }
   function choice() {
     return { provider: el["model-provider"].value, model: el["model-name"].value, intensity: el["model-intensity"].value };
   }
   function renderPicker() {
-    el["model-picker"].classList.toggle("hidden", !config || !conversation);
-    if (!config || !conversation) return;
+    el["model-picker"].classList.toggle("hidden", proMode || !config || !conversation);
+    if (proMode || !config || !conversation) return;
     if (!dirty) {
       providers(el["model-provider"], conversation.provider);
       models(el["model-provider"], el["model-name"], conversation.model);
-      intensities(el["model-intensity"], conversation.intensity);
+      intensities(el["model-intensity"], conversation.intensity, conversation.provider, conversation.model);
+    } else {
+      // A provider/model change narrows the intensity list even though the rest
+      // of the draft must survive the next server snapshot.
+      intensities(el["model-intensity"], el["model-intensity"].value,
+        el["model-provider"].value, el["model-name"].value);
     }
     const busy = Boolean(conversation.busy || conversation.approval);
     el["model-apply"].disabled = applying || busy || !choice().provider || !choice().model;
@@ -83,6 +113,7 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange }) {
   }
   async function load() {
     config = await json("/api/settings");
+    onCatalogChange?.(config);
     renderPicker();
     return config;
   }
@@ -134,9 +165,15 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange }) {
     el["settings-approval"].value = config.settings.approval_mode === "auto" ? "auto" : "request";
     providers(el["default-provider"], config.selection.provider);
     models(el["default-provider"], el["default-model"], config.selection.model);
-    intensities(el["default-intensity"], config.selection.intensity);
+    intensities(el["default-intensity"], config.selection.intensity,
+      el["default-provider"].value, el["default-model"].value);
     renderContextWindow();
     reviewerOptions(config.settings.approval_model);
+    if (proMode && el["settings-pro"]) {
+      el["settings-pro"].classList.remove("hidden");
+      proPresets(config.pro?.preset);
+      el["settings-pro-depth"].value = String(config.pro?.max_recursion_depth ?? 10);
+    }
     el["settings-extreme"].checked = config.settings.auto_approve_extreme_risk;
     el["settings-sound"].checked = config.settings.sound_alerts !== false;
     el["settings-web-console"].checked = config.settings.web_console !== false;
@@ -146,7 +183,7 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange }) {
   function renderContextWindow() {
     const provider = config.providers.find(entry => entry.name === el["default-provider"].value);
     const model = provider?.models.find(entry => entry.name === el["default-model"].value);
-    el["settings-context"].disabled = !model;
+    el["settings-context"].disabled = proMode || !model;
     el["settings-context"].value = String(model?.context_window ?? 1_000_000);
     renderCompressionNote();
   }
@@ -163,18 +200,26 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange }) {
     if (!config) return;
     providers(el["model-provider"], el["model-provider"].value);
     models(el["model-provider"], el["model-name"], el["model-name"].value);
-    intensities(el["model-intensity"], el["model-intensity"].value);
+    intensities(el["model-intensity"], el["model-intensity"].value,
+      el["model-provider"].value, el["model-name"].value);
     if (el["settings-dialog"].open) {
       providers(el["default-provider"], el["default-provider"].value);
       models(el["default-provider"], el["default-model"], el["default-model"].value);
-      intensities(el["default-intensity"], el["default-intensity"].value);
+      intensities(el["default-intensity"], el["default-intensity"].value,
+        el["default-provider"].value, el["default-model"].value);
       reviewerOptions(el["settings-reviewer"].value);
       renderCompressionNote();
+      if (proMode) proPresets(el["settings-pro-preset"].value);
     }
     renderPicker();
   }
   el["settings-context"].addEventListener("input", renderCompressionNote);
-  el["default-model"].addEventListener("change", () => { if (config) renderContextWindow(); });
+  el["default-model"].addEventListener("change", () => {
+    if (!config) return;
+    intensities(el["default-intensity"], el["default-intensity"].value,
+      el["default-provider"].value, el["default-model"].value);
+    renderContextWindow();
+  });
   el["settings-language"].addEventListener("change", () => {
     if (typeof onLanguageChange === "function") onLanguageChange(el["settings-language"].value);
   });
@@ -195,6 +240,8 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange }) {
   el["default-provider"].addEventListener("change", () => {
     if (config) {
       models(el["default-provider"], el["default-model"]);
+      intensities(el["default-intensity"], el["default-intensity"].value,
+        el["default-provider"].value, el["default-model"].value);
       renderContextWindow();
     }
   });
@@ -215,20 +262,26 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange }) {
     const lanChanged = el["settings-web-lan"].checked !== lanInitial;
     const selection = { provider: el["default-provider"].value, model: el["default-model"].value, intensity: el["default-intensity"].value };
     const settings = {
-      default_intensity: selection.intensity,
-      ...(!el["settings-context"].disabled ? { model_context_window: Number(el["settings-context"].value) } : {}),
-      approval_model: el["settings-reviewer"].value,
+      ...(!proMode ? {
+        default_intensity: selection.intensity,
+        ...(!el["settings-context"].disabled ? { model_context_window: Number(el["settings-context"].value) } : {}),
+        approval_model: el["settings-reviewer"].value,
+        plan_first: el["settings-plan"].checked,
+      } : {
+        pro_preset: el["settings-pro-preset"].value,
+        pro_max_recursion_depth: Number(el["settings-pro-depth"].value),
+      }),
       auto_approve_extreme_risk: el["settings-extreme"].checked,
       sound_alerts: el["settings-sound"].checked,
       web_console: el["settings-web-console"].checked,
       ...(lanChanged ? { web_lan: el["settings-web-lan"].checked } : {}),
       language: el["settings-language"].value,
-      plan_first: el["settings-plan"].checked,
       approval_mode: el["settings-approval"].value,
     };
     if (password) settings.web_password = password;
     try {
-      config = await json("/api/settings", { ...(selection.provider && selection.model ? { selection } : {}), settings });
+      config = await json("/api/settings", { ...(!proMode && selection.provider && selection.model ? { selection } : {}), settings });
+      onCatalogChange?.(config);
       renderPicker();
       el["settings-password"].value = "";
       el["settings-password-confirm"].value = "";

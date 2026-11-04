@@ -5,7 +5,7 @@ import { Renderer } from "./terminal/renderer.js";
 import { installCrashGuard, writeCrashLog } from "./terminal/restore.js";
 import { Screen, type ScrollbarHandle } from "./terminal/screen.js";
 import { defaultState, type AppState } from "./state.js";
-import { loadConfig, saveConfig, type ModelInfo, type SessionData } from "./config.js";
+import { findConfiguredModel, intensityForModel, loadConfig, saveConfig, type ModelInfo, type SessionData } from "./config.js";
 import { C } from "./colors.js";
 import {
   applySelection,
@@ -136,10 +136,18 @@ export class App {
     const config = loadConfig();
     this.state.selectedProvider = String(config.selected_provider ?? this.state.selectedProvider);
     this.state.selectedModelName = String(config.selected_model ?? this.state.selectedModelName);
-    this.state.selectedIntensity = String(config.selected_intensity ?? this.state.selectedIntensity);
     this.state.selectedModelUrl = String(config.selected_model_url ?? this.state.selectedModelUrl);
     this.state.selectedModelApiKey = String(config.selected_model_api_key ?? this.state.selectedModelApiKey);
     this.state.selectedModelStreaming = Boolean(config.selected_model_streaming ?? true);
+    // The saved intensity can predate a model's `intensity` limits (or the
+    // selected model itself can have been hand-edited since); start from a
+    // level this exact model accepts.
+    const model = findConfiguredModel(this.state.selectedProvider, this.state.selectedModelName);
+    this.state.selectedIntensity = intensityForModel(
+      model,
+      config.selected_intensity ?? config.default_intensity ?? this.state.selectedIntensity,
+      config.default_intensity,
+    );
   }
 
   /**
@@ -815,17 +823,18 @@ export class App {
   }
 
   setModelConfig(providerName: string, model: ModelInfo, intensity: string): void {
+    const config = loadConfig();
+    const level = intensityForModel(model, intensity, config.default_intensity);
     this.state.selectedProvider = providerName;
     this.state.selectedModelName = model.name;
     this.state.selectedModelUrl = model.url;
     this.state.selectedModelApiKey = model.api_key ?? "";
     this.state.selectedModelStreaming = model.supports_streaming ?? true;
-    this.state.selectedIntensity = intensity;
+    this.state.selectedIntensity = level;
 
-    const config = loadConfig();
     config.selected_provider = providerName;
     config.selected_model = model.name;
-    config.selected_intensity = intensity;
+    config.selected_intensity = level;
     config.selected_model_url = model.url;
     config.selected_model_api_key = model.api_key ?? "";
     config.selected_model_streaming = model.supports_streaming ?? true;
@@ -851,7 +860,13 @@ export class App {
     screen.loadedPlan = data.plan ?? null;
     if (data.provider) this.state.selectedProvider = data.provider;
     if (data.model) this.state.selectedModelName = data.model;
-    if (data.intensity) this.state.selectedIntensity = data.intensity;
+    if (data.intensity) {
+      this.state.selectedIntensity = intensityForModel(
+        findConfiguredModel(this.state.selectedProvider, this.state.selectedModelName),
+        data.intensity,
+        loadConfig().default_intensity,
+      );
+    }
     this.pushScreen(screen);
   }
 

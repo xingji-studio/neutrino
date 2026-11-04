@@ -13,7 +13,7 @@ A CLI coding agent that lives in your terminal. Neutrino gives you an interactiv
 - **LLM providers** — ships with DeepSeek, OpenAI, and Anthropic presets; works with any OpenAI-compatible endpoint.
 - **Tool calling** — the agent can run shell commands, read files, write files, and list directories in your working directory.
 - **Streaming responses** — token-by-token output with pause/resume (`ESC ESC`).
-- **Intensity control** — tune `temperature`/`top_p` from `Low` to `Ultra`.
+- **Intensity control** — tune `temperature`/`top_p` from `Low` to `Ultra`, limited to the levels each model declares in `model.json`.
 - **Session history** — messages are saved before a turn starts, streamed replies are checkpointed every second, and tool calls/results are saved immediately. The history screen lists conversations started in the current working directory. Failed saves are shown in the terminal and browser UI.
 - **Auto-folding turns** — once a turn finishes, the work behind the reply (the thinking and the tool calls) folds into one summary line in both the terminal and the browser, while the answer itself always stays on screen. Click the line to read the whole round again; a turn with little to hide, or a long answer on its own, stays open. A turn stopped with `ESC ESC` is paused, not finished, so it stays open. Nothing is dropped: the transcript, the saved session and the model's context keep every message.
 - **Complete conversation history** — context compression keeps every original message and tool result on disk. The earlier portion starts collapsed in the terminal and browser; click **Earlier conversation** to expand it, including in reopened history. Model requests use a separate summary plus recent messages.
@@ -23,7 +23,7 @@ A CLI coding agent that lives in your terminal. Neutrino gives you an interactiv
 - **Agent history browser** — view past sessions from other CLI agents (Claude Code, Codex, OpenCode) directly from the history screen.
 - **Approval gate** — risky commands and paths outside the working directory need your sign-off. The header turns orange and reads **Request Approval**; press `Y` or `N`. Delete-class commands always ask, unless you explicitly granted full trust, and there is an opt-in reviewer agent for automatic decisions.
 - **Browser UI on by default** — every `neutrino` launch also mounts a local website at <http://127.0.0.1:8765> that lists every saved conversation grouped by working directory, streams the running one in real time, and lets you pause/resume it, send messages, start new conversations, open or create working directories, switch provider/model/intensity, edit every terminal setting, and switch the interface between English and 简体中文. Use `--port`/`--host` to move it, `--lan` to share it, or `--no-web` to keep the terminal only.
-- **Pro workspace** — click the orbit badge in the Web UI (or the **启用Pro模式** box under the terminal's status bar) to switch to an isolated workspace at `/pro`, introduced by a three-second animated wordmark. Pro has its own conversations, defaults, interface language, plan-first choice, reviewer model and context-compression threshold; only machine-wide settings (the Web password, approval policy and LAN binding) are shared. See [Pro workspace](#pro-workspace).
+- **Pro workspace** — click the orbit badge in the Web UI (or the **启用Pro模式** box under the terminal's status bar) to switch to an isolated workspace at `/pro`, introduced by a three-second animated wordmark. Pro coordinates eight model roles with a preset slider, mandatory planning, temporary per-role fallback and configurable recursion; only machine-wide settings (the Web password, approval policy and LAN binding) are shared. See [Pro workspace](#pro-workspace).
 
 ## Requirements
 
@@ -186,6 +186,11 @@ The sub-agent's prompt is a file too: [`assets/subagent.txt`](./assets/subagent.
 Settings are stored under `~/.neutrino/`:
 
 - `model.json` — provider and model definitions (edit to add your own endpoints).
+  A model can list the thinking intensities it accepts:
+  `"intensity": ["low", "high", "max"]`. Names are matched case-insensitively
+  and the terminal, Web UI and API only offer levels on that list, so an
+  unsupported level is never sent to the endpoint. Omit the field (or leave it
+  empty) to keep allowing all five (`Low`, `Medium`, `High`, `Max`, `Ultra`).
   DeepSeek-style thinking endpoints get `reasoning_content` sent back on their
   assistant messages automatically; a differently named endpoint can opt in
   with `"reasoning": true` (or opt out with `false`).
@@ -366,6 +371,35 @@ longer used.
 
 ### Pro workspace
 
+Pro uses eight roles: main execution, reasoning, frontend completion, backend
+completion, independent approval, image generation (reserved), planning and
+modeling. Each role has a prompt under `assets/pro/`; the frontend prompt draws
+on the supplied component design guidance.
+
+On first use, `~/.neutrino/pro/model.json` is copied unchanged from the bundled
+example (`assets/pro/model-template.json`, sourced from
+`tmp-proproject/pro-model-example.json`). Provider endpoints and credentials
+still come from the ordinary `~/.neutrino/model.json`; the Pro file only refers
+to a provider/model pair and records its intensity and context window.
+
+Use the card at the bottom-right of the composer to slide between the presets
+in the Pro file. Before every task, Pro makes a small authenticated completion
+request for every active role. If one fails, only that role tries successively
+lower presets in the file's order. Custom is a separate user-defined team,
+not a fallback tier. A popup lists unavailable models and their temporary
+replacements; the preset file remains unchanged. If no tier can supply a role,
+execution stops with the missing role listed. Image generation is not checked.
+
+The planning agent receives every request first, including a one-step task;
+then the main agent receives the request and plan. All active roles can consult
+other roles with `call_pro_agent`, sharing the same approval policy. Automatic
+reviews use the selected approval role and preserve the ordinary verdict format
+and review rounds. Initial planning and reviewer consultations are read-only,
+including nested calls. Settings controls the default preset and maximum
+recursion depth (`pro_max_recursion_depth`, default 10, range 1–100). Pausing
+cancels active model requests, including availability checks. Context compression
+uses each role's configured `context_window` at the 80% threshold.
+
 The Web console has two workspaces with the same interface. The regular one is
 at `/`; **Pro** is at `/pro`. In the regular console, click the orbit badge to
 the left of the **Neutrino** title: a `#151515` curtain fades in over the page
@@ -375,7 +409,7 @@ explains the switch; its X dismisses the hint permanently for that browser. Pro
 mode uses the static `web/neutrino.png` wordmark as its top-left logo, renames
 the sidebar brand to **Neutrino Pro**, titles the page **Neutrino Pro**, and
 adds an **Exit Pro mode / 返回普通模式** button at the top-right of the
-workspace; the rest of the interface is unchanged. The button returns to the
+workspace. Its composer adds a professional-team preset card. The button returns to the
 regular workspace at `/`.
 
 The terminal exposes the same entry point as a **启用Pro模式** box under the
@@ -384,10 +418,9 @@ not running and opens `/pro` in the default browser.
 
 The two workspaces never mix conversations or live sessions: Pro saves its
 transcripts under `~/.neutrino/pro/session/` and its settings under
-`~/.neutrino/pro/config.json`. Default models and intensity, plan-first turns,
-interface language, sound alerts, the approval reviewer model, context
-compression capacities and recent working directories all have independent
-values. Only settings that describe the whole machine are shared: the Web
+`~/.neutrino/pro/config.json`. Pro has its own interface language, sound alerts,
+default preset, maximum recursion depth and recent working directories.
+Role models, effort and context capacities live in `~/.neutrino/pro/model.json`. Only settings that describe the whole machine are shared: the Web
 password, the approval policy (default approval mode and extreme-risk
 auto-approval) and whether the console also listens on the LAN. They guard the
 machine, so both workspaces, the terminal and every browser read and write the

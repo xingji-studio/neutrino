@@ -221,6 +221,12 @@ export interface ApprovalGateOptions {
   autoApprovalEnabled?(): boolean;
   /** Reviewer model; defaults to the chat model. */
   reviewer(): { model: ModelInfo; provider: string; intensity: string };
+  /** Pro selects its independent reviewer from the resolved task team. */
+  createReviewerClient?(): LLMClient;
+  /** Role instructions supplement, but never replace, the approval policy. */
+  reviewerSystemPrompt?(): string;
+  /** A stopped Pro turn also stops its in-flight independent reviews. */
+  cancelled?(): boolean;
   /** Whether automatic review may also clear delete-class commands. */
   extremeAutoApprovalEnabled(): boolean;
   /** Recent conversation, for the reviewer's context. */
@@ -671,9 +677,13 @@ export class ApprovalGate {
       // Resolved inside the try: an unresolvable reviewer model is a failed
       // vote (and therefore a denial), not an exception that aborts the call.
       const { model, provider, intensity } = this.options.reviewer();
-      const client = new LLMClient(model, provider, intensity);
+      const client = this.options.createReviewerClient?.() ?? new LLMClient(model, provider, intensity);
       const timeout = this.options.reviewTimeoutMs?.() ?? REVIEW_TIMEOUT_MS;
-      const raw = await withTimeout(client.complete(REVIEW_SYSTEM_PROMPT, prompt), timeout);
+      const rolePrompt = this.options.reviewerSystemPrompt?.();
+      const system = rolePrompt ? `${rolePrompt}\n\n${REVIEW_SYSTEM_PROMPT}` : REVIEW_SYSTEM_PROMPT;
+      const controller = new AbortController();
+      const raw = await withTimeout(client.complete(system, prompt, { signal: controller.signal, cancelled: this.options.cancelled }), timeout)
+        .finally(() => controller.abort());
       if (raw === null) {
         // Fail closed: a reviewer that never answers must not stall the turn.
         return {

@@ -2,7 +2,7 @@ import type { Buffer } from "../terminal/buffer.js";
 import { Screen } from "../terminal/screen.js";
 import type { Key, MouseEvent } from "../terminal/input.js";
 import { C } from "../colors.js";
-import { INTENSITY_LEVELS, getModelsByProvider, type ModelInfo } from "../config.js";
+import { intensityForModel, modelIntensities, getModelsByProvider, type ModelInfo } from "../config.js";
 import { drawHeader } from "../header.js";
 import { drawHint, drawTabButton, inRect } from "../ui.js";
 
@@ -34,7 +34,13 @@ export class ModelSelectScreen extends Screen {
   private currentList(): string[] {
     if (this.level === 0) return this.providers;
     if (this.level === 1) return (this.modelMap[this.providers[this.selectedProviderIdx]] ?? []).map((m) => m.name);
-    return INTENSITY_LEVELS;
+    return this.currentIntensities();
+  }
+
+  /** Only the intensity names this exact model accepts. */
+  private currentIntensities(): string[] {
+    const models = this.modelMap[this.providers[this.selectedProviderIdx]] ?? [];
+    return modelIntensities(models[this.selectedModelIdx]);
   }
 
   private currentIdx(): number {
@@ -71,7 +77,13 @@ export class ModelSelectScreen extends Screen {
     }
     if (this.level === 1) {
       const models = this.modelMap[this.providers[this.selectedProviderIdx]] ?? [];
-      if (models.length === 0) return;
+      const model = models[this.selectedModelIdx];
+      if (!model) return;
+      // Start on the level in use when this model accepts it, otherwise on the
+      // model's own fallback (High, or the first level it declares).
+      this.selectedIntensityIdx = Math.max(0, this.currentIntensities().indexOf(
+        intensityForModel(model, this.app.state.selectedIntensity),
+      ));
       this.level = 2;
       this.scrollBtn = 0;
       this.app.render();
@@ -81,7 +93,8 @@ export class ModelSelectScreen extends Screen {
     const models = this.modelMap[providerName] ?? [];
     const model = models[this.selectedModelIdx];
     if (!model) return;
-    const intensity = INTENSITY_LEVELS[this.selectedIntensityIdx];
+    const intensity = this.currentIntensities()[this.selectedIntensityIdx];
+    if (!intensity) return;
     this.app.setModelConfig(providerName, model, intensity);
     this.app.popScreen();
   }
