@@ -184,7 +184,8 @@ function runCommand(command: string, cwd: string): Promise<string> {
     }
     exec(
       command,
-      { cwd, timeout: 120000, maxBuffer: MAX_OUTPUT * 4 },
+      // A detached Windows service has no console for its tool shells to inherit.
+      { cwd, timeout: 120000, maxBuffer: MAX_OUTPUT * 4, windowsHide: true },
       (error, stdout, stderr) => {
         const parts: string[] = [];
         if (stdout) parts.push(stdout);
