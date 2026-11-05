@@ -115,6 +115,13 @@ const ZH = {
   "Updated to {version}. Restart Neutrino to use it.": "已更新到 {version}，请重新启动 Neutrino 以使用新版本。",
   "Update failed: {error}": "更新失败：{error}",
   "Update by hand with:": "也可以手动更新：",
+  "Updates": "更新",
+  "Check for updates": "检查更新",
+  "Checking for updates…": "正在检查更新…",
+  "Version {latest} is available. This install runs {current}.": "发现新版本 {latest}，当前安装为 {current}。",
+  "Neutrino {version} is up to date.": "Neutrino {version} 已是最新版本。",
+  "Update check failed: {error}": "检查更新失败：{error}",
+  "Neutrino checks npm for new releases every 30 minutes. Both workspaces share that check.": "Neutrino 每 30 分钟通过 npm 检查一次新版本，普通模式与 Pro 模式共用该检查。",
   // -- chrome -------------------------------------------------------------
   "Neutrino": "Neutrino",
   "Switch to Pro mode": "切换至Pro模式",

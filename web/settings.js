@@ -2,13 +2,14 @@
 // are returned to this controller or kept in browser storage.
 import { t, getLanguage } from "./i18n.js";
 
-export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, proMode = false, onCatalogChange }) {
+export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, onUpdateFound, proMode = false, onCatalogChange }) {
   const ids = ["model-picker", "model-picker-summary", "model-picker-label", "model-provider", "model-name", "model-intensity",
     "model-intensity-label", "model-intensity-slider", "model-intensity-stops", "model-intensity-ticks", "model-feedback",
     "settings-open", "settings-dialog", "settings-form", "settings-close", "settings-cancel", "settings-save", "settings-feedback",
     "default-provider", "default-model", "default-intensity", "settings-context", "settings-compress-note", "settings-reviewer",
     "settings-extreme", "settings-sound", "settings-password", "settings-password-confirm",
     "settings-language", "settings-plan", "settings-approval", "settings-web-console", "settings-web-lan", "settings-background",
+    "settings-check-update", "settings-update-feedback",
     "settings-pro", "settings-pro-preset", "settings-pro-depth"];
   const el = Object.fromEntries(ids.map(id => [id, document.getElementById(id)]));
   let config = null;
@@ -348,6 +349,33 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, proMo
     }
   });
 
+  /** Ask the server to compare this install with npm right now. */
+  el["settings-check-update"].addEventListener("click", async () => {
+    const button = el["settings-check-update"];
+    if (button.disabled) return;
+    button.disabled = true;
+    message(el["settings-update-feedback"], t("Checking for updates…"));
+    try {
+      const update = await json("/api/update/check", {});
+      if (update.error) {
+        message(el["settings-update-feedback"], t("Update check failed: {error}", { error: update.error }), true);
+      } else if (update.has_update) {
+        message(el["settings-update-feedback"], t("Version {latest} is available. This install runs {current}.", {
+          current: update.current_version, latest: update.latest_version,
+        }));
+        // Installing runs npm on this machine, so the offer and its progress
+        // belong to the console's dialog, not to this form.
+        onUpdateFound?.(update);
+      } else {
+        message(el["settings-update-feedback"], t("Neutrino {version} is up to date.", { version: update.current_version }));
+      }
+    } catch (error) {
+      message(el["settings-update-feedback"], t("Update check failed: {error}", { error: error.message }), true);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
   function renderContextWindow() {
     const provider = config.providers.find(entry => entry.name === el["default-provider"].value);
     const model = provider?.models.find(entry => entry.name === el["default-model"].value);
@@ -392,6 +420,8 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, proMo
   el["settings-open"].addEventListener("click", async () => {
     if (!el["settings-dialog"].open) el["settings-dialog"].showModal();
     el["settings-save"].disabled = true;
+    // The last check belongs to an earlier visit; do not present it as current.
+    message(el["settings-update-feedback"], "");
     message(el["settings-feedback"], t("Loading…"));
     try {
       await load();

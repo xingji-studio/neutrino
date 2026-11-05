@@ -32,7 +32,8 @@ import { defaultProPreset, ensureProModels, requireProPreset } from "../pro/conf
 import { listAgentSessions, loadAgentMessages, loadAgentSession, safeAgentSessionId, type AgentId } from "../agents.js";
 import { migrateAgentSession, SessionMigrationError } from "../migration.js";
 import { runningBackground, type BackgroundStatus, type BackgroundUpdate } from "../background.js";
-import { MANUAL_UPDATE_COMMAND, installUpdate, updateStatus } from "../update.js";
+import { MANUAL_UPDATE_COMMAND, checkForUpdate, installUpdate, updateStatus, type UpdateStatus } from "../update.js";
+import { subscribeUpdateAnnouncements } from "../updateWatch.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // dist/web -> package root (mirrors the same trick used in config.ts).
@@ -699,6 +700,89 @@ function streamLive(key: string, req: http.IncomingMessage, res: http.ServerResp
   res.on("error", cleanup);
 }
 
+/**
+ * The windows watching for update announcements. The console owns one of these
+ * so closing it can end those streams: a browser reconnects an EventSource by
+ * itself, so an open tab would otherwise keep `close` waiting for a socket that
+ * will never go quiet on its own.
+ */
+function createUpdateStreams() {
+  const open = new Set<http.ServerResponse>();
+  return {
+    add(res: http.ServerResponse): void {
+      open.add(res);
+    },
+    remove(res: http.ServerResponse): void {
+      open.delete(res);
+    },
+    closeAll(): void {
+      for (const res of [...open]) {
+        open.delete(res);
+        try { res.end(); } catch { /* the window is already gone */ }
+      }
+    },
+  };
+}
+
+type UpdateStreams = ReturnType<typeof createUpdateStreams>;
+
+/**
+ * The periodic check's findings, as an event stream. A window that opens after
+ * a release was already found still has to learn about it, so the answer this
+ * process holds goes out first: the same status /api/settings hands the
+ * first-open dialog, with the same fields the manual check returns.
+ *
+ * Both workspaces read it. An update belongs to the process, not to a
+ * conversation, so a Pro tab and a standard tab are told about the same release.
+ */
+function streamUpdateEvents(req: http.IncomingMessage, res: http.ServerResponse, streams: UpdateStreams): void {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  // Same guard as streamLive: a browser that closed or reloaded the tab leaves
+  // a socket writes fail on, and an unhandled 'error' event would stop the process.
+  const write = (chunk: string): boolean => {
+    if (res.destroyed || res.writableEnded) return false;
+    try {
+      res.write(chunk);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const send = (status: UpdateStatus, error = ""): void => {
+    write(`event: update\ndata: ${JSON.stringify({
+      has_update: status.hasUpdate,
+      current_version: status.currentVersion,
+      latest_version: status.latestVersion,
+      error,
+    })}\n\n`);
+  };
+
+  write("retry: 2000\n\n");
+  send(updateStatus());
+
+  streams.add(res);
+  const unsubscribe = subscribeUpdateAnnouncements((check) => send(check, check.error ?? ""));
+  const keepAlive = setInterval(() => {
+    if (!write(": ping\n\n")) cleanup();
+  }, 25_000);
+  keepAlive.unref?.();
+
+  function cleanup(): void {
+    clearInterval(keepAlive);
+    unsubscribe();
+    streams.remove(res);
+  }
+  req.on("close", cleanup);
+  req.on("error", cleanup);
+  res.on("error", cleanup);
+}
+
 async function handleApi(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -707,6 +791,7 @@ async function handleApi(
   mode: Mode,
   pathname: string,
   binding: WebBinding,
+  updates: UpdateStreams,
 ): Promise<boolean> {
   if (!pathname.startsWith("/api/")) return false;
 
@@ -840,6 +925,41 @@ async function handleApi(
     } else {
       sendJson(res, 405, { error: "method not allowed" });
     }
+    return true;
+  }
+
+  // The 30-minute background check announces a release here, so a window that
+  // stays open learns about it without reloading. Both workspaces open it.
+  if (req.method === "GET" && pathname === "/api/update/events") {
+    streamUpdateEvents(req, res, updates);
+    return true;
+  }
+
+  // The settings page's "Check for updates" button. Start-up reads the registry
+  // once and the Web console is served from that answer, so a manual check has
+  // to ask again; otherwise the button would keep showing whatever was true
+  // when the process started. Like the install below it runs npm on this
+  // machine, so it sits behind the login cookie and the same-origin check.
+  //
+  // The answer is a status, not an HTTP failure: an unreachable registry leaves
+  // `error` set on a 200 response, which is what the browser shows next to the
+  // button. A failure also changes nothing — the last good answer stays.
+  if (pathname === "/api/update/check") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "method not allowed" });
+      return true;
+    }
+    if (!isSameOrigin(req)) {
+      sendJson(res, 403, { error: "cross-origin request rejected" });
+      return true;
+    }
+    const check = await checkForUpdate({ refresh: true });
+    sendJson(res, 200, {
+      has_update: check.hasUpdate,
+      current_version: check.currentVersion,
+      latest_version: check.latestVersion,
+      error: check.error ?? "",
+    });
     return true;
   }
 
@@ -1392,6 +1512,7 @@ async function handleRequest(
   res: http.ServerResponse,
   auth: WebAuth,
   binding: WebBinding,
+  updates: UpdateStreams,
 ): Promise<void> {
   let url: URL;
   try {
@@ -1427,7 +1548,7 @@ async function handleRequest(
     apiPathname = pathname.slice("/pro".length);
   }
 
-  if (await handleApi(req, res, url, auth, mode, apiPathname, binding)) return;
+  if (await handleApi(req, res, url, auth, mode, apiPathname, binding, updates)) return;
   if (mode === "pro") {
     // Nothing else lives under /pro but the page and its API.
     sendText(res, 404, "Not found");
@@ -1460,8 +1581,12 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
     updateSettings: (body, mode) => updateSettings(body, mode),
   };
 
+  // Every window watching for an update belongs to this console, not the module,
+  // so a second embedded server (a test, an embedding) keeps its own set.
+  const updates = createUpdateStreams();
+
   const server = http.createServer((req, res) => {
-    handleRequest(req, res, auth, binding).catch((err) => {
+    handleRequest(req, res, auth, binding, updates).catch((err) => {
       if (!res.headersSent) {
         sendJson(res, 500, { error: err instanceof Error ? err.message : "internal error" });
       } else {
@@ -1593,6 +1718,9 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
     close: () =>
       new Promise<void>((resolve) => {
         closed = true;
+        // These streams never end on their own, so they are closed explicitly;
+        // otherwise server.close() would wait for a window that stays open.
+        updates.closeAll();
         for (const key of [...webSessions.keys()]) closeWebSession(key);
         if (!server.listening) {
           resolve();

@@ -145,6 +145,7 @@ function showGate(message = "") {
   if (gateShown) return;
   gateShown = true;
   closeStream();
+  closeUpdateEvents();
   setStatus("locked", "offline");
   document.getElementById("settings-dialog").close();
   document.getElementById("background-dialog")?.close?.();
@@ -259,20 +260,57 @@ async function answerBackgroundPrompt(enable) {
 
 // ------------------------------------------------------------- update notice
 //
-// The server compares the version it runs with the one npm publishes, and both
-// workspaces read that from the settings payload: a Pro tab announces a new
-// release exactly like the regular console. Confirming installs it on this
-// machine; the running process keeps the old code either way, so a successful
-// update ends by telling the user to restart.
+// The server compares the version it runs with the one npm publishes — at
+// start-up, every 30 minutes and on demand from Settings — and every answer
+// reaches the page through one announcement stream, so the notice shown when
+// the console opens and the corner badge cannot disagree about the release. A
+// Pro tab listens to the same stream under its own API prefix. Confirming
+// installs it on this machine; the running process keeps the old code either
+// way, so a successful update ends by telling the user to restart.
 //
-// Two dialogs never open at once: when an update is offered, the background
-// invitation waits for the next page load (it is not consumed by being skipped).
+// Two dialogs never open at once: the background invitation is modal too, so a
+// release announced while it is up is offered once it is out of the way.
 
 let updatePrompted = false;
 
-function maybePromptUpdate(config) {
-  const update = config?.update;
-  if (updatePrompted || !update?.has_update) return false;
+// The release the page currently knows about. The notice and the corner badge
+// read this one value, so the reminder can never name a different version.
+let updateOffer = null;
+
+// The console's own announcement stream, and the release that arrived while the
+// background invitation was holding the screen.
+let updateSource = null;
+let pendingUpdate = null;
+
+/**
+ * Remember a release and light the corner badge. The announcement stream and a
+ * check started in Settings both report here.
+ */
+function noteUpdateAvailable(update) {
+  if (!update?.has_update) return false;
+  updateOffer = update;
+  if (el.updateBadge) {
+    const label = tr("A new version is available");
+    el.updateBadge.title = label;
+    el.updateBadge.setAttribute("aria-label", label);
+    el.updateBadge.classList.remove("hidden");
+  }
+  return true;
+}
+
+/** The release is installed or was never on offer: drop the reminder. */
+function clearUpdateBadge() {
+  updateOffer = null;
+  pendingUpdate = null;
+  el.updateBadge?.classList.add("hidden");
+}
+
+/**
+ * Offer a known release. The notice shown on load and a check started from
+ * Settings both end up here, so an update is announced with the same words and
+ * the same buttons however the user found out about it.
+ */
+function openUpdateDialog(update) {
   if (!el.updateDialog || typeof el.updateDialog.showModal !== "function") return false;
   updatePrompted = true;
   if (el.updateVersions) {
@@ -299,6 +337,56 @@ function maybePromptUpdate(config) {
   return true;
 }
 
+/**
+ * Announce a release. The console pushes what it knows when a tab connects and
+ * again whenever the 30-minute background check finds a new one, so a window
+ * that stays open is told in the same words as one that has just loaded.
+ */
+function applyUpdateStatus(update) {
+  // The badge is lit even when the notice was already shown, so a dismissed
+  // offer can still be picked up again from the corner.
+  if (!noteUpdateAvailable(update)) {
+    // The console reports no release any more, so the reminder has nothing
+    // left to stand for.
+    clearUpdateBadge();
+    return false;
+  }
+  if (updatePrompted) return false;
+  // The background invitation is a modal dialog too, and two of them must never
+  // stack: this release is offered once that one is out of the way.
+  if (el.backgroundDialog?.open) {
+    pendingUpdate = update;
+    return false;
+  }
+  return openUpdateDialog(update);
+}
+
+/**
+ * Listen for the console's announcements. EventSource reconnects by itself, so
+ * a dropped connection only leaves the page with the release it already knows.
+ */
+function openUpdateEvents() {
+  if (updateSource) return;
+  const source = new EventSource(apiPath("/api/update/events"));
+  updateSource = source;
+  source.addEventListener("update", (event) => {
+    let update;
+    try {
+      update = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    applyUpdateStatus(update);
+  });
+}
+
+/** The console is locked behind the login gate: its announcements are moot. */
+function closeUpdateEvents() {
+  if (!updateSource) return;
+  updateSource.close();
+  updateSource = null;
+}
+
 /** Run npm through the console's own server and report what happened. */
 async function runUpdate() {
   if (!el.updateNow || el.updateNow.disabled) return;
@@ -322,6 +410,7 @@ async function runUpdate() {
     // The install is done: the only thing left is to close the notice.
     el.updateLater?.classList.add("hidden");
     el.updateNow?.classList.add("hidden");
+    clearUpdateBadge();
   } catch (error) {
     if (feedback) {
       feedback.textContent = tr("Update failed: {error}", { error: error.message });
@@ -422,6 +511,7 @@ const el = {
   updateClose: document.getElementById("update-close"),
   updateLater: document.getElementById("update-later"),
   updateNow: document.getElementById("update-now"),
+  updateBadge: document.getElementById("update-badge"),
 };
 
 if (el.backgroundCancel) {
@@ -435,6 +525,14 @@ if (el.backgroundDialog) {
     event.preventDefault();
     void answerBackgroundPrompt(false);
   });
+  // A release announced while the invitation was up is offered right after it.
+  el.backgroundDialog.addEventListener("close", () => {
+    const waiting = pendingUpdate;
+    pendingUpdate = null;
+    // The login gate closes this dialog on its way in, and nothing may sit on
+    // top of it.
+    if (waiting && !gateShown) openUpdateDialog(waiting);
+  });
 }
 
 if (el.updateNow) el.updateNow.addEventListener("click", () => { void runUpdate(); });
@@ -445,6 +543,12 @@ if (el.updateDialog) {
   el.updateDialog.addEventListener("cancel", (event) => {
     event.preventDefault();
     el.updateDialog.close();
+  });
+}
+// The corner disc reopens the same notice, so a dismissal is never final.
+if (el.updateBadge) {
+  el.updateBadge.addEventListener("click", () => {
+    if (updateOffer) openUpdateDialog(updateOffer);
   });
 }
 
@@ -495,6 +599,12 @@ const preferences = createSettingsUI({
   proMode: PRO_MODE,
   onCatalogChange: (catalog) => proUI?.load(catalog),
   onLanguageChange: (language) => changeInterfaceLanguage(language),
+  // A check started from Settings offers its result through the same dialog as
+  // the notice shown on load, and lights the corner badge with it.
+  onUpdateFound: (update) => {
+    noteUpdateAvailable(update);
+    return openUpdateDialog(update);
+  },
   async applyModel(selection) {
     const current = state.selection;
     if (!current) throw new Error("Select a conversation first.");
@@ -3146,9 +3256,12 @@ preferences.load()
     if (language && language !== uiLanguage()) {
       await changeInterfaceLanguage(language, { persist: false });
     }
-    // Offer the update first, and only then the background invitation: two
-    // modal dialogs must never stack on top of each other.
-    if (!maybePromptUpdate(config)) maybePromptBackground(config);
+    // The announcement stream needs the login cookie, so it opens once the
+    // settings payload has loaded. A release it reports right away opens the
+    // notice; one that lands while the background invitation is up waits for it
+    // to close, because two modal dialogs must never stack on top of each other.
+    openUpdateEvents();
+    maybePromptBackground(config);
   })
   .catch(error => console.error(error));
 loadSeen().then(() => loadOverview()).then(() => {

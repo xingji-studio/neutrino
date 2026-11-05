@@ -248,6 +248,12 @@
             <label><span data-i18n="Confirm password">Confirm password</span><input id="settings-password-confirm" type="password" autocomplete="new-password" maxlength="256" placeholder="Repeat new password" data-i18n-placeholder="Repeat new password" /></label>
           </div>
           <p class="settings-note" data-i18n="The password is permanent and survives restarts. Default: 114514. Saving a new password signs out other browsers.">The password is permanent and survives restarts. Default: 114514. Saving a new password signs out other browsers.</p>
+          <h3 data-i18n="Updates">Updates</h3>
+          <div class="settings-update-row">
+            <button id="settings-check-update" class="control" type="button" data-i18n="Check for updates">Check for updates</button>
+            <p id="settings-update-feedback" class="form-feedback" role="status" aria-live="polite"></p>
+          </div>
+          <p class="settings-note" data-i18n="Neutrino checks npm for new releases every 30 minutes. Both workspaces share that check.">Neutrino checks npm for new releases every 30 minutes. Both workspaces share that check.</p>
           <p id="settings-feedback" class="form-feedback" role="status" aria-live="polite"></p>
         </div>
         <footer class="settings-actions">
@@ -413,6 +419,13 @@
         <footer class="sheet-actions"><button id="pro-fallback-close" class="primary" type="button" data-i18n="Got it">Got it</button></footer>
       </div>
     </dialog>
+
+    <!-- A known release keeps this disc in the corner: the notice asks once, the
+         reminder stays until the release is installed. Both workspaces serve
+         this page, so Pro draws it too. -->
+    <button id="update-badge" class="update-badge hidden" type="button" title="A new version is available" aria-label="A new version is available" data-i18n-title="A new version is available" data-i18n-aria-label="A new version is available">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v10" /><path d="m7.5 9.5 4.5 4.5 4.5-4.5" /><path d="M5 19h14" /></svg>
+    </button>
 
     <dialog id="update-dialog" class="sheet-dialog" aria-labelledby="update-title">
       <div class="sheet">

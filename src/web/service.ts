@@ -8,6 +8,7 @@ import { loadConfig, saveConfig } from "../config.js";
 import { startBackgroundTray } from "../tray.js";
 import { PRO_MODELS_URL, syncProModels } from "../pro/config.js";
 import { checkForUpdate, UPDATE_PACKAGE } from "../update.js";
+import { startUpdateWatch } from "../updateWatch.js";
 import { hub } from "./hub.js";
 import { startWebServer, type WebServerHandle } from "./server.js";
 import { TerminalBridges } from "./terminalBridge.js";
@@ -22,6 +23,7 @@ export async function runWebService(options: { port: number; host?: string; auth
   let handle: WebServerHandle | null = null;
   let tray: ReturnType<typeof startBackgroundTray> = null;
   let monitor: NodeJS.Timeout | null = null;
+  let stopUpdateWatch: (() => void) | null = null;
   let stopping = false;
   const bridges = new TerminalBridges();
 
@@ -47,6 +49,8 @@ export async function runWebService(options: { port: number; host?: string; auth
     if (stopping) return;
     stopping = true;
     if (monitor) clearInterval(monitor);
+    stopUpdateWatch?.();
+    stopUpdateWatch = null;
     tray?.close();
     bridges.close();
     backgroundLog(`stopping pid=${process.pid}`);
@@ -122,6 +126,24 @@ export async function runWebService(options: { port: number; host?: string; auth
   }
   backgroundLog(`started pid=${process.pid} on ${handle.url} (residency ${resident ? "on" : "off"})`);
   syncTray();
+
+  // The start-up lookup above is one answer; a console that stays open needs
+  // more than that. Every 30 minutes the registry is asked again and a release
+  // it has not seen before is announced to every open window
+  // (GET /api/update/events), which is the same status the first-open dialog
+  // reads, so both ways of telling the user come from one source.
+  let loggedUpdate = "";
+  stopUpdateWatch = startUpdateWatch({
+    onCheck: (result) => {
+      // Log a change, not the same answer every half hour.
+      const line = result.hasUpdate
+        ? `${UPDATE_PACKAGE} ${result.latestVersion} is available (running ${result.currentVersion})`
+        : result.error ? `update check: ${result.error}` : "";
+      if (!line || line === loggedUpdate) return;
+      loggedUpdate = line;
+      backgroundLog(line);
+    },
+  });
 
   // No helper processes: polling pids must remain invisible on Windows. An
   // orphaned, non-resident console lets an in-flight browser turn finish before

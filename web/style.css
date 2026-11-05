@@ -2154,6 +2154,24 @@ select option {
   color: var(--red);
 }
 
+.settings-fields .settings-update-row {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-fields .settings-update-row .control {
+  height: 34px;
+  padding: 0 16px;
+}
+
+/* The check reports on its own line under the button. */
+.settings-fields .settings-update-row .form-feedback {
+  margin: 0;
+}
+
 .settings-actions {
   display: flex;
   justify-content: flex-end;
@@ -3031,6 +3049,44 @@ select option {
   gap: 16px 18px;
 }
 
+/* ----------------------------------------------------------- update badge */
+
+/* A release the console knows about keeps a blue disc in the corner. The notice
+   asks once; this stays until the release is installed, so a dismissal is never
+   final. It belongs to the page rather than to a dialog, which is why Pro —
+   serving the same page — shows it too. */
+.update-badge {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  color: #ffffff;
+  background: #2563eb;
+  border: 0;
+  border-radius: 50%;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.42);
+  transition: background var(--fast), transform var(--fast);
+}
+
+.update-badge:hover {
+  background: #1d4ed8;
+  transform: translateY(-1px);
+}
+
+.update-badge:active {
+  transform: none;
+}
+
+.update-badge svg {
+  width: 22px;
+  height: 22px;
+}
+
 /* --------------------------------------------------------------- scrollbar */
 
 * {
@@ -3318,6 +3374,12 @@ html.pro-transitioning body::before {
   #send {
     width: 40px;
     height: 40px;
+  }
+
+  /* Clear of the composer on a phone: the disc floats above it. */
+  .update-badge {
+    right: 14px;
+    bottom: calc(96px + env(safe-area-inset-bottom));
   }
 
   .composer-hint {

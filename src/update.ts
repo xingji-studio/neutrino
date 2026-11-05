@@ -32,6 +32,15 @@ export interface UpdateInstallResult {
   error?: string;
 }
 
+export interface UpdateCheckOptions {
+  /**
+   * Ask the registry again even though an answer is already remembered. The
+   * settings page's manual check and the periodic background check need a
+   * fresh answer; waiting for the next start-up would tell them nothing new.
+   */
+  refresh?: boolean;
+}
+
 let published = "";
 let pending: Promise<UpdateCheck> | null = null;
 let installing: Promise<UpdateInstallResult> | null = null;
@@ -56,9 +65,15 @@ export function updateStatus(): UpdateStatus {
  * announce", which is what the next start is for. Concurrent callers share the
  * one lookup, and a successful answer is kept for the rest of the process so
  * the terminal and the Web console cannot disagree.
+ *
+ * Start-up asks once and is served from that answer from then on. A caller that
+ * passes `refresh` — the settings button, the background timer — queries the
+ * registry again, so an answer from an hour ago cannot make a check look idle.
+ * A failed refresh changes nothing: the last good answer stays, and the caller
+ * learns what went wrong from `error`.
  */
-export function checkForUpdate(): Promise<UpdateCheck> {
-  if (published) return Promise.resolve(updateStatus());
+export function checkForUpdate(options: UpdateCheckOptions = {}): Promise<UpdateCheck> {
+  if (published && options.refresh !== true) return Promise.resolve(updateStatus());
   pending ??= lookupLatestVersion()
     .then((version) => {
       published = version;

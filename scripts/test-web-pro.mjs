@@ -260,6 +260,15 @@ try {
     const html = (await request("/pro")).text;
     assert.match(html, /id="brand-logo"/, "the brand badge is a control");
     assert.match(html, /pro-tip/, "the dismissible Pro hint exists");
+    // The corner reminder is page chrome, so both workspaces must be served it
+    // along with the stylesheet that places it.
+    assert.match(html, /id="update-badge"/, "the Pro workspace is served the update reminder");
+    assert.match((await request("/")).text, /id="update-badge"/,
+      "the regular console is served the same reminder");
+    // The mobile override repeats the selector, so match the rule that really
+    // pins it to the corner instead of any occurrence of the class name.
+    assert.match((await request("/style.css")).text, /\.update-badge \{[^}]*position: fixed/,
+      "the stylesheet that pins the reminder to the corner is served too");
     assert.match(html, /id="pro-exit"/, "the way back to the regular workspace exists");
     const index = fs.readFileSync(new URL("../web/index.html", import.meta.url), "utf8");
     assert.match(index, /data-i18n="Click the badge to switch to Pro mode"/);
