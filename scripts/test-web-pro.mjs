@@ -17,9 +17,12 @@ const {
   CONFIG_FILE, PRO_CONFIG_FILE, PRO_SESSION_DIR, SESSION_DIR, contextCompressionThreshold,
   loadConfig, loadModels, saveModels, saveSession,
 } = await import("../dist/config.js");
+const { seedProPresets } = await import("./pro-presets.mjs");
+// Nothing ships with the package: this home writes the presets the page offers.
+seedProPresets(["cheap", "medium", "best"]);
 const { startWebServer } = await import("../dist/web/server.js");
 const { proModeUrl } = await import("../dist/browser.js");
-const { PRO_MODE_LABEL, proModeButton } = await import("../dist/ui.js");
+const { PRO_MODE_LABEL, WEB_MODE_LABEL, proModeButton, webModeButton } = await import("../dist/ui.js");
 
 // --- CLI entry point -------------------------------------------------------
 assert.equal(PRO_MODE_LABEL, "启用Pro模式");
@@ -36,6 +39,19 @@ assert.deepEqual(
 );
 assert.equal(proModeButton(80, 20), null, "short terminals keep their original layout");
 assert.equal(proModeButton(16, 24), null, "the box is hidden when it cannot fit horizontally");
+
+// The Web entry point is glued to the Pro box, on the same rows.
+assert.equal(WEB_MODE_LABEL, "打开Web端");
+const webButton = webModeButton(80, 24);
+assert.ok(webButton, "the Web button fits a standard terminal");
+assert.deepEqual(
+  { x: webButton.x, y: webButton.y, h: webButton.h, w: webButton.w },
+  { x: button.x + button.w, y: button.y, h: button.h, w: 13 },
+  "the Web box starts where the Pro box ends, so the two are flush",
+);
+assert.equal(webModeButton(80, 20), null, "short terminals hide the Web box with the Pro box");
+assert.equal(webModeButton(31, 24), null, "the Web box is hidden when the row cannot fit");
+assert.ok(proModeButton(31, 24), "the Pro box stays on a terminal the Web box does not fit in");
 
 assert.ok(CONFIG_FILE.startsWith(testHome + path.sep));
 assert.ok(PRO_CONFIG_FILE.startsWith(path.join(testHome, ".neutrino", "pro")));

@@ -152,10 +152,16 @@ try {
     assert.ok(newChat.data.snapshot.sessionId, "a new conversation has an id before its first message");
     const key = newChat.data.key;
 
-    const overview = await request("/api/overview");
-    const group = overview.data.groups.find(entry => entry.cwd === project);
-    assert.ok(group, "the new folder appears in the sidebar");
-    assert.ok(group.sessions.some(session => session.liveKey === key && session.title === ""), "an unnamed live chat is titled by the client");
+    // An abandoned new chat is not history: the sidebar leaves it out, while the
+    // live list still carries it so the browser can hold on to its stream.
+    const emptyOverview = await request("/api/overview");
+    assert.ok(emptyOverview.data.live.some(entry => entry.key === key), "the new conversation is live");
+    assert.equal(
+      emptyOverview.data.groups.find(entry => entry.cwd === project),
+      undefined,
+      "a conversation without messages is not recorded in the sidebar",
+    );
+    assert.equal(loadSession(newChat.data.snapshot.sessionId), null, "nothing is written to disk yet");
 
     // A deterministic stream: this exercises the ordinary browser turn and the
     // transcript it writes, without contacting a provider.
@@ -173,6 +179,15 @@ try {
     assert.ok(loadSession(savedId), "the transcript is written to disk");
     assert.equal(loadSession(savedId).cwd, project);
     assert.equal(loadSession(savedId).intensity, "Ultra");
+
+    // Once it has content the conversation shows up in the sidebar under the
+    // same live key, titled by its first message.
+    const listedOverview = await request("/api/overview");
+    const listedGroup = listedOverview.data.groups.find(entry => entry.cwd === project);
+    assert.ok(listedGroup, "the folder is listed once it has a conversation");
+    const listed = listedGroup.sessions.find(session => session.liveKey === key);
+    assert.ok(listed, "the conversation is listed after its first message");
+    assert.equal(listed.title, "hello from the new folder");
 
     // Clear: the finished transcript is kept, the live conversation restarts.
     const cleared = await request(`/api/live/${key}/clear`, { method: "POST", headers: { Origin: "https://evil.invalid" } });

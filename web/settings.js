@@ -3,7 +3,8 @@
 import { t, getLanguage } from "./i18n.js";
 
 export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, proMode = false, onCatalogChange }) {
-  const ids = ["model-picker", "model-provider", "model-name", "model-intensity", "model-apply", "model-feedback",
+  const ids = ["model-picker", "model-picker-summary", "model-picker-label", "model-provider", "model-name", "model-intensity",
+    "model-intensity-label", "model-intensity-slider", "model-intensity-stops", "model-intensity-ticks", "model-feedback",
     "settings-open", "settings-dialog", "settings-form", "settings-close", "settings-cancel", "settings-save", "settings-feedback",
     "default-provider", "default-model", "default-intensity", "settings-context", "settings-compress-note", "settings-reviewer",
     "settings-extreme", "settings-sound", "settings-password", "settings-password-confirm",
@@ -14,7 +15,10 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, proMo
   let target = null;
   let conversation = null;
   let dirty = false;
-  let applying = false;
+  let draftIntensity = "";
+  let applying = null;
+  let generation = 0;
+  let failure = null;
   let feedback = "";
   let feedbackError = false;
   // Value the LAN switch had when the dialog opened. Only an actual flip is
@@ -88,32 +92,90 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, proMo
       value: preset.name, label: getLanguage() === "zh" ? preset.chinese_name || preset.name : preset.name,
     })), selected);
   }
+  function unavailableOption(select, value) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = `${value} ${t("(unavailable)")}`;
+    option.disabled = true;
+    select.appendChild(option);
+    select.value = value;
+  }
   function choice() {
-    return { provider: el["model-provider"].value, model: el["model-name"].value, intensity: el["model-intensity"].value };
+    return { provider: el["model-provider"].value, model: el["model-name"].value, intensity: draftIntensity };
   }
   function renderPicker() {
     el["model-picker"].classList.toggle("hidden", proMode || !config || !conversation);
     if (proMode || !config || !conversation) return;
     if (!dirty) {
-      providers(el["model-provider"], conversation.provider);
-      models(el["model-provider"], el["model-name"], conversation.model);
-      intensities(el["model-intensity"], conversation.intensity, conversation.provider, conversation.model);
+      providers(el["model-provider"], conversation.provider || config.selection?.provider);
+      if (conversation.provider && !config.providers.some(entry => entry.name === conversation.provider)) {
+        unavailableOption(el["model-provider"], conversation.provider);
+      }
+      models(el["model-provider"], el["model-name"], conversation.model || config.selection?.model);
+      if (conversation.model && !modelEntry(el["model-provider"].value, conversation.model)) {
+        unavailableOption(el["model-name"], conversation.model);
+      }
+      draftIntensity = pickIntensity(el["model-provider"].value, el["model-name"].value,
+        conversation.intensity || config.selection?.intensity);
     } else {
-      // A provider/model change narrows the intensity list even though the rest
-      // of the draft must survive the next server snapshot.
-      intensities(el["model-intensity"], el["model-intensity"].value,
-        el["model-provider"].value, el["model-name"].value);
+      // Keep a draft across live snapshots, while honoring the chosen model's limits.
+      draftIntensity = pickIntensity(el["model-provider"].value, el["model-name"].value, draftIntensity);
     }
+    const selection = choice();
+    const displayed = dirty || target?.startsWith("new:") ? selection : {
+      model: conversation.model || selection.model,
+      intensity: conversation.intensity || selection.intensity,
+    };
+    el["model-picker-label"].textContent = [displayed.model, displayed.intensity && t(displayed.intensity)]
+      .filter(Boolean).join(" · ") || t("Choose a model");
+    const summary = t("Conversation model: {selection}", { selection: el["model-picker-label"].textContent });
+    el["model-picker-summary"].setAttribute("aria-label", summary);
+    el["model-picker-summary"].title = summary;
+    el["model-intensity-label"].textContent = selection.intensity ? t(selection.intensity) : "";
+
+    const levels = modelEntry(selection.provider, selection.model) ? intensitiesFor(selection.provider, selection.model) : [];
+    const index = Math.max(0, levels.indexOf(selection.intensity));
+    const last = Math.max(0, levels.length - 1);
     const busy = Boolean(conversation.busy || conversation.approval);
-    el["model-apply"].disabled = applying || busy || !choice().provider || !choice().model;
-    el["model-apply"].textContent = applying
-      ? t("Applying…")
-      : target?.startsWith("file:") ? t("Continue with model") : t("Apply to conversation");
-    message(
-      el["model-feedback"],
-      feedback || (busy ? t("Pause the current turn to change models.") : t("Applies to the next turn.")),
-      feedbackError,
-    );
+    const locked = busy || Boolean(applying && applying.generation === generation);
+    const slider = el["model-intensity-slider"];
+    slider.setAttribute("style", `--pro-slider-position: ${last ? index / last : 0}`);
+    slider.classList.toggle("is-disabled", locked || !levels.length);
+    el["model-picker"].classList.toggle("is-max", last > 0 && index === last);
+    el["model-provider"].disabled = locked;
+    el["model-name"].disabled = locked || !selection.provider;
+    el["model-intensity"].disabled = locked || !levels.length;
+    el["model-intensity"].max = String(last);
+    el["model-intensity"].value = String(index);
+    el["model-intensity"].setAttribute("aria-valuetext", selection.intensity ? t(selection.intensity) : "");
+
+    const stops = el["model-intensity-stops"];
+    const ticks = el["model-intensity-ticks"];
+    stops.replaceChildren();
+    ticks.replaceChildren();
+    levels.forEach((level, levelIndex) => {
+      const position = last ? levelIndex / last * 100 : 0;
+      const stop = document.createElement("span");
+      stop.className = "pro-slider-stop";
+      stop.setAttribute("style", `left: ${position}%`);
+      stop.classList.toggle("is-filled", levelIndex <= index);
+      stops.appendChild(stop);
+      const tick = document.createElement("button");
+      tick.type = "button";
+      tick.textContent = t(level);
+      tick.disabled = locked;
+      tick.setAttribute("style", `left: ${position}%`);
+      tick.setAttribute("aria-pressed", String(level === selection.intensity));
+      tick.addEventListener("click", () => {
+        if (tick.disabled) return;
+        draftIntensity = level;
+        changeChoice();
+      });
+      ticks.appendChild(tick);
+    });
+    const status = busy ? t("Pause the current turn to change models.")
+      : feedback || (locked ? t("Applying…") : t("Applies to the next turn."));
+    message(el["model-feedback"], status, !busy && feedbackError);
   }
   async function load() {
     config = await json("/api/settings");
@@ -122,44 +184,109 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, proMo
     return config;
   }
   function showConversation(info, key) {
-    if (target !== key) { dirty = false; feedback = ""; feedbackError = false; }
+    if (target !== key) {
+      generation++;
+      dirty = false;
+      failure = null;
+      feedback = "";
+      feedbackError = false;
+      el["model-picker"].open = false;
+    }
     target = key;
     conversation = info;
+    // A turn may start elsewhere while the slider is being dragged. Discard
+    // that uncommitted preview so it cannot masquerade as the active setting.
+    if (target?.startsWith("live:") && dirty && (info?.busy || info?.approval) && applying?.generation !== generation) {
+      dirty = false;
+      feedback = "";
+      feedbackError = false;
+    }
     renderPicker();
   }
   function clear() {
+    generation++;
     target = null;
     conversation = null;
     dirty = false;
+    failure = null;
     feedback = "";
+    el["model-picker"].open = false;
     renderPicker();
+  }
+  function changeChoice() {
+    if (!config || !conversation || conversation.busy || conversation.approval || applying?.generation === generation) return;
+    dirty = true;
+    failure = null;
+    feedback = "";
+    feedbackError = false;
+    renderPicker();
+    // Saved and not-yet-created conversations keep the choice as a local draft.
+    if (!target?.startsWith("live:")) return;
+    const selection = choice();
+    if (!selection.provider || !modelEntry(selection.provider, selection.model) || !selection.intensity) return;
+    if (selection.provider === conversation.provider && selection.model === conversation.model && selection.intensity === conversation.intensity) {
+      dirty = false;
+      renderPicker();
+      return;
+    }
+    const request = { generation, promise: null };
+    applying = request;
+    renderPicker();
+    request.promise = (async () => {
+      try {
+        await applyModel(selection);
+        if (request.generation !== generation) return;
+        conversation = { ...conversation, ...selection };
+        dirty = false;
+        feedback = t("Model and intensity updated.");
+      } catch (error) {
+        if (request.generation !== generation) return;
+        dirty = false;
+        failure = error;
+        feedback = t(error.message);
+        feedbackError = true;
+      } finally {
+        if (applying === request) applying = null;
+        renderPicker();
+      }
+    })();
   }
   el["model-provider"].addEventListener("change", () => {
     if (!config) return;
-    models(el["model-provider"], el["model-name"]);
-    dirty = true; feedback = ""; feedbackError = false;
-    renderPicker();
+    const provider = config.providers.find(entry => entry.name === el["model-provider"].value);
+    models(el["model-provider"], el["model-name"], provider?.models.find(model => model.configured)?.name);
+    changeChoice();
   });
-  for (const id of ["model-name", "model-intensity"]) {
-    el[id].addEventListener("change", () => { dirty = true; feedback = ""; feedbackError = false; renderPicker(); });
-  }
-  el["model-picker"].addEventListener("submit", async event => {
-    event.preventDefault();
-    if (el["model-apply"].disabled) return;
-    const originalTarget = target;
-    applying = true;
+  el["model-name"].addEventListener("change", changeChoice);
+  el["model-intensity"].addEventListener("input", () => {
+    if (!config || !conversation || conversation.busy || conversation.approval || applying?.generation === generation) return;
+    const levels = intensitiesFor(el["model-provider"].value, el["model-name"].value);
+    draftIntensity = levels[Number(el["model-intensity"].value)] || draftIntensity;
+    dirty = true;
+    failure = null;
     feedback = "";
+    feedbackError = false;
     renderPicker();
-    try {
-      await applyModel(choice());
-      if (target === originalTarget) { dirty = false; feedback = t("Model and intensity updated."); feedbackError = false; }
-    } catch (error) {
-      if (target === originalTarget) { feedback = t(error.message); feedbackError = true; }
-    } finally {
-      applying = false;
-      renderPicker();
-    }
   });
+  el["model-intensity"].addEventListener("change", changeChoice);
+  el["model-picker"].addEventListener("keydown", event => {
+    if (event.key === "Escape") { el["model-picker"].open = false; event.stopPropagation(); }
+  });
+  document.addEventListener?.("pointerdown", event => {
+    if (el["model-picker"].open && !el["model-picker"].contains(event.target)) el["model-picker"].open = false;
+  });
+  async function flush() {
+    // A keyboard send can happen before a range input emits its change event.
+    if (dirty && target?.startsWith("live:") && applying?.generation !== generation) changeChoice();
+    const request = applying;
+    const currentGeneration = generation;
+    if (request?.generation === currentGeneration) await request.promise;
+    if (currentGeneration === generation && failure) {
+      const error = failure;
+      failure = null;
+      throw error;
+    }
+  }
 
   function renderSettings() {
     el["settings-password"].value = "";
@@ -241,8 +368,6 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, proMo
     if (!config) return;
     providers(el["model-provider"], el["model-provider"].value);
     models(el["model-provider"], el["model-name"], el["model-name"].value);
-    intensities(el["model-intensity"], el["model-intensity"].value,
-      el["model-provider"].value, el["model-name"].value);
     if (el["settings-dialog"].open) {
       providers(el["default-provider"], el["default-provider"].value);
       models(el["default-provider"], el["default-model"], el["default-model"].value);
@@ -362,12 +487,13 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, proMo
     clear,
     soundAlerts,
     refreshTexts,
+    flush,
     catalog: () => config,
-    defaultSelection: () => (config ? {
+    defaultSelection: () => (config ? (target?.startsWith("new:") && dirty ? choice() : {
       provider: config.selection.provider,
       model: config.selection.model,
       intensity: config.selection.intensity,
-    } : undefined),
+    }) : undefined),
     selectionForFile: id => target === `file:${id}` && dirty ? choice() : undefined,
   };
 }

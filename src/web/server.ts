@@ -22,15 +22,17 @@ import {
   type ApprovalMode, type Mode, type ModelSelection, type ResolvedModelSelection, type SessionData, type SessionMeta,
 } from "../config.js";
 import { getWebSettings, updateWebSettings } from "./settings.js";
+import { isSeenIdentity, loadSeen, updateSeen, SEEN_LIMIT } from "./clientState.js";
 import { WebAuth } from "./auth.js";
 import { normalizeCwd, sameCwd } from "../cwd.js";
 import { hub, type LiveEntrySummary, type LiveSnapshot } from "./hub.js";
 import { writeCrashLog } from "../terminal/restore.js";
 import { createWebSession, proInitialSelection, resumeSession, WebSession } from "./session.js";
-import { defaultProPreset, requireProPreset } from "../pro/config.js";
+import { defaultProPreset, ensureProModels, requireProPreset } from "../pro/config.js";
 import { listAgentSessions, loadAgentMessages, loadAgentSession, safeAgentSessionId, type AgentId } from "../agents.js";
 import { migrateAgentSession, SessionMigrationError } from "../migration.js";
 import { runningBackground, type BackgroundStatus, type BackgroundUpdate } from "../background.js";
+import { MANUAL_UPDATE_COMMAND, installUpdate, updateStatus } from "../update.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // dist/web -> package root (mirrors the same trick used in config.ts).
@@ -495,9 +497,13 @@ function buildOverview(mode: Mode = "standard"): Overview {
   }
 
   // Live conversations that have not been saved yet (or whose newest save has
-  // not landed) still deserve a spot at the top of their directory group.
+  // not landed) still deserve a spot at the top of their directory group. A
+  // conversation nobody has said anything in yet is not history: it stays out
+  // of the list (but in `live`, so the browser keeps its stream) until it has
+  // content.
   for (const live of lives) {
     if (live.sessionId && seen.has(live.sessionId)) continue;
+    if (live.empty) continue;
     const key = normalizeCwd(live.cwd) || "(unknown)";
     let group = groups.get(key);
     if (!group) {
@@ -704,6 +710,10 @@ async function handleApi(
 ): Promise<boolean> {
   if (!pathname.startsWith("/api/")) return false;
 
+  // The Pro presets are not bundled either: the first Pro request makes sure they
+  // are on disk. When the download fails the route below reports the missing file.
+  if (mode === "pro") await ensureProModels().catch(() => undefined);
+
   if (req.method === "OPTIONS") {
     // Same-origin only: no CORS headers, so cross-site preflights are rejected.
     // Answered before the login check because it reveals nothing.
@@ -833,6 +843,34 @@ async function handleApi(
     return true;
   }
 
+  // The update prompt's confirm button: npm runs on this machine, so the route
+  // sits behind the login cookie and the same-origin check like every other
+  // mutation, and only a release the registry announced can be installed.
+  if (pathname === "/api/update") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "method not allowed" });
+      return true;
+    }
+    if (!isSameOrigin(req)) {
+      sendJson(res, 403, { error: "cross-origin request rejected" });
+      return true;
+    }
+    if (!updateStatus().hasUpdate) {
+      sendJson(res, 409, { error: "No newer version is published." });
+      return true;
+    }
+    // Never rejects: a failure comes back as a result, carrying the command the
+    // browser shows so the user can finish the update by hand.
+    const result = await installUpdate();
+    sendJson(res, result.ok ? 200 : 500, {
+      ok: result.ok,
+      version: result.version,
+      error: result.error ?? "",
+      command: MANUAL_UPDATE_COMMAND,
+    });
+    return true;
+  }
+
   if (req.method === "GET" && pathname === "/api/health") {
     sendJson(res, 200, { ok: true, live: hub.list(mode).length });
     return true;
@@ -840,6 +878,53 @@ async function handleApi(
 
   if (req.method === "GET" && pathname === "/api/overview") {
     sendJson(res, 200, buildOverview(mode));
+    return true;
+  }
+
+  // The sidebar's blue dot is the browser's own memory of what it has read. It
+  // belongs to the console rather than to a conversation, so it is stored in
+  // ~/.neutrino/web.json (see clientState.ts) and never in the config or the
+  // transcript. Each workspace keeps its own record.
+  if (pathname === "/api/seen") {
+    if (req.method === "GET") {
+      sendJson(res, 200, { seen: loadSeen(mode) });
+      return true;
+    }
+    if (req.method === "POST") {
+      if (!isSameOrigin(req)) {
+        sendJson(res, 403, { error: "cross-origin request rejected" });
+        return true;
+      }
+      try {
+        const body = await readJsonBody(req, 64 * 1024);
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+          throw new ApiError(400, "invalid request", "invalid request");
+        }
+        const input = body as { identities?: unknown; seen?: unknown };
+        if (Object.keys(body).some((key) => key !== "identities" && key !== "seen")) {
+          throw new ApiError(400, "unknown field", "unknown field");
+        }
+        const identities = input.identities;
+        if (!Array.isArray(identities) || identities.length === 0 || identities.length > SEEN_LIMIT) {
+          throw new ApiError(400, `identities must be a list of 1 to ${SEEN_LIMIT}`, "invalid identities");
+        }
+        if (!identities.every(isSeenIdentity)) {
+          throw new ApiError(400, "invalid conversation id", "invalid conversation id");
+        }
+        if (typeof input.seen !== "boolean") {
+          throw new ApiError(400, "seen must be a boolean", "seen must be a boolean");
+        }
+        sendJson(res, 200, { ok: true, seen: updateSeen(mode, identities, input.seen) });
+      } catch (err) {
+        // A rejected body is the caller's fault; a file that cannot be written
+        // is ours, and must not read as a malformed request.
+        sendJson(res, err instanceof ApiError ? err.status : 500, {
+          error: err instanceof Error ? err.message : "invalid request",
+        });
+      }
+      return true;
+    }
+    sendJson(res, 405, { error: "method not allowed" });
     return true;
   }
 

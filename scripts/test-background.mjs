@@ -12,6 +12,9 @@ process.env.USERPROFILE = testHome;
 process.env.NEUTRINO_NO_TRAY = "1";
 
 const { DEFAULT_CONFIG, loadConfig, saveConfig } = await import("../dist/config.js");
+const { seedProPresets } = await import("./pro-presets.mjs");
+// The Pro settings page reads presets from disk: write them for this run.
+seedProPresets(["cheap", "medium", "best"]);
 const { getWebSettings, updateWebSettings } = await import("../dist/web/settings.js");
 const { startWebServer } = await import("../dist/web/server.js");
 const {

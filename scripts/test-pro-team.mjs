@@ -11,6 +11,7 @@ process.env.USERPROFILE = testHome;
 process.env.NEUTRINO_PLAN = "off"; // Pro always plans, independently of standard mode.
 const { saveModels, loadSession, loadConfig } = await import("../dist/config.js");
 const { PRO_MODEL_FILE, PRO_ROLES, loadProModels, loadProPrompt } = await import("../dist/pro/config.js");
+const { seedProPresets } = await import("./pro-presets.mjs");
 const { resolveProTeam, ProPreflightError } = await import("../dist/pro/preflight.js");
 const { ProAgentTeam } = await import("../dist/pro/agents.js");
 const { startWebServer } = await import("../dist/web/server.js");
@@ -103,8 +104,9 @@ async function waitFor(predicate) {
   }
 }
 try {
-  loadProModels();
-  assert.equal(fs.readFileSync(PRO_MODEL_FILE, "utf8"), fs.readFileSync(new URL("../assets/pro/model-template.json", import.meta.url), "utf8"), "initialize by copying the bundled template unchanged");
+  // Presets are downloaded, not bundled: this throwaway home writes its own.
+  seedProPresets(["cheap", "medium", "best"]);
+  assert.equal(loadProModels().tier.length, 3);
   for (const role of PRO_ROLES) assert.ok(loadProPrompt(role).length > 80, `prompt exists for ${role}`);
   const tier = ["cheap", "medium", "best"].map((name) => ({
     name, chinese_name: name,

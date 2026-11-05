@@ -414,38 +414,62 @@ export function drawTabButton(
 /** Label of the CLI entry point that opens the browser console's Pro workspace. */
 export const PRO_MODE_LABEL = "启用Pro模式";
 
-/**
- * Geometry of the Pro-mode button: a small box in the top-left corner, directly
- * below the status bar (row 0). Rendering and hit testing share it so a click
- * always lands on the box that is drawn.
- *
- * Returns null when the terminal is too small to fit the box with a little
- * breathing room around it. The height floor also keeps the start screen's
- * centered block (which is pushed below the box) clear of the approval toggle
- * on very short terminals, where the original layout is preserved instead.
- */
-export function proModeButton(
-  width: number,
-  height: number,
-): { x: number; y: number; w: number; h: number; label: string } | null {
-  // One blank column at the very edge, then the border: "flush to the edge
-  // with a single space", as the start screen expects.
-  const x = 1;
-  const y = 1;
-  const h = 3;
-  // Two cells of padding, one inside each border.
-  const w = displayWidth(PRO_MODE_LABEL) + 4;
-  if (width < w + 4 || height < 22) return null;
-  return { x, y, w, h, label: PRO_MODE_LABEL };
+/** Label of the CLI entry point that opens the browser console itself. */
+export const WEB_MODE_LABEL = "打开Web端";
+
+/** One of the small entry-point boxes painted in the top-left corner. */
+export interface HeaderButton {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  label: string;
 }
 
 /**
- * Draw the Pro-mode button. It is painted as opaque chrome so content behind it
+ * Geometry of a box in the top-left corner, directly below the status bar
+ * (row 0), starting at column `x`. Rendering and hit testing share it so a
+ * click always lands on the box that is drawn.
+ *
+ * Returns null when the terminal is too small to fit the box with a little
+ * breathing room to its right. The height floor also keeps the start screen's
+ * centered block (which is pushed below the boxes) clear of the approval
+ * toggle on very short terminals, where the original layout is preserved.
+ */
+function headerButton(width: number, height: number, x: number, label: string): HeaderButton | null {
+  const y = 1;
+  const h = 3;
+  // Two cells of padding, one inside each border.
+  const w = displayWidth(label) + 4;
+  if (width < x + w + 3 || height < 22) return null;
+  return { x, y, w, h, label };
+}
+
+/**
+ * The Pro-mode button: flush to the left edge with a single blank column, as
+ * the start screen expects.
+ */
+export function proModeButton(width: number, height: number): HeaderButton | null {
+  return headerButton(width, height, 1, PRO_MODE_LABEL);
+}
+
+/**
+ * The Web-mode button: glued to the right border of the Pro-mode button so the
+ * two read as one row of entry points. It starts where the Pro box ends, which
+ * also means it is hidden together with it on terminals too small for the row.
+ */
+export function webModeButton(width: number, height: number): HeaderButton | null {
+  const pro = proModeButton(width, height);
+  if (!pro) return null;
+  return headerButton(width, height, pro.x + pro.w, WEB_MODE_LABEL);
+}
+
+/**
+ * Draw one top-left button. It is painted as opaque chrome so content behind it
  * can never bleed through; the label row turns into the highlight background
  * while the pointer is over it.
  */
-export function drawProModeButton(buf: Buffer, hovered = false): void {
-  const button = proModeButton(buf.width, buf.height);
+export function drawHeaderButton(buf: Buffer, button: HeaderButton | null, hovered = false): void {
   if (!button) return;
   const { x, y, w, h, label } = button;
   if (w < 2 || h < 2) return;

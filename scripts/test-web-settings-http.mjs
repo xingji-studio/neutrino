@@ -10,7 +10,7 @@ process.env.HOME = testHome;
 process.env.USERPROFILE = testHome;
 // This test drives one resumed turn; planning would add requests it does not expect.
 process.env.NEUTRINO_PLAN = "off";
-const { saveModels, saveConfig, loadConfig, saveSession, loadSession } = await import("../dist/config.js");
+const { saveModels, saveConfig, loadConfig, saveSession, loadSession, loadVersion } = await import("../dist/config.js");
 const { startWebServer } = await import("../dist/web/server.js");
 const { LLMClient } = await import("../dist/llm/client.js");
 const { hub } = await import("../dist/web/hub.js");
@@ -62,6 +62,9 @@ try {
   const catalog = await request("/api/settings");
   assert.equal(catalog.status, 200);
   assert.equal(catalog.data.providers.length, 2);
+  // The update notice compares the running version with the published one; no
+  // registry lookup has run in this process, so only the running one is known.
+  assert.deepEqual(catalog.data.update, { current_version: loadVersion(), latest_version: "", has_update: false });
   for (const secret of ["http-secret", "https://", "web_password_hash"]) assert.ok(!catalog.text.includes(secret));
   assert.equal((await request("/api/settings", { method: "DELETE" })).status, 405);
   assert.equal((await request("/api/settings", { body: { selection: b }, headers: { Origin: "http://evil.example" } })).status, 403);

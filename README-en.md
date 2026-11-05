@@ -345,8 +345,10 @@ the same session file. **Clear** starts a fresh conversation in the same folder
 and **Other agents** lists read-only sessions that Claude Code, Codex or
 OpenCode recorded in that folder.
 
-Use the selectors above a conversation to change its provider, model or
-intensity, then press **Apply to conversation** (pause an active turn first).
+Open the model card at the lower right of the composer to choose a provider and
+model, and adjust thinking intensity with the slider. Changes apply immediately
+for an idle or paused conversation; for saved history or a new workspace, they
+are used when the conversation starts or continues.
 The **Settings** (gear) button in the sidebar edits defaults for new conversations,
 the interface language, plan-first turns, the default approval mode, context
 compression and approval settings. It also holds the **Web access** switch that
@@ -379,11 +381,17 @@ completion, independent approval, image generation (reserved), planning and
 modeling. Each role has a prompt under `assets/pro/`; the frontend prompt draws
 on the supplied component design guidance.
 
-On first use, `~/.neutrino/pro/model.json` is copied unchanged from the bundled
-example (`assets/pro/model-template.json`, sourced from
-`tmp-proproject/pro-model-example.json`). Provider endpoints and credentials
-still come from the ordinary `~/.neutrino/model.json`; the Pro file only refers
-to a provider/model pair and records its intensity and context window.
+On first use, `~/.neutrino/pro/model.json` is downloaded from
+`https://ius.neutrino.xingjisoft.com/model.json`; no template ships with the
+package. On every start it is compared with that address and overwritten when
+the content differs; a failed download leaves the local copy untouched. Provider
+endpoints and credentials still come from the ordinary `~/.neutrino/model.json`;
+the Pro file only refers to a provider/model pair and records its intensity and
+context window.
+
+Presets you author yourself live in `~/.neutrino/pro/model-custom.json`; its tier
+entries are merged into the list from `model.json`, and a same-named preset there
+wins.
 
 Use the card at the bottom-right of the composer to slide between the presets
 in the Pro file. Before every task, Pro makes a small authenticated completion

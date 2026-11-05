@@ -1,11 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
+import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { PRO_DIR, loadConfig, type ModelInfo } from "../config.js";
 
 /** Provider URLs and credentials stay in the shared, ordinary model catalogue. */
 export const PRO_MODEL_FILE = path.join(PRO_DIR, "model.json");
+/** Presets the user adds or rewrites themselves; a same-named preset here wins. */
+export const PRO_CUSTOM_MODEL_FILE = path.join(PRO_DIR, "model-custom.json");
+/** The official presets, fetched on first use: nothing is bundled with the package. */
+export const PRO_MODELS_URL = "https://ius.neutrino.xingjisoft.com/model.json";
 const ASSET_DIR = fileURLToPath(new URL("../../assets/pro/", import.meta.url));
+const DOWNLOAD_TIMEOUT_MS = 10_000;
 
 export const PRO_ROLES = [
   "main_model", "thinking_model", "front_output_model", "backend_output_model",
@@ -60,27 +66,130 @@ export interface ProFallback {
   reason: string;
 }
 
-/** Copy the bundled template byte-for-byte, exclusively on first use. */
-export function ensureProModels(): void {
+export interface ProModelSyncResult {
+  /** `updated`: the official copy replaced the file. `unchanged`: they agree. */
+  status: "updated" | "unchanged" | "kept";
+  /** Why the local presets were kept, when the official copy could not be used. */
+  detail?: string;
+}
+
+let downloading: Promise<void> | null = null;
+
+/**
+ * Make sure the Pro presets are on disk, downloading the official set the first
+ * time. A file the user already has is never touched here; a failed download
+ * leaves nothing behind, so the next start simply tries again.
+ */
+export function ensureProModels(): Promise<void> {
   fs.mkdirSync(PRO_DIR, { recursive: true });
+  if (fs.existsSync(PRO_MODEL_FILE)) return Promise.resolve();
+  downloading ??= downloadProModels().finally(() => { downloading = null; });
+  return downloading;
+}
+
+async function downloadProModels(): Promise<void> {
+  const body = await fetchProModels();
+  // An error page or a truncated reply must never become the user's presets.
+  parseProModels(body, "model.json", PRO_MODELS_URL);
   try {
-    fs.copyFileSync(path.join(ASSET_DIR, "model-template.json"), PRO_MODEL_FILE, fs.constants.COPYFILE_EXCL);
+    fs.writeFileSync(PRO_MODEL_FILE, body, { flag: "wx" });
   } catch (error) {
+    // Another process won the race and wrote the file first: that is fine.
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
   }
 }
 
-export function loadProModels(): ProModelsData {
-  ensureProModels();
+/**
+ * Keep ~/.neutrino/pro/model.json in step with the official presets, which own
+ * that file: any difference is overwritten. Presets the user keeps for
+ * themselves belong in model-custom.json, so nothing personal is lost. When the
+ * official copy cannot be read, the local presets stay exactly as they are.
+ *
+ * Called once at start-up by both the terminal and the Web console.
+ */
+export async function syncProModels(): Promise<ProModelSyncResult> {
+  const failure = `could not download the Pro model presets from ${PRO_MODELS_URL}`;
+  let body: string;
+  try {
+    body = await fetchProModels();
+  } catch (error) {
+    // Offline, or the server is down: the local presets are still usable.
+    if (!fs.existsSync(PRO_MODEL_FILE)) throw error;
+    return { status: "kept", detail: error instanceof Error ? error.message : String(error) };
+  }
+  const remote = parseProModels(body, "model.json", PRO_MODELS_URL);
+  const present = fs.existsSync(PRO_MODEL_FILE);
+  if (remote.tier.length === 0) {
+    if (!present) throw new Error(`${failure}: it contains no presets`);
+    return { status: "kept", detail: `${failure}: it contains no presets` };
+  }
+  // Only formatting differences are not a difference: the file keeps its shape.
+  // A local file that does not parse is replaced, so a hand edit cannot block Pro.
+  if (present && samePresets(readProModelsQuietly(), remote)) return { status: "unchanged" };
+  writeProModels(body);
+  return { status: "updated" };
+}
+
+async function fetchProModels(): Promise<string> {
+  try {
+    const response = await fetch(PRO_MODELS_URL, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.text();
+  } catch (error) {
+    throw new Error(
+      `could not download the Pro model presets from ${PRO_MODELS_URL}: `
+        + `${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/** Write the official copy in one step, so no reader ever sees half a file. */
+function writeProModels(body: string): void {
+  fs.mkdirSync(PRO_DIR, { recursive: true });
+  const temp = `${PRO_MODEL_FILE}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(temp, body);
+    fs.renameSync(temp, PRO_MODEL_FILE);
+  } catch (error) {
+    fs.rmSync(temp, { force: true });
+    throw error;
+  }
+}
+
+function readProModelsQuietly(): ProModelsData | null {
+  try {
+    return readProModels(PRO_MODEL_FILE, "model.json");
+  } catch {
+    return null;
+  }
+}
+
+function samePresets(left: ProModelsData | null, right: ProModelsData): boolean {
+  return left !== null && canonicalJson(left) === canonicalJson(right);
+}
+
+/** Compare documents by content, so reformatting alone is never a difference. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+    return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+/** Parse and validate one presets document; each file has to be valid on its own. */
+function parseProModels(text: string, label: string, where: string): ProModelsData {
   let value: unknown;
   try {
-    value = JSON.parse(fs.readFileSync(PRO_MODEL_FILE, "utf8"));
+    value = JSON.parse(text);
   } catch {
-    throw new Error("Pro model.json is not valid JSON; fix ~/.neutrino/pro/model.json");
+    throw new Error(`Pro ${label} is not valid JSON; fix ${where}`);
   }
-  if (!value || typeof value !== "object" || !Array.isArray((value as ProModelsData).tier) ||
-      (value as ProModelsData).tier.length === 0) {
-    throw new Error("Pro model.json must contain a nonempty tier array");
+  if (!value || typeof value !== "object" || !Array.isArray((value as ProModelsData).tier)) {
+    throw new Error(`Pro ${label} must contain a tier array`);
   }
   const names = new Set<string>();
   for (const preset of (value as ProModelsData).tier) {
@@ -101,6 +210,29 @@ export function loadProModels(): ProModelsData {
     }
   }
   return value as ProModelsData;
+}
+
+function readProModels(file: string, label: string): ProModelsData {
+  return parseProModels(fs.readFileSync(file, "utf8"), label, `~/.neutrino/pro/${label}`);
+}
+
+export function loadProModels(): ProModelsData {
+  if (!fs.existsSync(PRO_MODEL_FILE)) {
+    // The download is asynchronous, so it happens at start-up (see ensureProModels).
+    throw new Error(`Pro model.json is missing; it is downloaded from ${PRO_MODELS_URL} on first use`);
+  }
+  const { tier } = readProModels(PRO_MODEL_FILE, "model.json");
+  // Presets the user keeps in model-custom.json are merged in: a same-named entry
+  // replaces the one from model.json in place, new ones are appended.
+  if (fs.existsSync(PRO_CUSTOM_MODEL_FILE)) {
+    for (const preset of readProModels(PRO_CUSTOM_MODEL_FILE, "model-custom.json").tier) {
+      const index = tier.findIndex((entry) => entry.name === preset.name);
+      if (index === -1) tier.push(preset);
+      else tier[index] = preset;
+    }
+  }
+  if (tier.length === 0) throw new Error("Pro model.json must contain a nonempty tier array");
+  return { tier };
 }
 
 export function requireProPreset(value: unknown): string {

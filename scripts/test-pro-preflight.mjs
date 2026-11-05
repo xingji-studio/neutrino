@@ -8,9 +8,10 @@ process.env.HOME = testHome;
 process.env.USERPROFILE = testHome;
 const { saveConfig, saveModels, MODEL_FILE } = await import("../dist/config.js");
 const {
-  ACTIVE_PRO_ROLES, PRO_ROLES, PRO_MODEL_FILE, defaultProPreset,
-  loadProModels, loadProPrompt, proMaxRecursionDepth, requireProPreset,
+  ACTIVE_PRO_ROLES, PRO_MODELS_URL, PRO_ROLES, PRO_MODEL_FILE, defaultProPreset, ensureProModels,
+  loadProModels, loadProPrompt, proMaxRecursionDepth, requireProPreset, syncProModels,
 } = await import("../dist/pro/config.js");
+const { seedProPresets } = await import("./pro-presets.mjs");
 const { resolveProTeam, ProPreflightError } = await import("../dist/pro/preflight.js");
 
 const originalFetch = globalThis.fetch;
@@ -33,6 +34,61 @@ function preset(name, model, overrides = {}) {
 function configure(tier) {
   fs.writeFileSync(PRO_MODEL_FILE, JSON.stringify({ tier }));
 }
+// No template ships with the package: the first use downloads the official
+// presets, and a failed download must leave nothing behind.
+const downloaded = JSON.stringify({ tier: [preset("medium", "good")] });
+let downloadUrl = null;
+globalThis.fetch = async (url) => {
+  downloadUrl = String(url);
+  return new Response(downloaded, { status: 200 });
+};
+await ensureProModels();
+assert.equal(downloadUrl, PRO_MODELS_URL, "the official presets are the only download");
+assert.equal(fs.readFileSync(PRO_MODEL_FILE, "utf8"), downloaded, "the download is written verbatim");
+assert.equal(loadProModels().tier[0].name, "medium", "the downloaded presets load as written");
+// A file that already exists belongs to the user: no request, no rewrite.
+globalThis.fetch = async () => { throw new Error("an existing file is never downloaded again"); };
+await ensureProModels();
+assert.equal(fs.readFileSync(PRO_MODEL_FILE, "utf8"), downloaded);
+// Offline first run: no partial file, and Pro says where the file comes from.
+fs.rmSync(PRO_MODEL_FILE);
+globalThis.fetch = async () => { throw new Error("getaddrinfo ENOENT"); };
+await assert.rejects(ensureProModels(), /could not download the Pro model presets from/);
+assert.equal(fs.existsSync(PRO_MODEL_FILE), false, "a failed download leaves no partial file");
+assert.throws(() => loadProModels(), /is missing; it is downloaded from/);
+
+// The official copy owns model.json: any difference is overwritten, a failed
+// fetch keeps the local presets, and start-up is never blocked by either.
+const official = JSON.stringify({ tier: [preset("medium", "good"), preset("best", "good")] });
+globalThis.fetch = async () => new Response(official, { status: 200 });
+assert.equal((await syncProModels()).status, "updated", "a missing file is written from the official copy");
+assert.equal(fs.readFileSync(PRO_MODEL_FILE, "utf8"), official, "the official copy is written verbatim");
+// Reformatting alone is not a difference: the local file keeps its shape.
+fs.writeFileSync(PRO_MODEL_FILE, JSON.stringify(JSON.parse(official), null, 2));
+assert.equal((await syncProModels()).status, "unchanged", "a matching file is not rewritten");
+assert.ok(fs.readFileSync(PRO_MODEL_FILE, "utf8").includes('\n  "tier": ['), "a matching file keeps its formatting");
+// An edited or hand-broken file is replaced: user presets belong in model-custom.json.
+fs.writeFileSync(PRO_MODEL_FILE, JSON.stringify({ tier: [preset("custom", "good")] }));
+assert.equal((await syncProModels()).status, "updated", "a differing file is overwritten");
+assert.deepEqual(loadProModels(), JSON.parse(official), "the official presets replace local edits");
+fs.writeFileSync(PRO_MODEL_FILE, "{broken");
+assert.equal((await syncProModels()).status, "updated", "a hand-broken file heals instead of blocking Pro");
+// Offline: the local presets stay exactly as they are.
+globalThis.fetch = async () => { throw new Error("getaddrinfo ENOENT"); };
+const kept = await syncProModels();
+assert.equal(kept.status, "kept", "a failed fetch keeps the local presets");
+assert.match(kept.detail, /could not download the Pro model presets from/);
+assert.deepEqual(loadProModels(), JSON.parse(official), "the kept presets still load");
+// An offline first run has nothing to fall back on, so it reports the failure.
+fs.rmSync(PRO_MODEL_FILE);
+await assert.rejects(syncProModels(), /could not download the Pro model presets from/);
+assert.equal(fs.existsSync(PRO_MODEL_FILE), false, "a failed first download leaves no partial file");
+// An empty document from the server never replaces usable presets.
+fs.writeFileSync(PRO_MODEL_FILE, official);
+globalThis.fetch = async () => new Response('{"tier":[]}', { status: 200 });
+assert.equal((await syncProModels()).status, "kept", "an empty remote document keeps the local presets");
+assert.equal(fs.readFileSync(PRO_MODEL_FILE, "utf8"), official);
+
 globalThis.fetch = async (url, init) => {
   const body = JSON.parse(init.body);
   requests.push({ url, body, headers: init.headers });
@@ -47,9 +103,9 @@ globalThis.fetch = async (url, init) => {
 };
 
 try {
-  // Initial install is byte-for-byte, and never overwrites a user's file.
-  loadProModels();
-  assert.deepEqual(fs.readFileSync(PRO_MODEL_FILE), fs.readFileSync(new URL("../assets/pro/model-template.json", import.meta.url)));
+  // A throwaway home keeps its own presets; loading them must not rewrite them.
+  seedProPresets(["custom", "cheap", "medium", "best"]);
+  assert.equal(loadProModels().tier.length, 4, "the home's own presets load as written");
   assert.equal(ACTIVE_PRO_ROLES.length, 7, "image generation is reserved; modeling is active");
   assert.ok(ACTIVE_PRO_ROLES.includes("modeling_model"));
   for (const role of PRO_ROLES) assert.ok(loadProPrompt(role).length > 100);

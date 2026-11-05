@@ -257,6 +257,87 @@ async function answerBackgroundPrompt(enable) {
   }
 }
 
+// ------------------------------------------------------------- update notice
+//
+// The server compares the version it runs with the one npm publishes, and both
+// workspaces read that from the settings payload: a Pro tab announces a new
+// release exactly like the regular console. Confirming installs it on this
+// machine; the running process keeps the old code either way, so a successful
+// update ends by telling the user to restart.
+//
+// Two dialogs never open at once: when an update is offered, the background
+// invitation waits for the next page load (it is not consumed by being skipped).
+
+let updatePrompted = false;
+
+function maybePromptUpdate(config) {
+  const update = config?.update;
+  if (updatePrompted || !update?.has_update) return false;
+  if (!el.updateDialog || typeof el.updateDialog.showModal !== "function") return false;
+  updatePrompted = true;
+  if (el.updateVersions) {
+    el.updateVersions.textContent = tr("Running {current} · published {latest}", {
+      current: update.current_version, latest: update.latest_version,
+    });
+  }
+  if (el.updateFeedback) {
+    el.updateFeedback.textContent = "";
+    el.updateFeedback.classList.remove("error");
+  }
+  el.updateCommandBlock?.classList.add("hidden");
+  el.updateLater?.classList.remove("hidden");
+  el.updateNow?.classList.remove("hidden");
+  for (const button of [el.updateLater, el.updateNow, el.updateClose]) {
+    if (button) button.disabled = false;
+  }
+  if (el.updateNow) el.updateNow.textContent = tr("Update now");
+  try {
+    if (!el.updateDialog.open) el.updateDialog.showModal();
+  } catch {
+    return false; // An embedder without modal support still gets the console.
+  }
+  return true;
+}
+
+/** Run npm through the console's own server and report what happened. */
+async function runUpdate() {
+  if (!el.updateNow || el.updateNow.disabled) return;
+  const buttons = [el.updateNow, el.updateLater, el.updateClose].filter(Boolean);
+  for (const button of buttons) button.disabled = true;
+  const feedback = el.updateFeedback;
+  if (feedback) {
+    feedback.textContent = tr("Updating with npm…");
+    feedback.classList.remove("error");
+  }
+  let body = {};
+  try {
+    const response = await apiFetch("/api/update", { method: "POST" });
+    body = await response.json().catch(() => ({}));
+    if (!response.ok || body.ok !== true) throw new Error(body.error || `HTTP ${response.status}`);
+    if (feedback) {
+      feedback.textContent = tr("Updated to {version}. Restart Neutrino to use it.", { version: body.version || "" });
+      feedback.classList.remove("error");
+    }
+    el.updateCommandBlock?.classList.add("hidden");
+    // The install is done: the only thing left is to close the notice.
+    el.updateLater?.classList.add("hidden");
+    el.updateNow?.classList.add("hidden");
+  } catch (error) {
+    if (feedback) {
+      feedback.textContent = tr("Update failed: {error}", { error: error.message });
+      feedback.classList.add("error");
+    }
+    // npm failures are usually something the user has to fix, so the dialog
+    // keeps the command that finishes the job by hand.
+    if (el.updateCommand && typeof body?.command === "string" && body.command) {
+      el.updateCommand.textContent = body.command;
+    }
+    el.updateCommandBlock?.classList.remove("hidden");
+  } finally {
+    for (const button of buttons) button.disabled = false;
+  }
+}
+
 const el = {
   app: document.getElementById("app"),
   back: document.getElementById("back-to-menu"),
@@ -333,6 +414,14 @@ const el = {
   backgroundFeedback: document.getElementById("background-feedback"),
   backgroundCancel: document.getElementById("background-cancel"),
   backgroundEnable: document.getElementById("background-enable"),
+  updateDialog: document.getElementById("update-dialog"),
+  updateVersions: document.getElementById("update-versions"),
+  updateCommandBlock: document.getElementById("update-command-block"),
+  updateCommand: document.getElementById("update-command"),
+  updateFeedback: document.getElementById("update-feedback"),
+  updateClose: document.getElementById("update-close"),
+  updateLater: document.getElementById("update-later"),
+  updateNow: document.getElementById("update-now"),
 };
 
 if (el.backgroundCancel) {
@@ -345,6 +434,17 @@ if (el.backgroundDialog) {
   el.backgroundDialog.addEventListener("cancel", (event) => {
     event.preventDefault();
     void answerBackgroundPrompt(false);
+  });
+}
+
+if (el.updateNow) el.updateNow.addEventListener("click", () => { void runUpdate(); });
+if (el.updateLater) el.updateLater.addEventListener("click", () => el.updateDialog?.close?.());
+if (el.updateClose) el.updateClose.addEventListener("click", () => el.updateDialog?.close?.());
+if (el.updateDialog) {
+  // Esc closes it like "Later": the notice is an offer, never a gate.
+  el.updateDialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    el.updateDialog.close();
   });
 }
 
@@ -378,6 +478,9 @@ const state = {
   workspaces: null,
   // Translation key and colour class of the sidebar status line.
   status: { key: "connecting…", kind: "" },
+  // { identity: 1 } of finished conversations the reader has already opened,
+  // restored from the server before the first sidebar paint (see loadSeen).
+  seen: {},
 };
 
 function storedWorkspace() {
@@ -507,6 +610,11 @@ function announce(previous, next) {
   if (!previous || previous.key !== next.key) return;
   if (!previous.approval && next.approval) chime("approval");
   else if (previous.busy && !next.busy && !next.approval) chime("turn");
+}
+
+/** Whether a live conversation has anything to show (and so belongs in the list). */
+function liveHasContent(snapshot) {
+  return Boolean(snapshot.messages?.length || snapshot.streamingContent);
 }
 
 // ------------------------------------------------------------------ helpers
@@ -745,6 +853,154 @@ function isSelected(session) {
   return !session.liveKey && session.id === selection.id;
 }
 
+// --------------------------------------------------- the "already seen" record
+//
+// A blue dot means "this conversation finished and you have not looked at it
+// since". Opening a row records that, so the dot is not a permanent decoration;
+// new activity forgets the record again, so the next finished turn gets a mark
+// of its own. The record survives a reload and a restart of the console: a
+// conversation the reader has already read must not keep asking.
+
+/**
+ * Identity of a row in the record. A conversation keeps its id while it becomes
+ * live, so the id is the stable name; a conversation with no history yet has
+ * only its live key.
+ */
+function sessionIdentity(session) {
+  if (session.id) return `id:${session.id}`;
+  return session.liveKey ? `live:${session.liveKey}` : "";
+}
+
+// Key of the record an older console kept in localStorage. It is only read once
+// now, to hand that history over to the server.
+const SEEN_KEY = "neutrino.seen";
+
+/**
+ * Turn the server's list into the lookup the renderer uses.
+ *
+ * The record lives in ~/.neutrino/web.json (src/web/clientState.ts): one file
+ * the console owns, so the terminal UI never carries data it does not read and
+ * the answer survives a restart. localStorage could not do that — it is scoped
+ * to the address and port the console happened to listen on.
+ */
+function seenMap(list) {
+  const out = {};
+  if (Array.isArray(list)) {
+    for (const identity of list) {
+      if (typeof identity === "string" && identity) out[identity] = 1;
+    }
+  }
+  return out;
+}
+
+/** Report a change. A write that fails costs one dot, so it is never surfaced. */
+async function persistSeen(identities, seen) {
+  if (!identities.length) return true;
+  try {
+    const response = await apiFetch("/api/seen", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ identities, seen }),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** The record left in localStorage by an older console, if any. */
+function legacySeen() {
+  try {
+    const stored = JSON.parse(readStorage(modeStorageKey(SEEN_KEY)) || "{}");
+    return stored && typeof stored === "object" && !Array.isArray(stored) ? stored : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Load the record before the first sidebar paint, so a reload never starts by
+ * marking every finished conversation again. The localStorage record of an
+ * older console is handed over once, and dropped as soon as the server has it.
+ */
+async function loadSeen() {
+  let stored;
+  try {
+    const response = await apiFetch("/api/seen", { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    stored = seenMap((await response.json())?.seen);
+  } catch {
+    // Without a record every finished conversation shows its dot again, which
+    // is a readable page rather than a broken one.
+    return;
+  }
+  state.seen = stored;
+  const identities = Object.keys(legacySeen());
+  if (!identities.length) return;
+  const missing = identities.filter((identity) => !stored[identity]);
+  for (const identity of missing) state.seen[identity] = 1;
+  if (await persistSeen(missing, true)) writeStorage(modeStorageKey(SEEN_KEY), "");
+}
+
+function isSeen(identity) {
+  return Boolean(identity) && Boolean(state.seen[identity]);
+}
+
+/** The reader opened this row. */
+function rememberSeen(identity) {
+  if (!identity || state.seen[identity]) return;
+  state.seen[identity] = 1;
+  // The dot is already gone from the page; the write only has to reach the disk.
+  void persistSeen([identity], true);
+}
+
+/** New activity: the turn that comes next deserves a mark of its own. */
+function forgetSeen(identity) {
+  if (!identity || !state.seen[identity]) return;
+  delete state.seen[identity];
+  void persistSeen([identity], false);
+}
+
+/**
+ * Status of a live conversation: a tool call waiting for the user's decision, a
+ * turn in flight, or nothing left to run. An automated review answers for the
+ * user, so only manual approval leaves a conversation waiting on a human.
+ */
+function statusOfLive(live) {
+  if (!live) return "done";
+  if (live.approval && (live.approvalMode ?? "request") === "request") return "approval";
+  return live.busy || live.paused || live.queued || live.compressing ? "running" : "done";
+}
+
+/** Status of a sidebar row; a saved transcript has finished by definition. */
+function sessionStatus(session) {
+  if (!session.liveKey) return "done";
+  // The open stream is newer than the last overview poll.
+  const snapshot = state.snapshot;
+  if (snapshot && snapshot.key === session.liveKey) return statusOfLive(snapshot);
+  return statusOfLive((state.overview?.live ?? []).find((entry) => entry.key === session.liveKey));
+}
+
+/**
+ * The status mark of a row: blue dot when done, ring when running, amber when
+ * waiting. The blue dot asks for attention once — opening the conversation takes
+ * it away. Running and waiting are live states, so they are always drawn, and
+ * seeing one clears the record for the turn that follows.
+ */
+function sessionStatusMark(session) {
+  const status = sessionStatus(session);
+  const identity = sessionIdentity(session);
+  if (status === "done") {
+    if (isSeen(identity)) return "";
+  } else {
+    forgetSeen(identity);
+  }
+  const label = status === "running"
+    ? tr("Running")
+    : status === "approval" ? tr("Waiting for approval") : tr("Done");
+  return `<span class="session-state ${status}" title="${escapeHtml(label)}"></span>`;
+}
+
 function renderSession(session) {
   const item = document.createElement("button");
   item.className = "session";
@@ -756,15 +1012,16 @@ function renderSession(session) {
   item.title = title;
   item.innerHTML =
     `<div class="session-top"><span class="session-title">${escapeHtml(title)}</span>` +
-    `${session.live ? `<span class="dot" title="${escapeHtml(tr("Live"))}"></span>` : ""}</div>` +
+    `${sessionStatusMark(session)}</div>` +
     `<div class="session-meta"><span class="model">${escapeHtml(session.model || "?")}</span>` +
     `<span class="time">${escapeHtml(formatTime(session.updated_at))}</span>` +
     `<span class="count">${escapeHtml(count === 1 ? tr("{n} message", { n: count }) : tr("{n} messages", { n: count }))}</span></div>`;
 
   item.addEventListener("click", () => {
+    if (!session.liveKey && !session.id) return;
+    rememberSeen(sessionIdentity(session));
     if (session.liveKey) selectLive(session.liveKey);
-    else if (session.id) selectFile(session.id);
-    else return;
+    else selectFile(session.id);
     setConversationView(true);
   });
   return item;
@@ -774,11 +1031,97 @@ function renderSession(session) {
 
 // Only explicit navigation changes the mobile pane. Background refreshes and
 // live-to-saved transitions must not take the user away from the menu.
-function setConversationView(open) {
+//
+// On a phone the two panes share one screen, so the browser's own Back button
+// has to walk the same levels as the back arrow in the header: from an open
+// conversation to the list, and Forward back into that conversation. Each
+// explicit navigation records one marked entry, and the entries beneath it are
+// the list.
+const CONVERSATION_ENTRY = "conversation";
+
+function isConversationEntry(entry) {
+  return Boolean(entry) && entry.neutrinoView === CONVERSATION_ENTRY;
+}
+
+/** The narrow layout that swaps the panes; wider screens show both at once. */
+function stackedPanes() {
+  try {
+    return typeof window !== "undefined" && typeof window.matchMedia === "function"
+      && window.matchMedia("(max-width: 760px)").matches;
+  } catch {
+    return false;
+  }
+}
+
+/** Record the open conversation as a level the browser can return from. */
+function pushConversationEntry() {
+  try {
+    // Forward restored this entry already; recording it twice would take two
+    // presses to leave the conversation.
+    if (isConversationEntry(history.state)) return;
+    history.pushState({ neutrinoView: CONVERSATION_ENTRY }, "", location.href);
+  } catch {
+    // Without history the header's back arrow still closes the pane.
+  }
+}
+
+/** The list is the entry beneath an open conversation: step back onto it. */
+function stepBackToList() {
+  try {
+    if (isConversationEntry(history.state)) history.back();
+  } catch {
+    // Without history the header's back arrow still closes the pane.
+  }
+}
+
+function setConversationView(open, { record = true } = {}) {
+  const wasOpen = el.app.classList.contains("conversation-open");
   el.app.classList.toggle("conversation-open", open);
-  if (!window.matchMedia("(max-width: 760px)").matches) return;
+  const stacked = stackedPanes();
+  // A click records one level; Back and Forward already moved the browser.
+  if (record && stacked && open !== wasOpen) {
+    if (open) pushConversationEntry();
+    else stepBackToList();
+  }
+  if (!stacked) return;
   if (open) el.back.focus();
   else (el.sessions.querySelector(".session.selected") || el.refresh).focus();
+}
+
+/** Back and Forward: show the level the browser landed on, without recording it. */
+function followViewHistory(event) {
+  setConversationView(isConversationEntry(event?.state), { record: false });
+}
+
+/**
+ * A reload starts on the list, but the browser is still on the entry that
+ * recorded a conversation. Forget the mark, so the first Back press tells the
+ * truth instead of leaving a screen that never looked like a conversation.
+ */
+function forgetStaleConversationEntry() {
+  try {
+    if (!isConversationEntry(history.state)) return;
+    history.replaceState(null, "", location.href);
+  } catch {
+    // No history in this embedder: there is nothing to correct.
+  }
+}
+
+/**
+ * Rotating a phone crosses the width that swaps the panes. A conversation
+ * opened while both panes were shown never recorded a level, so record it on
+ * the way into the single-pane layout: otherwise Back would leave the console
+ * from a screen that shows nothing but a conversation.
+ */
+function watchPanes() {
+  const query = typeof window !== "undefined" && typeof window.matchMedia === "function"
+    ? window.matchMedia("(max-width: 760px)")
+    : null;
+  if (!query || typeof query.addEventListener !== "function") return;
+  query.addEventListener("change", (event) => {
+    if (!event?.matches) return;
+    if (el.app.classList.contains("conversation-open")) pushConversationEntry();
+  });
 }
 
 function resetMessagePane(text) {
@@ -832,6 +1175,16 @@ function openStream(key) {
     announce(previous, snapshot);
     setStatus("live", "live");
     renderLive();
+    // A turn that finishes in the conversation on screen needs no blue dot:
+    // recording it before the repaint keeps the mark off as the turn ends.
+    if (snapshot.sessionId && statusOfLive(snapshot) === "done") rememberSeen(`id:${snapshot.sessionId}`);
+    // The sidebar mirrors the open conversation, so a turn that starts, waits
+    // for approval or finishes shows there instead of on the next poll.
+    if (statusOfLive(previous) !== statusOfLive(snapshot)) renderSidebar();
+    // A conversation stays out of the sidebar until it has content; the first
+    // message makes it history, so list it now instead of on the next poll.
+    const started = previous && !liveHasContent(previous) && liveHasContent(snapshot);
+    if (started) loadOverview({ silent: true });
   });
 
   source.addEventListener("gone", () => {
@@ -1522,10 +1875,11 @@ async function sendMessage() {
   if (!selection) return;
   const text = el.input.value;
   if (!text.trim()) return;
-  if (PRO_MODE) {
-    try { await proUI?.flush(); }
-    catch (error) { el.sub.textContent = error.message; return; }
-  }
+  try {
+    if (PRO_MODE) await proUI?.flush();
+    else await preferences.flush?.();
+  } catch (error) { el.sub.textContent = tr(error.message); return; }
+  if (state.selection !== selection) return;
 
   if (selection.kind === "live") {
     el.input.value = "";
@@ -1655,13 +2009,14 @@ function showHome({ menu = true } = {}) {
 
 /** Show a folder as an empty workspace ready for its first message. */
 function renderWorkspaceLanding(path) {
+  const sameLanding = state.selection?.kind === "new" && state.selection.cwd === path;
   state.selection = { kind: "new", cwd: path };
   state.snapshot = null;
   state.fileData = null;
   state.planOpen = false;
   state.planSeen = "";
   closeStream();
-  preferences.clear();
+  if (!sameLanding) preferences.clear();
   renderSidebar();
   renderWorkspaceChrome();
   el.controls.innerHTML = "";
@@ -1670,6 +2025,7 @@ function renderWorkspaceLanding(path) {
   el.title.textContent = workspaceName(path) || tr("Working directory");
   el.sub.textContent = path;
   setComposerMode("new");
+  preferences.showConversation({}, `new:${path}`);
   proUI?.show(null, `new:${path}`);
   el.messages.innerHTML = "";
 
@@ -2776,6 +3132,11 @@ el.folderDialog.addEventListener("cancel", (event) => {
 });
 
 window.addEventListener("beforeunload", closeStream);
+// On the phone layout the browser's Back and Forward buttons walk the same
+// levels as the header's back arrow: an open conversation returns to the list.
+window.addEventListener("popstate", followViewHistory);
+watchPanes();
+forgetStaleConversationEntry();
 
 initializeLanguage();
 initializeProWorkspace();
@@ -2785,12 +3146,12 @@ preferences.load()
     if (language && language !== uiLanguage()) {
       await changeInterfaceLanguage(language, { persist: false });
     }
-    // Offer background residency only after the interface language is settled,
-    // so the invitation is never briefly shown in the wrong language.
-    maybePromptBackground(config);
+    // Offer the update first, and only then the background invitation: two
+    // modal dialogs must never stack on top of each other.
+    if (!maybePromptUpdate(config)) maybePromptBackground(config);
   })
   .catch(error => console.error(error));
-loadOverview().then(() => {
+loadSeen().then(() => loadOverview()).then(() => {
   // Reopen the folder the user had open last time, without stealing a click
   // that landed on a saved conversation while the overview was loading.
   if (state.workspace && !state.selection) renderWorkspaceLanding(state.workspace.path);

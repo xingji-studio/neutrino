@@ -65,6 +65,12 @@ export interface LiveMeta {
   /** On-disk session id, or null until the conversation is first saved. */
   sessionId: string | null;
   title: string;
+  /**
+   * Nothing has been said in this conversation yet. The sidebar leaves such a
+   * session out of the list until it has content, so an abandoned new chat
+   * never turns into a history entry.
+   */
+  empty?: boolean;
   provider: string;
   model: string;
   intensity: string;

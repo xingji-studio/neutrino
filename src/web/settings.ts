@@ -7,6 +7,7 @@ import {
 
 import { hashWebPassword, validateWebPassword } from "./auth.js";
 import { defaultProPreset, loadProModels, proMaxRecursionDepth, requireProPreset } from "../pro/config.js";
+import { updateStatus } from "../update.js";
 
 /**
  * Public settings use a whitelist: API keys and cached credentials stay on disk.
@@ -42,7 +43,15 @@ export function getWebSettings(mode: Mode = "standard") {
     config.selected_intensity ?? config.default_intensity,
     config.default_intensity,
   );
+  // Read-only runtime state for the update notice: which version runs, which
+  // one is published, and whether the two differ. Never persisted.
+  const update = updateStatus();
   return {
+    update: {
+      current_version: update.currentVersion,
+      latest_version: update.latestVersion,
+      has_update: update.hasUpdate,
+    },
     ...(mode === "pro" ? { pro: {
       presets: loadProModels().tier.map((preset) => ({
         name: preset.name, chinese_name: preset.chinese_name,

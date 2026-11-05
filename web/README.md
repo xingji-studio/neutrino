@@ -116,6 +116,11 @@ in-page switch takes over from there for the running process.
 The console can read every transcript and drive an agent with shell access, so
 keep the Web password on: anyone who can reach the port can use it.
 
+On a narrow screen the console shows one pane at a time: the conversation list,
+and then the open conversation. The back arrow in the header and the browser's
+own Back button both return to the list, and Forward reopens the conversation
+that was open.
+
 Startup prints the addresses to open:
 
 ```
@@ -223,16 +228,15 @@ login/logout routes are shared and stay unprefixed.
 
 ## Models and settings
 
-Open a conversation to see the **Provider**, **Model** and **Thinking**
-selectors. Choose a configured model and press **Apply to conversation**. The
-next turn uses that selection, and it is saved with the transcript. The same
-controls also update a conversation running in the terminal. Pause an active
-turn before applying a change; a running turn returns a clear conflict message.
+Open the model card at the lower right of the composer to choose a **Provider**
+and **Model**, and adjust **Thinking intensity** with the slider. Changes to an
+idle or paused conversation apply immediately to its next turn and are saved
+with the transcript. The same controls update a conversation running in the
+terminal. Pause an active turn before changing its model.
 
-For saved history, **Continue with model** resumes the transcript with the chosen
-selection. Changing the selectors and then using **Continue here** or sending a
-message also uses the draft selection, so a transcript whose old model was
-removed can still be continued.
+For saved history or a new workspace conversation, the card keeps the selection
+as a draft. **Continue here** or sending a message starts the conversation with
+that selection, so a transcript whose old model was removed can still continue.
 
 The **Settings** (gear) button in the sidebar opens the interface language,
 plan-first turns, the default approval mode, defaults for new conversations, the
@@ -276,6 +280,21 @@ plan card and dialogs) without a reload, is stored in the workspace's
 regular and Pro workspaces remember their own choice. The terminal UI stays in
 English. New conversation content, of course, remains in the language the model
 writes.
+
+## Sidebar status marks
+
+Every row in the sidebar carries one mark. A **blue dot** means the conversation
+finished and has not been opened since, a **turning ring** means a turn is
+running, and an **amber dot** means a tool call is waiting for your answer. The
+amber mark only appears while the conversation really asks for approval — with
+automatic review the reviewers answer for you, so the row keeps showing the
+running ring.
+
+The blue dot asks once: opening the row answers it, and the next turn that
+finishes asks again. The console remembers those answers in a file of its own,
+`~/.neutrino/web.json` (the regular and Pro workspaces each keep their own
+record), so the terminal UI never carries data it does not read, and a reload, a
+restart of the console or a change of port does not bring every dot back.
 
 ## History vs. live sessions
 

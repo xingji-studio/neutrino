@@ -6,6 +6,8 @@ import {
 } from "../background.js";
 import { loadConfig, saveConfig } from "../config.js";
 import { startBackgroundTray } from "../tray.js";
+import { PRO_MODELS_URL, syncProModels } from "../pro/config.js";
+import { checkForUpdate, UPDATE_PACKAGE } from "../update.js";
 import { hub } from "./hub.js";
 import { startWebServer, type WebServerHandle } from "./server.js";
 import { TerminalBridges } from "./terminalBridge.js";
@@ -82,6 +84,28 @@ export async function runWebService(options: { port: number; host?: string; auth
     syncTray();
     return status();
   };
+
+  // Nothing ships with the package any more: reconcile the presets with the
+  // official copy now, so the first browser to open /pro already finds them and
+  // an outdated local set is replaced. A failure is logged and reported there,
+  // so this never holds up the console itself.
+  void syncProModels().then((result) => {
+    if (result.status === "updated") backgroundLog(`pro presets: updated from ${PRO_MODELS_URL}`);
+    else if (result.status === "kept") backgroundLog(`pro presets: kept the local copy (${result.detail})`);
+  }).catch((error) => {
+    backgroundLog(`pro presets: ${error instanceof Error ? error.message : String(error)}`);
+  });
+
+  // The registry lookup runs alongside the listener so a slow or unreachable
+  // registry never delays the console; the pages read the answer from the
+  // settings payload. Failures are logged, as with the presets above.
+  void checkForUpdate().then((result) => {
+    if (result.hasUpdate) {
+      backgroundLog(`${UPDATE_PACKAGE} ${result.latestVersion} is available (running ${result.currentVersion})`);
+    } else if (result.error) {
+      backgroundLog(`update check: ${result.error}`);
+    }
+  });
 
   try {
     handle = await startWebServer({

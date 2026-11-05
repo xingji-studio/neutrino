@@ -150,7 +150,7 @@ try {
   // Test the actual browser controller with a DOM stand-in and real settings
   // validation. Rendering functions never receive credentials.
   class Element {
-    value = ""; children = []; checked = false; disabled = false; open = false; events = new Map(); textContent = "";
+    value = ""; children = []; checked = false; disabled = false; open = false; events = new Map(); textContent = ""; style = {}; scrollHeight = 30;
     classes = new Set();
     classList = {
       toggle: (name, on) => { if (on) this.classes.add(name); else this.classes.delete(name); },
@@ -161,17 +161,27 @@ try {
     appendChild(child) { this.children.push(child); }
     setAttribute(name, value) { (this.attributes ??= {})[name] = value; }
     addEventListener(name, fn) { this.events.set(name, fn); }
-    async fire(name) { await this.events.get(name)?.({ preventDefault() {} }); }
+    contains(node) { return node === this || this.children.includes(node); }
+    async fire(name, event = {}) { await this.events.get(name)?.({ preventDefault() {}, stopPropagation() {}, ...event }); }
     showModal() { this.open = true; }
     close() { this.open = false; }
   }
   const nodes = new Map();
   const html = fs.readFileSync(new URL("../web/index.html", import.meta.url), "utf8");
+  assert.ok(html.indexOf('id="model-picker"') > html.indexOf('id="composer"'), "the picker lives in the composer");
+  assert.ok(html.indexOf('id="model-picker"') < html.indexOf('id="send"'));
   for (const match of html.matchAll(/id="([^"]+)"/g)) nodes.set(match[1], new Element());
-  globalThis.document = { getElementById: id => { assert.ok(nodes.has(id), `missing control ${id}`); return nodes.get(id); }, createElement: () => new Element() };
+  const documentEvents = new Map();
+  globalThis.document = {
+    getElementById: id => { assert.ok(nodes.has(id), `missing control ${id}`); return nodes.get(id); },
+    createElement: () => new Element(),
+    addEventListener: (name, fn) => documentEvents.set(name, fn),
+  };
   const applied = [];
   let ui;
   let failApply = false;
+  let holdApply = null;
+  let updateLiveOnApply = true;
   let failBackground = false;
   let holdBackground = null;
   ui = createSettingsUI({
@@ -193,33 +203,110 @@ try {
       } catch (error) { return { ok: false, status: 400, json: async () => ({ error: error.message }) }; }
     },
     async applyModel(selection) {
+      if (holdApply) await holdApply;
       if (failApply) throw new Error("pause the current turn before changing models");
       applied.push(selection);
-      ui.showConversation({ ...selection, busy: false }, "live:L1");
+      if (updateLiveOnApply) ui.showConversation({ ...selection, busy: false }, "live:L1");
     },
   });
   const node = id => nodes.get(id);
   await ui.load();
   ui.showConversation({ ...a, busy: false }, "live:L1");
+  assert.match(node("model-picker-label").textContent, /same · High/);
+  assert.match(node("model-picker-summary").attributes["aria-label"], /same · High/, "the selected model is announced to assistive technology");
+  node("model-picker").open = true;
+  await node("model-picker").fire("keydown", { key: "Escape" });
+  assert.equal(node("model-picker").open, false, "Escape closes the card");
+  node("model-picker").open = true;
+  documentEvents.get("pointerdown")({ target: node("settings-open") });
+  assert.equal(node("model-picker").open, false, "clicking outside closes the card");
+  assert.deepEqual(node("model-intensity-ticks").children.map(tick => tick.textContent), ["Low", "Medium", "High", "Max", "Ultra"]);
   node("model-provider").value = b.provider;
   await node("model-provider").fire("change");
+  await ui.flush();
+  assert.deepEqual(applied.at(-1), { provider: b.provider, model: "same", intensity: "High" }, "changing providers applies immediately");
   node("model-name").value = "b-only";
   await node("model-name").fire("change");
-  node("model-intensity").value = "Low";
-  await node("model-intensity").fire("change");
+  await ui.flush();
+  assert.deepEqual(applied.at(-1), { provider: b.provider, model: "b-only", intensity: "High" });
+  node("model-intensity").value = "0";
+  await node("model-intensity").fire("input");
+  const beforeSliderCommit = applied.length;
   ui.showConversation({ ...a, busy: false }, "live:L1");
-  assert.equal(node("model-name").value, "b-only", "SSE refresh must preserve the user's draft");
-  await node("model-picker").fire("submit");
-  assert.deepEqual(applied[0], { provider: b.provider, model: "b-only", intensity: "Low" });
+  assert.equal(node("model-name").value, "b-only", "SSE refresh preserves the user's slider draft");
+  assert.equal(node("model-intensity-label").textContent, "Low");
+  assert.equal(applied.length, beforeSliderCommit, "dragging previews without sending requests");
+  await node("model-intensity").fire("change");
+  await ui.flush();
+  assert.deepEqual(applied.at(-1), { provider: b.provider, model: "b-only", intensity: "Low" });
+  node("model-intensity").value = "1";
+  await node("model-intensity").fire("input");
   ui.showConversation({ ...b, busy: true }, "live:L1");
-  assert.equal(node("model-apply").disabled, true);
-  await node("model-picker").fire("submit");
-  assert.equal(applied.length, 1);
+  assert.equal(node("model-intensity-label").textContent, "Ultra", "a turn starting elsewhere discards an uncommitted slider preview");
+  assert.equal(node("model-provider").disabled, true);
+  assert.equal(node("model-intensity").disabled, true);
+  assert.match(node("model-feedback").textContent, /Pause/, "the busy state explains why the control is disabled");
+  await node("model-intensity-ticks").children[0].fire("click");
+  assert.equal(applied.length, beforeSliderCommit + 1, "a running turn cannot change the model");
   ui.showConversation({ ...b, busy: false, paused: true }, "live:L1");
   failApply = true;
-  await node("model-picker").fire("submit");
+  node("model-intensity").value = "0";
+  await node("model-intensity").fire("input");
+  await node("model-intensity").fire("change");
+  await assert.rejects(ui.flush(), /pause/);
   assert.match(node("model-feedback").textContent, /pause/);
-  assert.equal(node("model-apply").disabled, false);
+  assert.equal(node("model-intensity").value, "4", "a failed change restores the committed intensity");
+  assert.equal(node("model-provider").disabled, false);
+  failApply = false;
+
+  ui.showConversation({ provider: "removed provider", model: "removed model", intensity: "High" }, "file:F1");
+  assert.equal(node("model-provider").value, "removed provider", "missing saved models remain visible until replaced");
+  assert.equal(node("model-intensity").disabled, true);
+  const appliedBeforeDraft = applied.length;
+  node("model-provider").value = b.provider;
+  await node("model-provider").fire("change");
+  assert.deepEqual(ui.selectionForFile("F1"), { provider: b.provider, model: "same", intensity: "High" });
+  assert.equal(applied.length, appliedBeforeDraft, "saved conversations keep the choice as a draft");
+  ui.showConversation({}, "new:folder");
+  node("model-provider").value = a.provider;
+  await node("model-provider").fire("change");
+  assert.deepEqual(ui.defaultSelection(), { ...a, intensity: "Ultra" }, "a new conversation uses the draft selection");
+  ui.refreshTexts();
+  assert.deepEqual(ui.defaultSelection(), { ...a, intensity: "Ultra" }, "a language refresh keeps the draft selection");
+
+  ui.showConversation({ ...a, busy: false }, "live:L1");
+  let releaseApply;
+  holdApply = new Promise(resolve => { releaseApply = resolve; });
+  node("model-provider").value = b.provider;
+  await node("model-provider").fire("change");
+  let flushed = false;
+  const pendingChange = ui.flush().then(() => { flushed = true; });
+  await Promise.resolve();
+  assert.equal(flushed, false, "sending must wait for an in-flight model change");
+  assert.equal(node("model-provider").disabled, true);
+  releaseApply();
+  await pendingChange;
+  holdApply = null;
+  assert.equal(flushed, true);
+  node("model-intensity").value = "0";
+  await node("model-intensity").fire("input");
+  await ui.flush();
+  assert.equal(applied.at(-1).intensity, "Low", "sending also commits a slider preview without a change event");
+
+  let releaseOldApply;
+  holdApply = new Promise(resolve => { releaseOldApply = resolve; });
+  updateLiveOnApply = false;
+  node("model-provider").value = a.provider;
+  await node("model-provider").fire("change");
+  ui.showConversation({ ...b }, "file:F2");
+  node("model-provider").value = a.provider;
+  await node("model-provider").fire("change");
+  releaseOldApply();
+  await Promise.resolve();
+  await Promise.resolve();
+  holdApply = null;
+  updateLiveOnApply = true;
+  assert.deepEqual(ui.selectionForFile("F2"), { ...a, intensity: "Ultra" }, "a late response cannot replace another conversation's draft");
   await node("settings-open").fire("click");
   assert.equal(node("settings-dialog").open, true);
   assert.equal(node("settings-web-lan").checked, false, "LAN access starts off by default");
@@ -280,6 +367,7 @@ try {
   const browserErrors = [];
   const browserRequests = [];
   let snapshot = { ...a, key: "browser-live", messages: [], busy: false, tokens: { prompt: 0, completion: 0 } };
+  let holdBrowserModel = null;
   const browser = vm.createContext({
     createSettingsUI, turnAnswerIndex, turnFolds, turnPreview, turnRanges, document: globalThis.document,
     localStorage: { removeItem() {} }, location: { search: "" },
@@ -295,16 +383,18 @@ try {
       }
       else if (url === "/api/overview") data = { groups: [], live: [] };
       else if (url === "/api/live/browser-live/model") {
+        if (holdBrowserModel) await holdBrowserModel;
         snapshot = { ...snapshot, ...JSON.parse(init.body) };
         data = { ok: true, snapshot };
-      } else throw new Error(`unexpected browser request: ${url}`);
+      } else if (url === "/api/live/browser-live/message") data = { ok: true };
+      else throw new Error(`unexpected browser request: ${url}`);
       return { ok: true, status: 200, json: async () => data };
     },
   });
   // Strip every module import: the test injects the same bindings into the vm
   // context above (settings.js and turns.js are real ES modules).
   const source = fs.readFileSync(new URL("../web/app.js", import.meta.url), "utf8").replace(/^import .*;\r?\n/gm, "");
-  vm.runInContext(source + "\nglobalThis.appTest = { state, preferences, loadOverview, selectLive, renderLive, syncSelection, maybePromptBackground };", browser);
+  vm.runInContext(source + "\nglobalThis.appTest = { state, preferences, loadOverview, selectLive, renderLive, syncSelection, sendMessage, maybePromptBackground };", browser);
   const appTest = browser.appTest;
   await appTest.preferences.load();
   await appTest.loadOverview();
@@ -313,13 +403,31 @@ try {
   appTest.renderLive();
   node("model-provider").value = b.provider;
   await node("model-provider").fire("change");
-  node("model-intensity").value = "Max";
+  await appTest.preferences.flush();
+  node("model-intensity").value = "3";
+  await node("model-intensity").fire("input");
   await node("model-intensity").fire("change");
-  await node("model-picker").fire("submit");
+  await appTest.preferences.flush();
   assert.equal(appTest.state.snapshot.provider, b.provider);
   assert.equal(appTest.state.snapshot.intensity, "Max");
   assert.equal(node("model-provider").value, b.provider);
-  assert.equal(browserRequests.filter(request => request.url.endsWith("/model")).length, 1);
+  assert.equal(browserRequests.filter(request => request.url.endsWith("/model")).length, 2);
+  let releaseBrowserModel;
+  holdBrowserModel = new Promise(resolve => { releaseBrowserModel = resolve; });
+  node("model-intensity").value = "0";
+  await node("model-intensity").fire("input");
+  await node("model-intensity").fire("change");
+  node("input").value = "send with the selected model";
+  const sendWhileChanging = appTest.sendMessage();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(browserRequests.filter(request => request.url.endsWith("/message")).length, 0, "the message waits for the model response");
+  releaseBrowserModel();
+  await sendWhileChanging;
+  holdBrowserModel = null;
+  assert.equal(appTest.state.snapshot.intensity, "Low");
+  assert.equal(browserRequests.filter(request => request.url.endsWith("/message")).length, 1);
+  assert.deepEqual(JSON.parse(browserRequests.find(request => request.url.endsWith("/message")).init.body), { text: "send with the selected model" });
   appTest.syncSelection();
   assert.equal(appTest.state.selection, null);
   assert.ok(node("model-picker").classes.has("hidden"));

@@ -102,14 +102,6 @@
           </button>
         </header>
 
-        <form id="model-picker" class="model-picker hidden" aria-label="Conversation model">
-          <label><span data-i18n="Provider">Provider</span><select id="model-provider"></select></label>
-          <label><span data-i18n="Model">Model</span><select id="model-name"></select></label>
-          <label><span data-i18n="Thinking">Thinking</span><select id="model-intensity"></select></label>
-          <button id="model-apply" class="control" type="submit" data-i18n="Apply">Apply</button>
-          <p id="model-feedback" class="form-feedback" role="status" aria-live="polite"></p>
-        </form>
-
         <aside id="plan-card" class="plan-card hidden" aria-live="polite"></aside>
 
         <section id="messages" class="messages">
@@ -137,6 +129,24 @@
           <div class="composer-inner">
             <div class="composer-card">
               <textarea id="input" rows="1" placeholder="Message Neutrino…" aria-label="Message" data-i18n-placeholder="Message Neutrino…"></textarea>
+              <details id="model-picker" class="model-picker pro-preset-control hidden">
+                <summary id="model-picker-summary" aria-label="Conversation model" data-i18n-aria-label="Conversation model"><span id="model-picker-label"></span><svg class="pro-preset-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg></summary>
+                <div class="pro-preset-card model-picker-card">
+                  <div class="pro-preset-heading"><span data-i18n="Conversation model">Conversation model</span><strong id="model-intensity-label"></strong></div>
+                  <div class="model-picker-fields">
+                    <label><span data-i18n="Provider">Provider</span><select id="model-provider"></select></label>
+                    <label><span data-i18n="Model">Model</span><select id="model-name"></select></label>
+                  </div>
+                  <label class="pro-slider-label" for="model-intensity" data-i18n="Thinking intensity">Thinking intensity</label>
+                  <div id="model-intensity-slider" class="pro-preset-slider">
+                    <div class="pro-slider-track" aria-hidden="true"><div class="pro-slider-fill"></div></div>
+                    <div id="model-intensity-stops" class="pro-slider-stops" aria-hidden="true"></div>
+                    <input id="model-intensity" type="range" min="0" max="0" step="1" value="0" aria-label="Thinking intensity" data-i18n-aria-label="Thinking intensity" />
+                  </div>
+                  <div id="model-intensity-ticks" class="pro-preset-ticks"></div>
+                  <p id="model-feedback" class="form-feedback" role="status" aria-live="polite"></p>
+                </div>
+              </details>
               <details id="pro-preset-control" class="pro-preset-control hidden">
                 <summary aria-label="Pro preset" data-i18n-aria-label="Pro preset"><span id="pro-preset-label">Pro</span><svg class="pro-preset-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg></summary>
                 <div class="pro-preset-card">
@@ -401,6 +411,29 @@
           <p id="pro-fallback-error" class="form-feedback error hidden" role="alert"></p>
         </div>
         <footer class="sheet-actions"><button id="pro-fallback-close" class="primary" type="button" data-i18n="Got it">Got it</button></footer>
+      </div>
+    </dialog>
+
+    <dialog id="update-dialog" class="sheet-dialog" aria-labelledby="update-title">
+      <div class="sheet">
+        <header class="sheet-header">
+          <div>
+            <h2 id="update-title" data-i18n="A new version is available">A new version is available</h2>
+            <p id="update-versions" class="sheet-sub"></p>
+          </div>
+          <button id="update-close" class="icon-btn" type="button" aria-label="Close" data-i18n-aria-label="Close">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+        </header>
+        <div class="sheet-body">
+          <p id="update-note" class="settings-note" data-i18n="Neutrino updates itself with npm. Restart it afterwards to use the new version.">Neutrino updates itself with npm. Restart it afterwards to use the new version.</p>
+          <p id="update-command-block" class="settings-note hidden"><span data-i18n="Update by hand with:">Update by hand with:</span> <code id="update-command">npm install -g @xingjisoft/neutrino</code></p>
+          <p id="update-feedback" class="form-feedback" role="status" aria-live="polite"></p>
+        </div>
+        <footer class="sheet-actions">
+          <button id="update-later" class="control" type="button" data-i18n="Later">Later</button>
+          <button id="update-now" class="primary" type="button" data-i18n="Update now" autofocus>Update now</button>
+        </footer>
       </div>
     </dialog>
 

@@ -26,6 +26,8 @@ import { AgentSelectScreen } from "./screens/agentSelect.js";
 import { ModelSelectScreen } from "./screens/modelSelect.js";
 import { SettingsScreen } from "./screens/settings.js";
 import { StartScreen } from "./screens/start.js";
+import { UpdatePromptScreen } from "./screens/updatePrompt.js";
+import type { UpdateStatus } from "./update.js";
 import {
   configureBackgroundService, readBackgroundStatus, isProcessAlive, runningBackground,
   startBackgroundService, stopBackgroundService, type BackgroundStatus, type TerminalBridgeInfo,
@@ -118,6 +120,10 @@ export class App {
   private webPromptBackground = true;
   /** True while a click is bringing the Web console up, so double clicks are safe. */
   private proOpening = false;
+  /** Same guard for the Web-mode button, which has its own click. */
+  private webOpening = false;
+  /** An update offer that arrived before the start screen was mounted. */
+  private pendingUpdate: UpdateStatus | null = null;
 
   constructor() {
     this.width = process.stdout.columns || 80;
@@ -354,6 +360,26 @@ export class App {
     }
   }
 
+  /**
+   * Open the browser console's regular workspace, bringing the console up first
+   * when it is not running yet. Like openProMode it runs from a mouse handler:
+   * it never throws and never waits on the browser.
+   */
+  async openWebMode(): Promise<void> {
+    if (this.webOpening) return;
+    this.webOpening = true;
+    try {
+      const url = await this.ensureWebConsole();
+      openInBrowser(url);
+      this.showToast(`Opening Web console: ${url}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.showToast(`Web console failed: ${message}`, "top");
+    } finally {
+      this.webOpening = false;
+    }
+  }
+
   async start(): Promise<void> {
     // Installed before anything touches the terminal: from here on, a crash
     // restores mouse tracking, raw mode and the alternate screen instead of
@@ -386,6 +412,14 @@ export class App {
     this.resetMouse();
     this.state.selection = null;
     screen.onActivate();
+    // An offer made while the start screen was not mounted yet belongs on it,
+    // and the start screen is exactly what has just appeared.
+    if (screen instanceof StartScreen && this.pendingUpdate) {
+      const status = this.pendingUpdate;
+      this.pendingUpdate = null;
+      this.pushScreen(new UpdatePromptScreen(status));
+      return;
+    }
     this.render();
   }
 
@@ -999,6 +1033,25 @@ export class App {
       );
     }
     this.pushScreen(screen);
+  }
+
+  /**
+   * Offer a newer published release where a session starts.
+   *
+   * The registry answer arrives a moment after launch. If the user is already
+   * in a conversation by then, the notice is dropped rather than breaking into
+   * their work: the next start offers it again.
+   */
+  promptUpdate(status: UpdateStatus): void {
+    if (this.screens.some((screen) => screen instanceof UpdatePromptScreen)) return;
+    if (this.top instanceof StartScreen) {
+      this.pushScreen(new UpdatePromptScreen(status));
+      return;
+    }
+    // No screen is mounted yet: the launch is still starting the Web console.
+    // Hold the offer until the start screen appears. Once the user has moved
+    // on to a conversation the offer is dropped instead of interrupting it.
+    if (this.screens.length === 0) this.pendingUpdate = status;
   }
 
   openModelConfig(): void {

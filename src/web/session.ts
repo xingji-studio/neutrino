@@ -366,6 +366,7 @@ export class WebSession implements LiveAgent {
       } } : {}),
       sessionId: this.sessionId,
       title: this.title(),
+      empty: this.messages.length === 0 && !this.streamingContent,
       provider: this.provider,
       model: this.model.name,
       intensity: this.intensity,

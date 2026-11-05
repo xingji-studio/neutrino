@@ -2,7 +2,7 @@
 
 ↓ 详细内容点这里 Learn More ↓
 
-[English](./README-en.md) | [简体中文](./README-en.md)
+[English](./README-en.md) | [简体中文](./README-zh.md)
 
 ## 什么是 Neutrino ？
 

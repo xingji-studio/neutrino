@@ -14,8 +14,9 @@ import {
   inRect,
   approvalToggle,
   drawApprovalToggle,
-  drawProModeButton,
+  drawHeaderButton,
   proModeButton,
+  webModeButton,
 } from "../ui.js";
 
 const TABS = ["Model", "History", "Settings"];
@@ -60,6 +61,7 @@ export class StartScreen extends Screen {
   private focusIdx = 0; // 0 = input box, 1..3 = tabs, 4 = approval mode
   private hoverIdx = -1; // -1 = nothing, otherwise the control index
   private proHover = false; // pointer is over the Pro-mode button
+  private webHover = false; // pointer is over the Web-mode button
   private lastHoverX = -1;
   private lastHoverY = -1;
 
@@ -165,12 +167,15 @@ export class StartScreen extends Screen {
       this.lastHoverY = ev.y;
 
       const pro = proModeButton(this.app.width, this.app.height);
+      const web = webModeButton(this.app.width, this.app.height);
       const proHover = pro !== null && inRect(ev.x, ev.y, pro);
+      const webHover = web !== null && inRect(ev.x, ev.y, web);
       const layout = this.layout();
       let hover = -1;
-      // While the pointer is over the Pro button no other control is hovered
-      // underneath it: the box is opaque, so its neighbours must not light up.
-      if (!proHover) {
+      // While the pointer is over one of the top-left buttons no other control
+      // is hovered underneath it: the boxes are opaque, so their neighbours
+      // must not light up.
+      if (!proHover && !webHover) {
         if (inRect(ev.x, ev.y, approvalToggle(this.app.width, this.app.height - 4, this.approvalMode))) {
           hover = FOCUS_COUNT - 1;
         } else if (layout && inRect(ev.x, ev.y, { x: layout.inputX, y: layout.inputY, w: layout.inputW, h: INPUT_H })) {
@@ -184,8 +189,9 @@ export class StartScreen extends Screen {
           }
         }
       }
-      if (proHover !== this.proHover || hover !== this.hoverIdx) {
+      if (proHover !== this.proHover || webHover !== this.webHover || hover !== this.hoverIdx) {
         this.proHover = proHover;
+        this.webHover = webHover;
         this.hoverIdx = hover;
         this.app.render();
       }
@@ -196,11 +202,17 @@ export class StartScreen extends Screen {
       const layout = this.layout();
       if (!layout) return;
       if (ev.button === 2) return; // right click: no-op on start screen
-      // The Pro button is a control of its own and is checked first: a left
-      // click anywhere in its box opens Pro mode instead of the control below.
+      // The top-left buttons are controls of their own and are checked first:
+      // a left click anywhere in a box opens its workspace instead of the
+      // control below.
       const pro = proModeButton(this.app.width, this.app.height);
       if (ev.button === 0 && pro && inRect(ev.x, ev.y, pro)) {
         void this.app.openProMode();
+        return;
+      }
+      const web = webModeButton(this.app.width, this.app.height);
+      if (ev.button === 0 && web && inRect(ev.x, ev.y, web)) {
+        void this.app.openWebMode();
         return;
       }
       if (ev.y >= 1 && inRect(ev.x, ev.y, approvalToggle(this.app.width, this.app.height - 4, this.approvalMode))) {
@@ -247,8 +259,8 @@ export class StartScreen extends Screen {
     const h = this.app.height;
     const rows: number[] = [];
     for (let y = inputY; y <= tabY + TAB_H; y++) if (y >= 0 && y < h) rows.push(y);
-    // The Pro button sits directly below the status bar; repainting its rows
-    // makes it self-heal exactly like the input box and the tabs.
+    // The top-left buttons sit directly below the status bar; repainting their
+    // rows makes them self-heal exactly like the input box and the tabs.
     for (let y = 1; y <= 3; y++) if (y >= 0 && y < h) rows.push(y);
     if (h - 4 >= 1) rows.push(h - 4);
     return rows;
@@ -281,8 +293,8 @@ export class StartScreen extends Screen {
 
   /**
    * First content row. The centered block normally floats in the middle, but
-   * it must start below the Pro button when that button is visible: the box is
-   * opaque chrome and would otherwise clip the top of the logo.
+   * it must start below the top-left buttons when they are visible: the boxes
+   * are opaque chrome and would otherwise clip the top of the logo.
    */
   private contentTop(height: number, contentH: number): number {
     const top = centerVertically(height - 4, contentH);
@@ -384,8 +396,9 @@ export class StartScreen extends Screen {
     drawApprovalToggle(buf, approvalY, this.approvalMode,
       this.focusIdx === FOCUS_COUNT - 1 || this.hoverIdx === FOCUS_COUNT - 1);
 
-    // Painted last so its opaque footprint is never clipped by the decorative
-    // content above it. Its hit box uses the same top-left geometry.
-    drawProModeButton(buf, this.proHover);
+    // Painted last so their opaque footprints are never clipped by the
+    // decorative content drawn before them. Hit testing shares the geometry.
+    drawHeaderButton(buf, proModeButton(w, h), this.proHover);
+    drawHeaderButton(buf, webModeButton(w, h), this.webHover);
   }
 }

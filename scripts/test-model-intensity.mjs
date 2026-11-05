@@ -191,6 +191,7 @@ try {
     set innerHTML(_value) { this.replaceChildren(); }
     replaceChildren() { this.children = []; }
     appendChild(child) { this.children.push(child); }
+    setAttribute(name, value) { (this.attributes ??= {})[name] = value; }
     addEventListener(name, fn) { this.events.set(name, fn); }
     async fire(name) { await this.events.get(name)?.({ preventDefault() {} }); }
     showModal() { this.open = true; }
@@ -213,10 +214,14 @@ try {
     await ui.load();
     ui.showConversation({ provider: "Limited", model: "low-high-max", intensity: "High", busy: false }, "live:L1");
     const values = select => select.children.map(child => child.value);
-    assert.deepEqual(values(nodes.get("model-intensity")), ["Low", "High", "Max"]);
+    const ticks = () => nodes.get("model-intensity-ticks").children.map(child => child.textContent);
+    assert.deepEqual(ticks(), ["Low", "High", "Max"]);
+    assert.equal(nodes.get("model-intensity").value, "1", "the slider starts at the selected intensity");
     nodes.get("model-name").value = "reordered";
     await nodes.get("model-name").fire("change");
-    assert.deepEqual(values(nodes.get("model-intensity")), ["Low", "Medium", "Max"], "changing the model narrows the picker");
+    await ui.flush();
+    assert.deepEqual(ticks(), ["Low", "Medium", "Max"], "changing the model narrows the slider");
+    assert.equal(nodes.get("model-intensity").value, "0", "an unsupported intensity falls back to a supported one");
     await nodes.get("settings-open").fire("click");
     assert.deepEqual(values(nodes.get("default-intensity")), ["Low", "High", "Max"]);
     nodes.get("default-provider").value = "Open";

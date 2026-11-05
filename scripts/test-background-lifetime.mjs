@@ -58,6 +58,9 @@ if (process.argv[2] === "--owner") {
   process.env.NEUTRINO_NO_TRAY = "1";
   process.env.NEUTRINO_PLAN = "off";
   const { loadConfig, saveConfig, saveModels, loadSession } = await import("../dist/config.js");
+  const { seedProPresets } = await import("./pro-presets.mjs");
+  // Every child inherits this HOME, so the Pro workspace finds its presets.
+  seedProPresets(["cheap", "medium", "best"]);
   const { readBackgroundStatus, startBackgroundService, configureBackgroundService, stopBackgroundService } = await import("../dist/background.js");
   const { startWebServer } = await import("../dist/web/server.js");
   const children = new Set();

@@ -9,6 +9,8 @@ import {
 } from "./background.js";
 import { runWebService } from "./web/service.js";
 import { openInBrowser } from "./browser.js";
+import { PRO_MODEL_FILE, PRO_MODELS_URL, syncProModels } from "./pro/config.js";
+import { checkForUpdate } from "./update.js";
 
 const DEFAULT_WEB_PORT = 8765;
 /** Binding here makes the UI reachable from every interface. */
@@ -326,6 +328,23 @@ if (options.mode === "web") {
     process.exit(1);
   }
 
+  // The Pro presets are downloaded, not shipped, and kept in line with the
+  // official copy before any workspace can ask for a preset. A failure is not
+  // fatal: Pro mode reports the missing file (or keeps the local presets), and
+  // the next start tries again.
+  await syncProModels().then((result) => {
+    if (result.status === "updated") {
+      process.stderr.write(`neutrino: updated the Pro presets at ${PRO_MODEL_FILE} from ${PRO_MODELS_URL}\n`);
+    }
+  }).catch((error: unknown) => {
+    process.stderr.write(`neutrino: ${error instanceof Error ? error.message : String(error)}\n`);
+  });
+
+  // Ask the registry for the published version as early as possible, while the
+  // Web console is still starting: the first screen must not wait on the
+  // network. Offline is an ordinary state, hence no diagnostic here.
+  const updateCheck = checkForUpdate();
+
   const app = new App();
   const webPort = options.port ?? portFromEnv ?? DEFAULT_WEB_PORT;
   const saved = loadConfig();
@@ -347,5 +366,9 @@ if (options.mode === "web") {
       process.stderr.write("The terminal UI will keep running. Pass --port <port> to use another port, or --no-web to skip the web UI.\n");
     }
   }
+  void updateCheck.then((status) => {
+    if (status.hasUpdate) app.promptUpdate(status);
+  });
+
   await app.start();
 }
