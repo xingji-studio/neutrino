@@ -17,9 +17,12 @@ const {
   CONFIG_FILE, PRO_CONFIG_FILE, PRO_SESSION_DIR, SESSION_DIR, contextCompressionThreshold,
   loadConfig, loadModels, saveModels, saveSession,
 } = await import("../dist/config.js");
+const { PRO_CUSTOM_MODEL_FILE } = await import("../dist/pro/config.js");
 const { seedProPresets } = await import("./pro-presets.mjs");
 // Nothing ships with the package: this home writes the presets the page offers.
 seedProPresets(["cheap", "medium", "best"]);
+// The presets this user keeps for themselves: they are not part of the graded set.
+seedProPresets(["custom", "mine"], PRO_CUSTOM_MODEL_FILE);
 const { startWebServer } = await import("../dist/web/server.js");
 const { proModeUrl } = await import("../dist/browser.js");
 const { PRO_MODE_LABEL, WEB_MODE_LABEL, proModeButton, webModeButton } = await import("../dist/ui.js");
@@ -173,6 +176,8 @@ try {
   assert.equal(before.selection.provider, provider);
   assert.equal(proBefore.selection.provider, provider);
   assert.ok(!proBefore.providers.some((p) => p.models.some((m) => m.name === "pro-secret")));
+  assert.deepEqual(proBefore.pro.presets.map((preset) => preset.name), ["custom", "mine", "cheap", "medium", "best"],
+    "the slider starts with the user's own presets instead of ending on them");
 
   // A standard context-capacity edit must not move Pro's compression threshold;
   // Pro starts from its own documented default until it saves its own value.

@@ -113,6 +113,20 @@ try {
   assert.equal(saves[0].settings.pro_max_recursion_depth, 12);
   for (const key of ["default_intensity", "approval_model", "plan_first", "model_context_window"]) assert.ok(!(key in saves[0].settings));
   assert.ok(!("selection" in saves[0]));
+  // The preset a user writes for themselves leads the payload, and the slider
+  // starts at its weakest position: it must never read as the highest tier.
+  const ownPreset = { ...presets[0], name: "custom", chinese_name: "自定义" };
+  const ownUi = createProUI({ changePreset: async () => {} });
+  ownUi.load({ ...catalog, pro: { ...catalog.pro, presets: [ownPreset, ...presets], preset: "custom" } });
+  ownUi.show(null, "new:project");
+  assert.equal(ownUi.preset(), "custom");
+  assert.equal(node("pro-preset-ticks").children[0].textContent, "自定义", "the user's preset is the leftmost label");
+  assert.equal(node("pro-preset-slider").attributes.style, "--pro-slider-position: 0", "its slider position is the left end");
+  assert.equal(node("pro-preset-control").classes.has("is-max"), false, "the maximum styling belongs to the last preset");
+  ownUi.show({ pro: { preset: "best" } }, "new:project");
+  assert.equal(node("pro-preset-slider").attributes.style, "--pro-slider-position: 1");
+  assert.equal(node("pro-preset-control").classes.has("is-max"), true, "only the last preset is the maximum");
+
   console.log("ok Pro UI: role presets, slider commit, busy guard, rejection rollback, fallback notices, localization and orchestration settings");
 } finally {
   setLanguage("en");

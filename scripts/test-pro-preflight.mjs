@@ -8,7 +8,7 @@ process.env.HOME = testHome;
 process.env.USERPROFILE = testHome;
 const { saveConfig, saveModels, MODEL_FILE } = await import("../dist/config.js");
 const {
-  ACTIVE_PRO_ROLES, PRO_MODELS_URL, PRO_ROLES, PRO_MODEL_FILE, defaultProPreset, ensureProModels,
+  ACTIVE_PRO_ROLES, PRO_CUSTOM_MODEL_FILE, PRO_MODELS_URL, PRO_ROLES, PRO_MODEL_FILE, defaultProPreset, ensureProModels,
   loadProModels, loadProPrompt, proMaxRecursionDepth, requireProPreset, syncProModels,
 } = await import("../dist/pro/config.js");
 const { seedProPresets } = await import("./pro-presets.mjs");
@@ -106,6 +106,12 @@ try {
   // A throwaway home keeps its own presets; loading them must not rewrite them.
   seedProPresets(["custom", "cheap", "medium", "best"]);
   assert.equal(loadProModels().tier.length, 4, "the home's own presets load as written");
+  // The slider reads left to right as strength, so the presets a user writes in
+  // model-custom.json lead the list instead of landing on the maximum end.
+  seedProPresets(["custom", "mine"], PRO_CUSTOM_MODEL_FILE);
+  assert.deepEqual(loadProModels().tier.map((entry) => entry.name), ["mine", "custom", "cheap", "medium", "best"],
+    "user presets lead, official rungs keep their order, and a same-named entry keeps its rung");
+  fs.rmSync(PRO_CUSTOM_MODEL_FILE);
   assert.equal(ACTIVE_PRO_ROLES.length, 7, "image generation is reserved; modeling is active");
   assert.ok(ACTIVE_PRO_ROLES.includes("modeling_model"));
   for (const role of PRO_ROLES) assert.ok(loadProPrompt(role).length > 100);

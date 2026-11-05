@@ -222,14 +222,18 @@ export function loadProModels(): ProModelsData {
     throw new Error(`Pro model.json is missing; it is downloaded from ${PRO_MODELS_URL} on first use`);
   }
   const { tier } = readProModels(PRO_MODEL_FILE, "model.json");
-  // Presets the user keeps in model-custom.json are merged in: a same-named entry
-  // replaces the one from model.json in place, new ones are appended.
+  // Presets the user keeps in model-custom.json are merged in. Their place in the
+  // list is read as strength (the slider runs from weak to strong), so entries that
+  // are not official rungs lead it: a preset named after an official one edits that
+  // rung in place, every other one sits left of the graded presets.
   if (fs.existsSync(PRO_CUSTOM_MODEL_FILE)) {
+    const own: ProPreset[] = [];
     for (const preset of readProModels(PRO_CUSTOM_MODEL_FILE, "model-custom.json").tier) {
       const index = tier.findIndex((entry) => entry.name === preset.name);
-      if (index === -1) tier.push(preset);
+      if (index === -1) own.push(preset);
       else tier[index] = preset;
     }
+    tier.unshift(...own);
   }
   if (tier.length === 0) throw new Error("Pro model.json must contain a nonempty tier array");
   return { tier };
