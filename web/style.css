@@ -413,11 +413,20 @@ svg {
   margin-bottom: 4px;
 }
 
+/* A folder row is two controls: the name folds the list, the plus beside it
+   opens a new conversation in that folder. */
+.group-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
 .group-header {
   display: flex;
   align-items: center;
   gap: 7px;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   height: 30px;
   padding: 0 8px;
   background: transparent;
@@ -461,16 +470,22 @@ svg {
   font-size: 12px;
 }
 
-.group-header .count {
-  flex: none;
-  min-width: 20px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--surface-1);
+/* Small enough to sit on the folder row without competing with the name, and
+   dimmed so a long list of folders never reads as a wall of plus signs. */
+.group-new {
+  width: 22px;
+  height: 22px;
   color: var(--text-caption);
-  font-size: 10.5px;
-  line-height: 18px;
-  text-align: center;
+}
+
+.group-new svg {
+  width: 13px;
+  height: 13px;
+}
+
+.group-new:hover {
+  background: var(--surface-1);
+  color: var(--text-secondary);
 }
 
 .group-items {
@@ -3306,6 +3321,13 @@ html.pro-transitioning body::before {
   .group-header,
   .more {
     min-height: 40px;
+  }
+
+  /* The plus takes the same 40px target as the other icon buttons here, so
+     its icon grows with it instead of staying at the desktop size. */
+  .group-new svg {
+    width: 16px;
+    height: 16px;
   }
 
   .main-header {

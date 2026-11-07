@@ -909,20 +909,42 @@ function renderGroup(group, options = {}) {
   wrap.className = "group";
 
   const collapsed = !options.forceOpen && state.collapsed.has(group.key);
+  // The row answers "start something here", not "how much is already here": a
+  // plus beside the folder opens a fresh conversation in it, the way Codex puts
+  // a project's own new-chat control next to the project. Two actions cannot
+  // share one button, so the row holds the folder and the plus side by side.
+  const head = document.createElement("div");
+  head.className = "group-head";
+
   const header = document.createElement("button");
   header.className = "group-header";
+  header.type = "button";
+  header.setAttribute("aria-expanded", String(!collapsed));
   header.innerHTML =
     `<span class="chevron${collapsed ? " collapsed" : ""}">` +
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>' +
     "</span>" +
-    `<span class="path" title="${escapeHtml(group.cwd)}">${escapeHtml(shortenPath(group.cwd))}</span>` +
-    `<span class="count">${group.sessions.length}</span>`;
+    `<span class="path" title="${escapeHtml(group.cwd)}">${escapeHtml(shortenPath(group.cwd))}</span>`;
   header.addEventListener("click", () => {
     if (state.collapsed.has(group.key)) state.collapsed.delete(group.key);
     else state.collapsed.add(group.key);
     renderSidebar();
   });
-  wrap.appendChild(header);
+  head.appendChild(header);
+
+  if (group.cwd) {
+    const start = document.createElement("button");
+    start.className = "icon-btn group-new";
+    start.type = "button";
+    start.title = tr("New conversation in this folder");
+    start.setAttribute("aria-label", tr("New conversation in this folder"));
+    start.innerHTML =
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+    start.addEventListener("click", () => startConversationIn(group.cwd));
+    head.appendChild(start);
+  }
+
+  wrap.appendChild(head);
 
   if (collapsed) return wrap;
 
@@ -954,6 +976,19 @@ function renderGroup(group, options = {}) {
 
   wrap.appendChild(list);
   return wrap;
+}
+
+/**
+ * The plus on a folder header. It opens that folder's landing view, where the
+ * next message becomes a new conversation in that directory, so starting one
+ * costs a click instead of a dialog.
+ */
+function startConversationIn(cwd) {
+  const path = String(cwd ?? "").trim();
+  if (!path) return;
+  renderWorkspaceLanding(path);
+  setConversationView(true);
+  el.input?.focus?.();
 }
 
 function isSelected(session) {

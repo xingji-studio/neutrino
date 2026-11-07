@@ -218,6 +218,7 @@ const ZH = {
   "Choose a conversation from the sidebar to view it.": "从侧边栏选择一个对话查看。",
   "No conversations yet.": "暂无对话。",
   "No conversations in this folder yet.": "此文件夹中暂无对话。",
+  "New conversation in this folder": "在此文件夹中新建对话",
   "Type a message below to start a conversation in this folder.": "在下方输入消息，即可在此文件夹中开始对话。",
   "Send a message to get started.": "发送一条消息开始对话。",
   "This conversation is empty.": "此对话为空。",
