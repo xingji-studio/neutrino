@@ -22,6 +22,9 @@ const { App } = await import("../dist/app.js");
 const { Buffer: ScreenBuffer } = await import("../dist/terminal/buffer.js");
 const { defaultState } = await import("../dist/state.js");
 const { LLMClient } = await import("../dist/llm/client.js");
+const { PRO_MODELS_URL } = await import("../dist/pro/config.js");
+const { seedProPresets } = await import("./pro-presets.mjs");
+seedProPresets();
 
 const project = path.join(home, "project 中文");
 const other = path.join(home, "other project");
@@ -90,6 +93,15 @@ if (sqlite) {
 
 let server;
 const originalStream = LLMClient.prototype.streamTurn;
+const originalFetch = globalThis.fetch;
+let presetDownloads = 0;
+globalThis.fetch = (input, init) => {
+  if (String(input) === PRO_MODELS_URL) {
+    presetDownloads++;
+    return Promise.reject(new Error("The migration fixture is offline"));
+  }
+  return originalFetch(input, init);
+};
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function request(route, body, options = {}) {
   const response = await fetch(server.url + route, {
@@ -223,7 +235,8 @@ try {
   assert.ok(overview.data.groups.find(group => group.cwd === project).sessions.some(session => session.id === migrated.data.id));
 
   let context;
-  LLMClient.prototype.streamTurn = async function* (messages) { context = messages; yield "Continued in Neutrino."; };
+  let modelCompletions = 0;
+  LLMClient.prototype.streamTurn = async function* (messages) { modelCompletions++; context = messages; yield "Continued in Neutrino."; };
   await request(`/api/live/${migrated.data.key}/message`, { text: "Please continue" });
   let snapshot;
   for (const deadline = Date.now() + 4000; Date.now() < deadline;) {
@@ -247,14 +260,19 @@ try {
     assert.deepEqual(copied.data.snapshot.messages, expected);
   } finally { saveModels(models); }
 
+  const completionsBeforeProMigration = modelCompletions;
   const pro = await request("/pro/api/agents/claude/sessions/claude-source/migrate", { cwd: project });
-  assert.equal(pro.status, 201);
+  assert.equal(pro.status, 201, JSON.stringify(pro.data));
+  assert.equal(presetDownloads, 0, "migration uses initialized Pro presets without network downloads");
+  assert.equal(modelCompletions, completionsBeforeProMigration, "copying Pro history does not request a model completion");
+  assert.equal(pro.data.snapshot.pro.preset, "medium");
   assert.ok(loadSession(pro.data.id, "pro")?.pro_preset);
   assert.equal(loadSession(pro.data.id), null, "Pro migration stays in the Pro workspace");
   assert.deepEqual(pro.data.snapshot.messages, expected);
   console.log("ok session migration: source formats, working directories, native persistence, terminal actions, HTTP and continuation");
 } finally {
   LLMClient.prototype.streamTurn = originalStream;
+  globalThis.fetch = originalFetch;
   if (server) await server.close();
   database?.close();
   fs.rmSync(home, { recursive: true, force: true });

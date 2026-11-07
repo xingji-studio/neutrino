@@ -79,6 +79,21 @@ export function locale() {
 }
 
 const ZH = {
+  "Agent mode": "Agent 模式",
+  "Standard mode": "标准模式",
+  "PTC mode": "PTC模式",
+  "Fast mode": "快速模式",
+  "Professional mode": "专业模式",
+  "Full-featured Agent for every scenario": "功能完整的Agent，适用于所有场景",
+  "All standard capabilities, with code-based planning to save tokens": "拥有标准模式所有功能，通过代码实现规划，节省Token",
+  "Less thinking and fewer calls for quick answers": "减少思考和调用，迅速回答问题",
+  "Assign tasks to the best-suited models so multiple models complement each other": "适合需要多个模型取长补短的任务，将任务分给最适合他的模型",
+  "Applies to the next turn": "从下一轮开始生效",
+  "Changing mode…": "正在切换模式…",
+  "Could not change mode: {error}": "无法切换模式：{error}",
+  "Select a working directory first.": "请先选择工作目录。",
+  "Program": "程序",
+
   "Pro preset": "Pro 预设",
   "Preset": "预设",
   "Neutrino Pro": "Neutrino Pro",

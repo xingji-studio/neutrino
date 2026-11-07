@@ -24,6 +24,9 @@ import {
   planFirstEnabled,
   loadModels,
   loadPrompt,
+  loadAgentPrompt,
+  normalizeAgentMode,
+  type AgentMode,
   saveSession,
   type ModelInfo,
   type SessionData,
@@ -140,6 +143,7 @@ export function createWebSession(
   approvalMode?: ApprovalMode,
   mode: Mode = "standard",
   proPreset?: string,
+  agentMode: AgentMode = "standard",
 ): WebSession {
   const now = new Date();
   const source: SessionData = {
@@ -154,6 +158,7 @@ export function createWebSession(
     messages: [],
     tokens: { prompt: 0, completion: 0 },
     approval_mode: normalizeApprovalMode(approvalMode ?? loadConfig(mode).approval_mode),
+    agent_mode: mode === "pro" ? "standard" : agentMode,
     ...(mode === "pro" ? { pro_preset: requireProPreset(proPreset ?? defaultProPreset()) } : {}),
   };
   return new WebSession(source, selection.model, mode);
@@ -262,6 +267,9 @@ export class WebSession implements LiveAgent {
     return saved;
   });
   private turnToken = 0;
+  private agentMode: AgentMode = "standard";
+  private activeAgentMode: AgentMode = "standard";
+  private turnAbort: AbortController | null = null;
   private lastPromptTokens = 0;
   private disposed = false;
   private idleTimer: NodeJS.Timeout | null = null;
@@ -278,6 +286,7 @@ export class WebSession implements LiveAgent {
 
   constructor(source: SessionData, model: ModelInfo, mode: Mode = "standard") {
     this.mode = mode;
+    this.agentMode = mode === "pro" ? "standard" : normalizeAgentMode(source.agent_mode);
     if (mode === "pro") this.proPreset = requireProPreset(source.pro_preset ?? defaultProPreset());
     this.model = model;
     this.approvalMode = normalizeApprovalMode(source.approval_mode ?? loadConfig(this.mode).approval_mode);
@@ -311,6 +320,7 @@ export class WebSession implements LiveAgent {
     if (this.disposed) return;
     this.disposed = true;
     this.proAbort?.abort();
+    this.turnAbort?.abort();
     this.turnToken++;
     this.busy = false;
     if (this.pendingApproval) {
@@ -372,6 +382,8 @@ export class WebSession implements LiveAgent {
       model: this.model.name,
       intensity: this.intensity,
       approvalMode: this.approvalMode,
+      agentMode: this.agentMode,
+      activeAgentMode: this.busy ? this.activeAgentMode : this.agentMode,
       busy: this.busy,
       paused: this.paused,
       queued: this.queued,
@@ -420,6 +432,7 @@ export class WebSession implements LiveAgent {
     if (this.paused || (!this.busy && !this.queued)) return;
     this.paused = true;
     this.proAbort?.abort();
+    this.turnAbort?.abort();
     this.turnToken++;
     // A queued decision would otherwise keep the promise (and the gate) alive.
     if (this.pendingApproval) {
@@ -461,6 +474,14 @@ export class WebSession implements LiveAgent {
     return true;
   }
 
+  liveSetAgentMode(mode: AgentMode): ModelChangeResult {
+    if (this.mode === "pro" || this.disposed) return { ok: false, error: "this session cannot change agent mode" };
+    this.agentMode = mode;
+    this.save();
+    this.publishLive();
+    return { ok: true };
+  }
+
   liveSetApprovalMode(mode: ApprovalMode): void {
     if (this.approvalMode === mode) return;
     this.approvalMode = mode;
@@ -485,6 +506,7 @@ export class WebSession implements LiveAgent {
     this.proAbort?.abort();
     this.proTeam = null;
     this.proState = undefined;
+    this.turnAbort?.abort();
     this.turnToken++;
     if (this.pendingApproval) {
       const pending = this.pendingApproval;
@@ -539,6 +561,9 @@ export class WebSession implements LiveAgent {
     const turnMessages = this.messages.slice();
     const approvalContext = captureApprovalContext(turnMessages);
     this.busy = true;
+    this.activeAgentMode = this.agentMode;
+    this.turnAbort?.abort();
+    this.turnAbort = new AbortController();
     const token = ++this.turnToken;
     this.streamingContent = "";
     this.publishLive();
@@ -559,7 +584,8 @@ export class WebSession implements LiveAgent {
     await this.autoCompress(token);
     if (token !== this.turnToken || this.paused) return;
 
-    const plan = await this.makePlan(token);
+    if (this.activeAgentMode !== "standard") this.plan = null;
+    const plan = this.activeAgentMode === "standard" ? await this.makePlan(token) : null;
     if (token !== this.turnToken || this.paused) return;
 
     if (plan) {
@@ -765,7 +791,7 @@ export class WebSession implements LiveAgent {
   private buildApiMessages(messages = this.messages, directive = ""): ApiMessage[] {
     // A step directive extends the system prompt: the plan is an instruction, not
     // something the user just said.
-    const prompt = this.mode === "pro" ? loadProPrompt("main_model") : loadPrompt();
+    const prompt = this.mode === "pro" ? loadProPrompt("main_model") : loadAgentPrompt(this.activeAgentMode);
     const api: ApiMessage[] = [
       { role: "system", content: directive ? `${prompt}\n\n${directive}` : prompt },
     ];
@@ -785,7 +811,10 @@ export class WebSession implements LiveAgent {
    * the caller owns the turn's end because a planned turn runs this per step.
    */
   private async agentLoop(apiMessages: ApiMessage[], token: number, approvalContext: ApprovalContext): Promise<boolean> {
-    const tools = this.mode === "pro" ? getProToolDefinitions() : getToolDefinitions();
+    const tools = this.mode === "pro" ? getProToolDefinitions() : [
+      ...getToolDefinitions(),
+      ...(this.activeAgentMode === "ptc" ? [(await import("../llm/codemode.js")).getCodeToolDefinition()] : []),
+    ];
     const team = this.proTeam;
     try {
       while (true) {
@@ -935,6 +964,7 @@ export class WebSession implements LiveAgent {
     tool: string,
     args: Record<string, unknown>,
     context = captureApprovalContext(this.messages),
+    signal = this.turnAbort?.signal,
   ): Promise<ApprovalDecision> {
     const risk = assessToolCall(tool, args, this.dir);
     if (!risk) return { approved: true, source: "prompt", reason: "routine call" };
@@ -943,7 +973,7 @@ export class WebSession implements LiveAgent {
     const gate = new ApprovalGate({
       askHuman: () =>
         new Promise<boolean | null>((resolve) => {
-          if (this.mode === "pro" && (approvalToken !== this.turnToken || this.paused || this.disposed)) {
+          if (approvalToken !== this.turnToken || this.paused || this.disposed || signal?.aborted === true) {
             resolve(false);
             return;
           }
@@ -954,12 +984,12 @@ export class WebSession implements LiveAgent {
       ...(this.mode === "pro" && team ? {
         createReviewerClient: () => team.client("confirm_model"),
         reviewerSystemPrompt: () => loadProPrompt("confirm_model"),
-        cancelled: () => approvalToken !== this.turnToken || this.paused || this.disposed,
       } : {}),
+      cancelled: () => approvalToken !== this.turnToken || this.paused || this.disposed || signal?.aborted === true,
       autoApprovalEnabled: () => this.approvalMode === "auto",
       extremeAutoApprovalEnabled: () => loadConfig(this.mode).auto_approve_extreme_risk === true,
       onReview: (info) => {
-        if (this.mode === "pro" && (approvalToken !== this.turnToken || this.paused || this.disposed)) return;
+        if (approvalToken !== this.turnToken || this.paused || this.disposed || signal?.aborted === true) return;
         this.reviewing = info
           ? {
             total: info.total, round: info.round ?? 1, rounds: info.rounds ?? 1,
@@ -969,7 +999,19 @@ export class WebSession implements LiveAgent {
         this.publishLive();
       },
     });
-    return gate.decide({ tool, args, cwd: this.dir, ...context, risk });
+    const abortApproval = () => {
+      const pending = this.pendingApproval;
+      if (pending?.args !== args) return;
+      this.pendingApproval = null;
+      pending.resolve(false);
+      this.publishLive();
+    };
+    signal?.addEventListener("abort", abortApproval, { once: true });
+    try {
+      return await gate.decide({ tool, args, cwd: this.dir, ...context, risk });
+    } finally {
+      signal?.removeEventListener("abort", abortApproval);
+    }
   }
 
   /** Reviewer model: `approval_model` when set, otherwise the chat model. */
@@ -983,6 +1025,58 @@ export class WebSession implements LiveAgent {
       }
     }
     return { model: this.model, provider: this.provider, intensity: this.intensity };
+  }
+
+  private async runProgram(args: Record<string, unknown>, token: number, apiMessages: ApiMessage[], approvalContext: ApprovalContext): Promise<string> {
+    if (this.activeAgentMode !== "ptc") return "[Error: execute_ts requires PTC mode]";
+    const { executeCodeProgram, ProgramToolDenied } = await import("../llm/codemode.js");
+    const signal = this.turnAbort?.signal;
+    const cancelled = () => token !== this.turnToken || this.paused || signal?.aborted;
+    const result = await executeCodeProgram(args, {
+      signal,
+      onPlan: plan => {
+        if (cancelled()) return;
+        this.plan = plan;
+        this.save(); this.publishLive();
+      },
+      onStep: (index, status) => { if (!cancelled()) this.setStep(index, status); },
+      call: async (name, callArgs, programSignal) => {
+        if (cancelled() || programSignal?.aborted) throw new Error("Execution cancelled");
+        const message: Msg & { role: "tool" } = { role: "tool", name, arguments: callArgs, result: "…" };
+        this.messages.push(message);
+        this.save(); this.publishLive();
+        const stopApproval = () => {
+          if (this.pendingApproval?.args !== callArgs) return;
+          const pending = this.pendingApproval;
+          this.pendingApproval = null;
+          pending.resolve(false);
+          this.publishLive();
+        };
+        programSignal?.addEventListener("abort", stopApproval, { once: true });
+        try {
+          const decision = await this.requestApproval(name, callArgs, {
+            ...approvalContext, context: captureApprovalContext(apiMessages).context,
+          }, programSignal);
+          if (cancelled() || programSignal?.aborted) throw new Error("Execution cancelled");
+          if (!decision.approved) {
+            message.result = `[Not executed: ${decision.reason}]`;
+            throw new ProgramToolDenied(`Approval denied: ${decision.reason}. Do not retry or work around this denial.`);
+          }
+          const value = await this.runTool(name, callArgs, message, token, apiMessages, approvalContext, programSignal);
+          message.result = value;
+          if (cancelled() || programSignal?.aborted) throw new Error("Execution cancelled");
+          return value;
+        } catch (error) {
+          if (message.result === "…") message.result = `[Error: ${error instanceof Error ? error.message : String(error)}]`;
+          throw error;
+        } finally {
+          programSignal?.removeEventListener("abort", stopApproval);
+          if (this.messages.includes(message)) { this.save(); this.publishLive(); }
+        }
+      },
+    });
+    if (!cancelled()) { this.save(); this.publishLive(); }
+    return result;
   }
 
   // ---- sub-agents ------------------------------------------------------
@@ -999,6 +1093,7 @@ export class WebSession implements LiveAgent {
     token: number,
     apiMessages: ApiMessage[],
     approvalContext: ApprovalContext,
+    signal = this.turnAbort?.signal,
   ): Promise<string> {
     if (this.mode === "pro" && (name === "call_pro_agent" || name === DELEGATE_TOOL)) {
       const team = this.proTeam;
@@ -1007,8 +1102,9 @@ export class WebSession implements LiveAgent {
         `${typeof args.context === "string" ? args.context : ""}\n\nCurrent user request: ${approvalContext.prompt}\n` +
         captureApprovalContext(apiMessages).context, 1);
     }
-    if (name !== DELEGATE_TOOL) return executeTool(name, args, this.dir);
-    return this.delegate(args, toolMsg, token, apiMessages, approvalContext);
+    if (name === "execute_ts") return this.runProgram(args, token, apiMessages, approvalContext);
+    if (name !== DELEGATE_TOOL) return executeTool(name, args, this.dir, signal);
+    return this.delegate(args, toolMsg, token, apiMessages, approvalContext, signal);
   }
 
   /**
@@ -1022,6 +1118,7 @@ export class WebSession implements LiveAgent {
     token: number,
     apiMessages: ApiMessage[],
     approvalContext: ApprovalContext,
+    signal = this.turnAbort?.signal,
   ): Promise<string> {
     const task = String(args.task ?? "").trim();
     if (!task) return "[Error: delegate needs a task: what should the sub-agent do?]";
@@ -1034,11 +1131,11 @@ export class WebSession implements LiveAgent {
       task: buildSubAgentTask({ task, context, cwd: this.dir, rounds: maxRounds }),
       tools: SUB_AGENT_TOOLS,
       maxRounds,
-      approve: (name, callArgs) => this.requestApproval(name, callArgs, approval),
+      approve: (name, callArgs) => this.requestApproval(name, callArgs, approval, signal),
       execute: (name, callArgs) =>
         name === DELEGATE_TOOL
           ? Promise.resolve("[Error: sub-agents cannot delegate further]")
-          : executeTool(name, callArgs, this.dir),
+          : executeTool(name, callArgs, this.dir, signal),
       onProgress: (label) => {
         this.subagent = label;
         toolMsg.result = `… ${label}`;
@@ -1178,6 +1275,7 @@ export class WebSession implements LiveAgent {
         this.plan,
         this.mode,
         this.proPreset ?? undefined,
+        this.agentMode,
       );
       this.saveError = null;
       return true;

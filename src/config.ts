@@ -26,6 +26,16 @@ export const CONFIG_FILE = path.join(NEUTRINO_DIR, "config.json");
 export const MODES = ["standard", "pro"] as const;
 export type Mode = (typeof MODES)[number];
 
+/** Conversation strategy inside the regular workspace; Pro owns its own workspace. */
+export const AGENT_MODES = ["standard", "ptc", "fast"] as const;
+export type AgentMode = (typeof AGENT_MODES)[number];
+export function isAgentMode(value: unknown): value is AgentMode {
+  return typeof value === "string" && (AGENT_MODES as readonly string[]).includes(value);
+}
+export function normalizeAgentMode(value: unknown): AgentMode {
+  return isAgentMode(value) ? value : "standard";
+}
+
 export const PRO_DIR = path.join(NEUTRINO_DIR, "pro");
 export const PRO_CONFIG_FILE = path.join(PRO_DIR, "config.json");
 export const PRO_SESSION_DIR = path.join(PRO_DIR, "session");
@@ -288,6 +298,7 @@ export interface SessionMeta {
   cwd: string;
   title: string;
   message_count: number;
+  agent_mode?: AgentMode;
 }
 
 export interface ToolMessage {
@@ -323,6 +334,7 @@ export interface SessionData {
   /** Model context is separate from messages, which always retain the originals. */
   context?: ConversationContext;
   approval_mode?: ApprovalMode;
+  agent_mode?: AgentMode;
   /** The plan of the turn being worked on, so reopening shows the same steps. */
   plan?: PlanState | null;
   /** Pro preset selection; resolved fallback models are always task-local. */
@@ -471,6 +483,7 @@ export function saveSession(
   plan?: PlanState | null,
   mode: Mode = "standard",
   proPreset?: string,
+  agentMode?: AgentMode,
 ): string {
   ensureDirs(mode);
   const now = new Date();
@@ -498,6 +511,7 @@ export function saveSession(
     messages,
     tokens,
     approval_mode: normalizeApprovalMode(approvalMode ?? existing?.approval_mode),
+    agent_mode: mode === "pro" ? "standard" : normalizeAgentMode(agentMode ?? existing?.agent_mode),
     ...(mode === "pro" && (proPreset ?? existing?.pro_preset)
       ? { pro_preset: proPreset ?? existing?.pro_preset } : {}),
   };
@@ -571,6 +585,7 @@ export function listSessions(mode: Mode = "standard"): SessionMeta[] {
         cwd: data.cwd ?? "",
         title: data.title ?? "",
         message_count: (data.messages ?? []).length,
+        agent_mode: normalizeAgentMode(data.agent_mode),
       });
     } catch {
       // ignore unreadable sessions
@@ -616,6 +631,13 @@ export function loadPrompt(): string {
     readAsset(path.join(PKG_ROOT, "assets", "prompt.txt"), path.join(PKG_ROOT, "prompt.txt")) ??
     "You are Neutrino, a helpful AI coding assistant."
   );
+}
+
+/** Mode prompts are standalone so standard planning/delegation directives cannot conflict. */
+export function loadAgentPrompt(mode: AgentMode): string {
+  if (mode === "standard") return loadPrompt();
+  const file = mode === "fast" ? "fast.txt" : "ptc.txt";
+  return readAsset(path.join(PKG_ROOT, "assets", file)) ?? loadPrompt();
 }
 
 /** The planning agent's system prompt. */

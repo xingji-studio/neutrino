@@ -1,4 +1,4 @@
-import { exec } from "node:child_process";
+import { exec, execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { webSearch } from "./search.js";
@@ -175,6 +175,7 @@ export async function executeTool(
 ): Promise<string> {
   // Tools always operate inside the directory the conversation belongs to, which
   // is not necessarily the directory the current process was started in.
+  if (signal?.aborted) return "[Error: command cancelled]";
   const base = cwd || process.cwd();
   let result: string;
   try {
@@ -183,7 +184,9 @@ export async function executeTool(
         result = await webSearch(args, signal);
         break;
       case "run_command":
-        result = await runCommand(String(args.command ?? ""), base);
+        result = signal
+          ? await runCancellableCommand(String(args.command ?? ""), base, signal)
+          : await runCommand(String(args.command ?? ""), base);
         break;
       case "read_file":
         result = readFile(String(args.path ?? ""), base);
@@ -201,6 +204,50 @@ export async function executeTool(
     result = `[Error: ${e instanceof Error ? e.message : String(e)}]`;
   }
   return result.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+/** Kill the whole command tree when a PTC execution or its turn is stopped. */
+function runCancellableCommand(command: string, cwd: string, signal: AbortSignal): Promise<string> {
+  if (!command.trim()) return Promise.resolve("[Error: empty command]");
+  if (signal.aborted) return Promise.resolve("[Error: command cancelled]");
+  return new Promise(resolve => {
+    const child = spawn(command, { cwd, shell: true, windowsHide: true, detached: process.platform !== "win32" });
+    let stdout = "";
+    let stderr = "";
+    let stopped = "";
+    const stop = (reason: string) => {
+      if (stopped) return;
+      stopped = reason;
+      if (child.pid) {
+        if (process.platform === "win32") {
+          execFile("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true }, () => child.kill());
+        } else {
+          try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); }
+        }
+      }
+    };
+    const abort = () => stop("command cancelled");
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+    const timeout = setTimeout(() => stop("command timed out"), 120_000);
+    const collect = (chunk: Buffer, output: "stdout" | "stderr") => {
+      if (output === "stdout") stdout += chunk.toString(); else stderr += chunk.toString();
+      if (stdout.length + stderr.length > MAX_OUTPUT * 4) stop("command output exceeded limit");
+    };
+    child.stdout.on("data", chunk => collect(chunk, "stdout"));
+    child.stderr.on("data", chunk => collect(chunk, "stderr"));
+    child.on("error", error => { stderr += error.message; });
+    child.on("close", code => {
+      clearTimeout(timeout);
+      signal.removeEventListener("abort", abort);
+      const parts = [stdout, stderr ? `[stderr]\n${stderr}` : ""];
+      const ending = stopped ? `[Error: ${stopped}]` : code !== 0 ? `[exit code: ${code ?? "unknown"}]` : "";
+      const result = parts.filter(Boolean).join("\n").trim();
+      // Keep the execution status even when stdout fills the output allowance.
+      const body = result.slice(0, MAX_OUTPUT - (ending ? ending.length + 1 : 0));
+      resolve(ending ? `${body}${body ? "\n" : ""}${ending}` : body || "(no output)");
+    });
+  });
 }
 
 function runCommand(command: string, cwd: string): Promise<string> {

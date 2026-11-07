@@ -445,6 +445,9 @@ const el = {
   messages: document.getElementById("messages"),
   composer: document.getElementById("composer"),
   input: document.getElementById("input"),
+  modePicker: document.getElementById("agent-mode-picker"),
+  modeLabel: document.getElementById("agent-mode-label"),
+  modeFeedback: document.getElementById("agent-mode-feedback"),
   send: document.getElementById("send"),
   approval: document.getElementById("approval"),
   emptyNewChat: document.getElementById("empty-new-chat"),
@@ -591,6 +594,148 @@ function storedWorkspace() {
   const path = readStorage(modeStorageKey("neutrino.workspace"));
   if (!path) return null;
   return { key: pathKey(path), path };
+}
+
+const AGENT_MODE_LABELS = { standard: "Standard mode", ptc: "PTC mode", fast: "Fast mode", pro: "Professional mode" };
+let newAgentMode = readStorage("neutrino.agent-mode");
+if (!["standard", "ptc", "fast"].includes(newAgentMode)) newAgentMode = "standard";
+let agentModePending = Promise.resolve();
+let agentModeChanging = false;
+let workspaceNavigation = false;
+let agentModeError = "";
+
+function clearAgentModeFeedback() {
+  agentModeError = "";
+  agentModePending = Promise.resolve();
+}
+
+function currentAgentMode() {
+  if (PRO_MODE) return "pro";
+  if (state.selection?.kind === "live") return state.snapshot?.agentMode || "standard";
+  if (state.selection?.kind === "file") return state.fileData?.agent_mode || "standard";
+  return newAgentMode;
+}
+
+function renderAgentMode() {
+  if (!el.modePicker || !el.modeLabel) return;
+  const mode = currentAgentMode();
+  el.modeLabel.removeAttribute?.("data-i18n");
+  el.modeLabel.textContent = tr(AGENT_MODE_LABELS[mode] || AGENT_MODE_LABELS.standard);
+  const nextTurn = state.snapshot?.busy && state.snapshot.activeAgentMode !== state.snapshot.agentMode;
+  el.modePicker.classList.toggle("is-pending", Boolean(agentModeChanging || nextTurn));
+  for (const button of el.modePicker.querySelectorAll?.("[data-agent-mode]") || []) {
+    button.setAttribute("aria-checked", String(button.dataset.agentMode === mode));
+    button.disabled = agentModeChanging || workspaceNavigation;
+  }
+  if (el.modeFeedback) {
+    el.modeFeedback.textContent = agentModeError || (agentModeChanging ? tr("Changing mode…") : nextTurn ? tr("Applies to the next turn") : "");
+    el.modeFeedback.classList.toggle("error", Boolean(agentModeError));
+  }
+}
+
+async function chooseAgentMode(mode) {
+  if (!Object.hasOwn(AGENT_MODE_LABELS, mode) || agentModeChanging || workspaceNavigation || mode === currentAgentMode()) return;
+  const selected = state.selection;
+  agentModeChanging = true;
+  agentModeError = "";
+  if (el.modePicker) renderAgentMode();
+  el.modePicker.open = false;
+  try {
+    if (mode === "pro" || PRO_MODE) {
+      await switchWorkspaceMode(mode);
+    } else if (selected?.kind === "live") {
+      const response = await apiFetch(`/api/live/${encodeURIComponent(selected.key)}/agent-mode`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(apiError(body, `HTTP ${response.status}`));
+      if (state.selection === selected) { state.snapshot = body.snapshot; renderLive(); }
+    } else if (selected?.kind === "file") {
+      await continueSession(selected.id, preferences.selectionForFile(selected.id), mode);
+    } else {
+      newAgentMode = mode;
+    }
+    if (mode !== "pro") { newAgentMode = mode; writeStorage("neutrino.agent-mode", mode); }
+  } catch (error) {
+    if (state.selection !== selected) return;
+    agentModeError = tr("Could not change mode: {error}", { error: error.message });
+    throw error;
+  } finally { agentModeChanging = false; renderAgentMode(); }
+}
+
+async function switchWorkspaceMode(mode) {
+  const cwd = selectionCwd() || state.workspace?.path;
+  if (!cwd) throw new Error(tr("Select a working directory first."));
+  const targetPro = mode === "pro";
+  const response = await fetch(targetPro ? "/pro/api/conversations" : "/api/conversations", {
+    method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, ...(targetPro ? {} : { agent_mode: mode }) }),
+  });
+  const body = await response.json();
+  if (response.status === 401) showGate();
+  if (!response.ok) throw new Error(apiError(body, `HTTP ${response.status}`));
+  workspaceNavigation = true;
+  if (el.modePicker) renderAgentMode();
+  try { sessionStorage.setItem(`neutrino.workspace-draft.${body.key}`, el.input.value); } catch { /* Navigation still works without storage. */ }
+  const target = `${targetPro ? "/pro" : "/"}?live=${encodeURIComponent(body.key)}`;
+  if (targetPro) startProTransition(target);
+  else { try { location.assign(target); } catch { location.href = target; } }
+}
+
+/** A transferred chat remains reloadable until the user chooses another view. */
+function clearLinkedConversation(keepKey) {
+  const params = new URLSearchParams(location.search);
+  if (!params.has("live") || params.get("live") === keepKey) return;
+  params.delete("live");
+  const query = params.toString();
+  try { history.replaceState(history.state, "", location.pathname + (query ? `?${query}` : "") + location.hash); } catch { /* History is optional. */ }
+}
+
+async function openLinkedConversation() {
+  const key = new URLSearchParams(location.search).get("live");
+  if (!key || state.selection) return false;
+  try {
+    const response = await apiFetch(`/api/live/${encodeURIComponent(key)}`, { cache: "no-store" });
+    const body = await response.json();
+    if (!response.ok) throw new Error(apiError(body, `HTTP ${response.status}`));
+    if (state.selection) return false;
+    setWorkspace({ path: body.cwd });
+    await selectLive(key);
+    state.snapshot = body;
+    renderLive();
+    setConversationView(true);
+    try {
+      const storageKey = `neutrino.workspace-draft.${key}`;
+      el.input.value = sessionStorage.getItem(storageKey) || "";
+      sessionStorage.removeItem(storageKey);
+    } catch { /* Storage is optional. */ }
+    autosize(); el.input.focus();
+    return true;
+  } catch (error) { el.sub.textContent = error.message; return false; }
+}
+
+function initializeAgentMode() {
+  if (!el.modePicker?.querySelectorAll) return;
+  for (const button of el.modePicker.querySelectorAll("[data-agent-mode]")) {
+    button.addEventListener("click", () => {
+      agentModePending = chooseAgentMode(button.dataset.agentMode);
+      // Keep the rejection available to sendMessage while avoiding an unhandled promise.
+      void agentModePending.catch(() => {});
+    });
+  }
+  el.modePicker.addEventListener("keydown", event => {
+    if (event.key === "Escape") { el.modePicker.open = false; el.modePicker.querySelector("summary")?.focus(); event.stopPropagation(); }
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    event.preventDefault(); el.modePicker.open = true;
+    const buttons = [...el.modePicker.querySelectorAll("[data-agent-mode]")];
+    let index = buttons.indexOf(document.activeElement);
+    index = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
+    buttons[index]?.focus();
+  });
+  document.addEventListener("pointerdown", event => {
+    if (el.modePicker.open && !el.modePicker.contains(event.target)) el.modePicker.open = false;
+  });
+  if (el.modePicker) renderAgentMode();
 }
 
 let proUI = null;
@@ -1278,6 +1423,7 @@ function resetMessagePane(text) {
 }
 
 async function selectLive(key) {
+  if (el.modePicker) { clearAgentModeFeedback(); clearLinkedConversation(key); }
   preferences.clear();
   closeStream();
   state.selection = { kind: "live", key };
@@ -1354,6 +1500,7 @@ function closeStream() {
 }
 
 async function selectFile(id) {
+  if (el.modePicker) { clearAgentModeFeedback(); clearLinkedConversation(); }
   preferences.clear();
   closeStream();
   state.selection = { kind: "file", id };
@@ -1399,6 +1546,7 @@ function renderFile(data) {
   renderFileControls(data);
   maybeOpenPlan(data.plan);
   renderPlanCard(data);
+  if (el.modePicker) renderAgentMode();
 }
 
 /**
@@ -1445,8 +1593,10 @@ function renderFileControls(data) {
 }
 
 /** Attach to a resumed conversation, creating it server-side when needed. */
-async function continueSession(id, selection = preferences.selectionForFile(id)) {
-  const payload = PRO_MODE ? { pro_preset: currentProPreset() } : selection ? { selection } : undefined;
+async function continueSession(id, selection = preferences.selectionForFile(id), agentMode) {
+  const payload = PRO_MODE ? { pro_preset: currentProPreset() } : {
+    ...(selection ? { selection } : {}), ...(agentMode ? { agent_mode: agentMode } : {}),
+  };
   const response = await apiFetch(`/api/session/${encodeURIComponent(id)}/continue`, {
     method: "POST",
     headers: payload ? { "Content-Type": "application/json" } : undefined,
@@ -1460,6 +1610,7 @@ async function continueSession(id, selection = preferences.selectionForFile(id))
 
 function setComposerMode(mode) {
   state.composerMode = mode;
+  if (el.modePicker) renderAgentMode();
   el.agentActions.classList.add("hidden");
   el.composer.classList.remove("hidden");
   el.input.placeholder = mode === "resume"
@@ -1661,6 +1812,7 @@ function renderLive() {
   });
   maybeOpenPlan(snapshot.plan);
   renderPlanCard(snapshot);
+  if (el.modePicker) renderAgentMode();
 }
 
 async function changeApprovalMode(key, mode) {
@@ -1877,6 +2029,12 @@ function renderMessage(message, index) {
       `<span class="tool-args">${escapeHtml(truncate(safeJson(message.arguments), 120))}</span>`;
     details.appendChild(summary);
 
+    if (message.name === "execute_ts" && typeof message.arguments?.code === "string") {
+      const program = document.createElement("pre");
+      program.className = "tool-result program-source";
+      program.textContent = message.arguments.code;
+      details.appendChild(program);
+    }
     const result = document.createElement("pre");
     result.className = "tool-result";
     result.textContent = message.result || "(no output)";
@@ -2016,6 +2174,7 @@ function activateComposer() {
 }
 
 async function sendMessage() {
+  try { await agentModePending; } catch (error) { el.sub.textContent = error.message; return; }
   const selection = state.selection;
   if (!selection) return;
   const text = el.input.value;
@@ -2154,6 +2313,7 @@ function showHome({ menu = true } = {}) {
 
 /** Show a folder as an empty workspace ready for its first message. */
 function renderWorkspaceLanding(path) {
+  if (el.modePicker) { clearAgentModeFeedback(); clearLinkedConversation(); }
   const sameLanding = state.selection?.kind === "new" && state.selection.cwd === path;
   state.selection = { kind: "new", cwd: path };
   state.snapshot = null;
@@ -2433,7 +2593,10 @@ async function submitNewChat() {
 async function createConversation(cwd, selection, approvalMode, proPreset = currentProPreset()) {
   const payload = { cwd };
   if (PRO_MODE) payload.pro_preset = proPreset;
-  else if (selection && selection.provider && selection.model) payload.selection = selection;
+  else {
+    payload.agent_mode = currentAgentMode();
+    if (selection && selection.provider && selection.model) payload.selection = selection;
+  }
   if (approvalMode === "request" || approvalMode === "auto") payload.approval_mode = approvalMode;
   const response = await apiFetch("/api/conversations", {
     method: "POST",
@@ -3025,7 +3188,7 @@ function proDelay(callback, ms) {
   if (typeof setTimeout === "function") setTimeout(callback, ms);
 }
 
-function startProTransition() {
+function startProTransition(target = "/pro") {
   if (PRO_MODE || proTransitionStarted) return;
   proTransitionStarted = true;
   const started = Date.now();
@@ -3041,7 +3204,7 @@ function startProTransition() {
   curtain.classList.add("pro-curtain-visible");
 
   proDelay(() => {
-    try { location.assign("/pro"); } catch { location.href = "/pro"; }
+    try { location.assign(typeof target === "string" ? target : "/pro"); } catch { location.href = typeof target === "string" ? target : "/pro"; }
   }, PRO_TRANSITION_COVER_MS);
 }
 
@@ -3062,6 +3225,8 @@ function removeProCurtains() {
  */
 function resetProTransition({ clearRecord = true } = {}) {
   removeProCurtains();
+  if (typeof workspaceNavigation !== "undefined") workspaceNavigation = false;
+  if (typeof el !== "undefined" && el.modePicker) renderAgentMode();
   document.documentElement?.classList?.remove?.("pro-transitioning");
   proTransitionStarted = false;
   if (!clearRecord) return;
@@ -3168,7 +3333,7 @@ function initializeProWorkspace() {
   // the record and the pre-paint cover behind. Neither may ever affect the
   // regular console, so clear them before wiring the badge.
   resetProTransition();
-  el.brandLogo?.addEventListener("click", startProTransition);
+  el.brandLogo?.addEventListener("click", () => startProTransition());
   initializeProTip();
 }
 
@@ -3285,6 +3450,7 @@ forgetStaleConversationEntry();
 
 initializeLanguage();
 initializeProWorkspace();
+initializeAgentMode();
 preferences.load()
   .then(async (config) => {
     const language = config?.settings?.language;
@@ -3299,7 +3465,8 @@ preferences.load()
     maybePromptBackground(config);
   })
   .catch(error => console.error(error));
-loadSeen().then(() => loadOverview()).then(() => {
+loadSeen().then(() => loadOverview()).then(async () => {
+  if (await openLinkedConversation()) return;
   // Reopen the folder the user had open last time, without stealing a click
   // that landed on a saved conversation while the overview was loading.
   if (state.workspace && !state.selection) renderWorkspaceLanding(state.workspace.path);

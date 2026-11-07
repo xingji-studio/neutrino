@@ -18,8 +18,8 @@ import path from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import {
-  deleteSession, listSessions, loadConfig, normalizeApprovalMode, resolveModelSelection, saveConfig, sessionDir,
-  type ApprovalMode, type Mode, type ModelSelection, type ResolvedModelSelection, type SessionData, type SessionMeta,
+  deleteSession, listSessions, loadConfig, normalizeApprovalMode, isAgentMode, resolveModelSelection, saveConfig, sessionDir,
+  type ApprovalMode, type AgentMode, type Mode, type ModelSelection, type ResolvedModelSelection, type SessionData, type SessionMeta,
 } from "../config.js";
 import { getWebSettings, updateWebSettings } from "./settings.js";
 import { isSeenIdentity, loadSeen, updateSeen, SEEN_LIMIT } from "./clientState.js";
@@ -628,18 +628,20 @@ function serveStatic(res: http.ServerResponse, pathname: string): void {
     sendText(res, 403, "Forbidden");
     return;
   }
-  fs.stat(filePath, (err, stat) => {
-    if (err || !stat.isFile()) {
+  // Send an immutable snapshot: the length and body must agree even while
+  // the development checkout changes or a filesystem stream adapter retries.
+  fs.readFile(filePath, (err, contents) => {
+    if (err) {
       sendText(res, 404, "Not found");
       return;
     }
     const type = MIME_TYPES[path.extname(filePath).toLowerCase()] ?? "application/octet-stream";
     res.writeHead(200, {
       "Content-Type": type,
-      "Content-Length": stat.size,
+      "Content-Length": contents.length,
       "Cache-Control": "no-cache",
     });
-    fs.createReadStream(filePath).pipe(res);
+    res.end(contents);
   });
 }
 
@@ -1143,7 +1145,10 @@ async function handleApi(
         }
         approvalMode = normalizeApprovalMode(input.approval_mode);
       }
-      const session = createWebSession(cwd, selection, approvalMode, mode, preset);
+      if (input.agent_mode !== undefined && (!isAgentMode(input.agent_mode) || (mode === "pro" && input.agent_mode !== "standard"))) {
+        throw new ApiError(400, "invalid agent mode", "invalid agent mode");
+      }
+      const session = createWebSession(cwd, selection, approvalMode, mode, preset, input.agent_mode as AgentMode | undefined);
       const key = session.start();
       webSessions.set(key, session);
       recordWorkspace(cwd, mode);
@@ -1284,6 +1289,7 @@ async function handleApi(
 
     let selection: ResolvedModelSelection | undefined;
     let preset: string | undefined;
+    let agentMode: AgentMode | undefined;
     try {
       const body = await readJsonBody(req);
       if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("invalid JSON body");
@@ -1291,6 +1297,11 @@ async function handleApi(
       if (requested !== undefined && mode !== "pro") selection = resolveModelSelection(requested);
       const requestedPreset = (body as { pro_preset?: unknown }).pro_preset;
       if (requestedPreset !== undefined && mode === "pro") preset = requireProPreset(requestedPreset);
+      const requestedMode = (body as { agent_mode?: unknown }).agent_mode;
+      if (requestedMode !== undefined) {
+        if (!isAgentMode(requestedMode) || (mode === "pro" && requestedMode !== "standard")) throw new Error("invalid agent mode");
+        agentMode = requestedMode;
+      }
     } catch (err) {
       sendJson(res, 400, { error: err instanceof Error ? err.message : "invalid model selection" });
       return true;
@@ -1300,6 +1311,15 @@ async function handleApi(
     const existing = hub.list(mode).find((entry) => entry.sessionId === id);
     if (existing) {
       const remote = hub.remoteAction(existing.key);
+      if (agentMode !== undefined && mode !== "pro") {
+        if (remote) {
+          const result = await remote("agent-mode", { mode: agentMode });
+          if (result.status !== 200) { sendJson(res, result.status, result.data); return true; }
+        } else {
+          const changed = hub.setAgentMode(existing.key, agentMode);
+          if (!changed.ok) { sendJson(res, 409, { error: changed.error }); return true; }
+        }
+      }
       if (remote && preset !== undefined) {
         const result = await remote("pro-preset", { preset });
         if (result.status !== 200) { sendJson(res, result.status, result.data); return true; }
@@ -1328,6 +1348,7 @@ async function handleApi(
       return true;
     }
     if (preset !== undefined) data.pro_preset = preset;
+    if (agentMode !== undefined) data.agent_mode = agentMode;
 
     const requested: ModelSelection | undefined = selection ? {
       provider: selection.provider, model: selection.model.name, intensity: selection.intensity,
@@ -1357,7 +1378,7 @@ async function handleApi(
     return true;
   }
 
-  const liveMatch = /^\/api\/live\/([^/]+)(?:\/(pause|resume|message|approve|close|model|pro-preset|approval-mode|clear))?$/.exec(pathname);
+  const liveMatch = /^\/api\/live\/([^/]+)(?:\/(pause|resume|message|approve|close|model|pro-preset|approval-mode|agent-mode|clear))?$/.exec(pathname);
   if (liveMatch) {
     const key = decodeURIComponent(liveMatch[1]);
     const action = liveMatch[2];
@@ -1388,7 +1409,7 @@ async function handleApi(
           return true;
         }
         try {
-          const body = ["approve", "approval-mode", "message", "model", "pro-preset"].includes(action)
+          const body = ["approve", "approval-mode", "agent-mode", "message", "model", "pro-preset"].includes(action)
             ? await readJsonBody(req) : {};
           const result = await remote(action, body);
           sendJson(res, result.status, result.data);
@@ -1406,6 +1427,17 @@ async function handleApi(
           if (!changed.ok) sendJson(res, 409, { error: changed.error });
           else sendJson(res, 200, { ok: true, snapshot: hub.snapshot(key) });
         } catch (error) { sendJson(res, 400, { error: error instanceof Error ? error.message : "invalid Pro preset" }); }
+        return true;
+      }
+      if (action === "agent-mode") {
+        try {
+          const body = await readJsonBody(req);
+          const value = (body as { mode?: unknown } | null)?.mode;
+          if (!isAgentMode(value) || mode === "pro") { sendJson(res, 400, { error: "invalid agent mode" }); return true; }
+          const changed = hub.setAgentMode(key, value);
+          if (!changed.ok) sendJson(res, 409, { error: changed.error });
+          else sendJson(res, 200, { ok: true, snapshot: hub.snapshot(key) });
+        } catch (error) { sendJson(res, 400, { error: error instanceof Error ? error.message : "invalid agent mode" }); }
         return true;
       }
       if (action === "approval-mode") {

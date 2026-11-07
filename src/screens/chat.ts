@@ -14,6 +14,9 @@ import {
   normalizeApprovalMode,
   planFirstEnabled,
   loadPrompt,
+  loadAgentPrompt,
+  normalizeAgentMode,
+  type AgentMode,
   saveSession,
   type ModelInfo,
   type SessionMessage,
@@ -158,6 +161,7 @@ export class ChatScreen extends Screen implements LiveAgent {
   loadedContext: ConversationContext | null = null;
   loadedApprovalMode: ApprovalMode | null = null;
   loadedPlan: PlanState | null = null;
+  loadedAgentMode: AgentMode | null = null;
   private approvalMode: ApprovalMode = "request";
 
   modelProvider = "DeepSeek";
@@ -189,6 +193,9 @@ export class ChatScreen extends Screen implements LiveAgent {
   private paused = false;
   private queued: string | null = null;
   private turnToken = 0;
+  private agentMode: AgentMode = "standard";
+  private activeAgentMode: AgentMode = "standard";
+  private turnAbort: AbortController | null = null;
   private inputValue = "";
   private cursor = 0;
   private scrollTop = 0;
@@ -262,6 +269,7 @@ export class ChatScreen extends Screen implements LiveAgent {
   onActivate(): void {
     if (this.initialized) return;
     this.initialized = true;
+    this.agentMode = normalizeAgentMode(this.loadedAgentMode);
     this.approvalMode = normalizeApprovalMode(this.loadedApprovalMode ?? loadConfig().approval_mode);
     const st = this.app.state;
     this.modelProvider = this.loadedProvider ?? st.selectedProvider;
@@ -353,6 +361,8 @@ export class ChatScreen extends Screen implements LiveAgent {
       model: this.model.name,
       intensity: this.intensity,
       approvalMode: this.approvalMode,
+      agentMode: this.agentMode,
+      activeAgentMode: this.busy ? this.activeAgentMode : this.agentMode,
       busy: this.busy,
       paused: this.paused,
       queued: this.queued,
@@ -393,6 +403,7 @@ export class ChatScreen extends Screen implements LiveAgent {
   livePause(): void {
     if (this.paused || (!this.busy && !this.queued)) return;
     this.paused = true;
+    this.turnAbort?.abort();
     this.turnToken++;
     // A queued decision would otherwise keep the agent awaiting forever.
     if (this.pendingApproval) this.settleApproval(false);
@@ -416,6 +427,13 @@ export class ChatScreen extends Screen implements LiveAgent {
     return true;
   }
 
+  liveSetAgentMode(mode: AgentMode): ModelChangeResult {
+    this.agentMode = mode;
+    this.save();
+    this.publishLive();
+    return { ok: true };
+  }
+
   liveSetApprovalMode(mode: ApprovalMode): void {
     if (this.approvalMode === mode) return;
     this.approvalMode = mode;
@@ -436,6 +454,7 @@ export class ChatScreen extends Screen implements LiveAgent {
       this.app.render();
       return;
     }
+    this.turnAbort?.abort();
     this.turnToken++;
     if (this.pendingApproval) this.settleApproval(false);
     this.busy = false;
@@ -746,7 +765,8 @@ export class ChatScreen extends Screen implements LiveAgent {
     if (!this.busy && !this.queued) return;
     this.paused = !this.paused;
     if (this.paused) {
-      this.turnToken++;
+      this.turnAbort?.abort();
+    this.turnToken++;
       this.busy = false;
       this.app.state.isThinking = false;
       this.retainStreamingContent();
@@ -850,7 +870,8 @@ export class ChatScreen extends Screen implements LiveAgent {
     await this.autoCompress(token);
     if (token !== this.turnToken) return;
 
-    const plan = await this.makePlan(token);
+    if (this.activeAgentMode !== "standard") this.plan = null;
+    const plan = this.activeAgentMode === "standard" ? await this.makePlan(token) : null;
     if (token !== this.turnToken) return;
 
     if (plan) {
@@ -938,6 +959,9 @@ export class ChatScreen extends Screen implements LiveAgent {
     this.busy = true;
     this.paused = false;
     this.app.state.isThinking = true;
+    this.activeAgentMode = this.agentMode;
+    this.turnAbort?.abort();
+    this.turnAbort = new AbortController();
     const token = ++this.turnToken;
     this.streamingContent = "";
     this.app.render();
@@ -980,7 +1004,8 @@ export class ChatScreen extends Screen implements LiveAgent {
   private buildApiMessages(messages = this.messages, directive = ""): ApiMessage[] {
     // A step directive extends the system prompt rather than adding a user
     // message: the plan is an instruction, not something the user just said.
-    const system = directive ? `${loadPrompt()}\n\n${directive}` : loadPrompt();
+    const prompt = loadAgentPrompt(this.activeAgentMode);
+    const system = directive ? `${prompt}\n\n${directive}` : prompt;
     const api: ApiMessage[] = [{ role: "system", content: system }];
     for (const m of modelHistory(messages, this.context)) {
       if (m.role === "user" || m.role === "assistant") {
@@ -1002,6 +1027,8 @@ export class ChatScreen extends Screen implements LiveAgent {
    * because a planned turn runs this once per step.
    */
   private async agentLoop(apiMessages: ApiMessage[], token: number, approvalContext: ApprovalContext): Promise<boolean> {
+    const tools = this.activeAgentMode === "ptc"
+      ? [...TOOLS, (await import("../llm/codemode.js")).getCodeToolDefinition()] : TOOLS;
     try {
       while (true) {
         if (token !== this.turnToken) return false;
@@ -1013,7 +1040,7 @@ export class ChatScreen extends Screen implements LiveAgent {
         let hasContent = false;
         let aborted = false;
 
-        for await (const chunk of client.streamTurn(apiMessages, TOOLS, {
+        for await (const chunk of client.streamTurn(apiMessages, tools, {
           // A retried request can go quiet for up to 160s, so the status line
           // says why instead of looking hung. The moment the user pauses or a
           // newer turn takes over, the backoff is dropped instead of waited out.
@@ -1169,17 +1196,22 @@ export class ChatScreen extends Screen implements LiveAgent {
     tool: string,
     args: Record<string, unknown>,
     context = captureApprovalContext(this.messages),
+    signal = this.turnAbort?.signal,
   ): Promise<ApprovalDecision> {
     const risk = assessToolCall(tool, args, this.liveDir);
     if (!risk) return { approved: true, source: "prompt", reason: "routine call" };
+    const approvalToken = this.turnToken;
+    const cancelled = () => approvalToken !== this.turnToken || this.paused || signal?.aborted === true;
     const gate = new ApprovalGate({
-      askHuman: () => this.askHuman(tool, args, risk),
+      cancelled,
+      askHuman: () => cancelled() ? Promise.resolve(false) : this.askHuman(tool, args, risk),
       reviewer: () => this.reviewerModel(),
       autoApprovalEnabled: () => this.approvalMode === "auto",
       extremeAutoApprovalEnabled: () => loadConfig().auto_approve_extreme_risk === true,
       // Reviews happen before any card is shown, so without this the app looks
       // frozen while the independent assessments run.
       onReview: (info) => {
+        if (cancelled()) return;
         this.reviewing = info ? {
           total: info.total, round: info.round ?? 1, rounds: info.rounds ?? 1,
           request: liveApprovalDetails(tool, args, risk, this.liveDir),
@@ -1198,7 +1230,15 @@ export class ChatScreen extends Screen implements LiveAgent {
         );
       },
     });
-    return gate.decide({ tool, args, cwd: this.liveDir, ...context, risk });
+    const abortApproval = () => {
+      if (this.pendingApproval?.args === args) this.settleApproval(false);
+    };
+    signal?.addEventListener("abort", abortApproval, { once: true });
+    try {
+      return await gate.decide({ tool, args, cwd: this.liveDir, ...context, risk });
+    } finally {
+      signal?.removeEventListener("abort", abortApproval);
+    }
   }
 
   /** Park the turn until the user answers; the header turns orange meanwhile. */
@@ -1303,6 +1343,57 @@ export class ChatScreen extends Screen implements LiveAgent {
     };
   }
 
+  private async runProgram(args: Record<string, unknown>, token: number, apiMessages: ApiMessage[], approvalContext: ApprovalContext): Promise<string> {
+    if (this.activeAgentMode !== "ptc") return "[Error: execute_ts requires PTC mode]";
+    const { executeCodeProgram, ProgramToolDenied } = await import("../llm/codemode.js");
+    const signal = this.turnAbort?.signal;
+    const cancelled = () => token !== this.turnToken || this.paused || signal?.aborted;
+    const result = await executeCodeProgram(args, {
+      signal,
+      onPlan: plan => {
+        if (cancelled()) return;
+        this.plan = plan;
+        this.save(); this.publishLive();
+        this.app.render();
+      },
+      onStep: (index, status) => { if (!cancelled()) this.setStep(index, status); },
+      call: async (name, callArgs, programSignal) => {
+        if (cancelled() || programSignal?.aborted) throw new Error("Execution cancelled");
+        const message: ToolMsg = { role: "tool", name, arguments: callArgs, result: "…" };
+        this.messages.push(message);
+        this.save(); this.publishLive();
+        this.app.render();
+        const stopApproval = () => {
+          if (this.pendingApproval?.args !== callArgs) return;
+          this.settleApproval(false);
+        };
+        programSignal?.addEventListener("abort", stopApproval, { once: true });
+        try {
+          const decision = await this.requestApproval(name, callArgs, {
+            ...approvalContext, context: captureApprovalContext(apiMessages).context,
+          }, programSignal);
+          if (cancelled() || programSignal?.aborted) throw new Error("Execution cancelled");
+          if (!decision.approved) {
+            message.result = `[Not executed: ${decision.reason}]`;
+            throw new ProgramToolDenied(`Approval denied: ${decision.reason}. Do not retry or work around this denial.`);
+          }
+          const value = await this.runTool(name, callArgs, message, token, apiMessages, approvalContext, programSignal);
+          message.result = value;
+          if (cancelled() || programSignal?.aborted) throw new Error("Execution cancelled");
+          return value;
+        } catch (error) {
+          if (message.result === "…") message.result = `[Error: ${error instanceof Error ? error.message : String(error)}]`;
+          throw error;
+        } finally {
+          programSignal?.removeEventListener("abort", stopApproval);
+          if (this.messages.includes(message)) { this.save(); this.publishLive(); this.app.render(); }
+        }
+      },
+    });
+    if (!cancelled()) { this.save(); this.publishLive(); this.app.render(); }
+    return result;
+  }
+
   // ---- sub-agents ------------------------------------------------------
 
   /**
@@ -1317,9 +1408,11 @@ export class ChatScreen extends Screen implements LiveAgent {
     token: number,
     apiMessages: ApiMessage[],
     approvalContext: ApprovalContext,
+    signal = this.turnAbort?.signal,
   ): Promise<string> {
-    if (name !== DELEGATE_TOOL) return executeTool(name, args, this.liveDir);
-    return this.delegate(args, toolMsg, token, apiMessages, approvalContext);
+    if (name === "execute_ts") return this.runProgram(args, token, apiMessages, approvalContext);
+    if (name !== DELEGATE_TOOL) return executeTool(name, args, this.liveDir, signal);
+    return this.delegate(args, toolMsg, token, apiMessages, approvalContext, signal);
   }
 
   /**
@@ -1336,6 +1429,7 @@ export class ChatScreen extends Screen implements LiveAgent {
     token: number,
     apiMessages: ApiMessage[],
     approvalContext: ApprovalContext,
+    signal = this.turnAbort?.signal,
   ): Promise<string> {
     const task = String(args.task ?? "").trim();
     if (!task) return "[Error: delegate needs a task: what should the sub-agent do?]";
@@ -1348,11 +1442,11 @@ export class ChatScreen extends Screen implements LiveAgent {
       task: buildSubAgentTask({ task, context, cwd: this.liveDir, rounds: maxRounds }),
       tools: SUB_AGENT_TOOLS,
       maxRounds,
-      approve: (name, callArgs) => this.requestApproval(name, callArgs, approval),
+      approve: (name, callArgs) => this.requestApproval(name, callArgs, approval, signal),
       execute: (name, callArgs) =>
         name === DELEGATE_TOOL
           ? Promise.resolve("[Error: sub-agents cannot delegate further]")
-          : executeTool(name, callArgs, this.liveDir),
+          : executeTool(name, callArgs, this.liveDir, signal),
       onProgress: (label) => {
         this.subagent = label;
         // The tool block is what a reader of the transcript sees while the child
@@ -1371,7 +1465,7 @@ export class ChatScreen extends Screen implements LiveAgent {
           `(attempt ${notice.attempt}/${notice.attempts})`;
         this.app.render();
       },
-      cancelled: () => token !== this.turnToken || this.paused,
+      cancelled: () => token !== this.turnToken || this.paused || signal?.aborted === true,
     });
     // The final report replaces the live marker, and the status line goes back
     // to the parent's own state.
@@ -1669,6 +1763,9 @@ export class ChatScreen extends Screen implements LiveAgent {
         this.context,
         this.approvalMode,
         this.plan,
+        "standard",
+        undefined,
+        this.agentMode,
       );
       this.saveError = null;
       return true;

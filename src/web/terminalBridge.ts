@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import http from "node:http";
-import { resolveModelSelection, type Mode } from "../config.js";
+import { resolveModelSelection, isAgentMode, type Mode } from "../config.js";
 import type { TerminalBridgeInfo } from "../background.js";
 import { hub, type LiveAgent, type LiveMeta, type LiveSnapshot } from "./hub.js";
 
@@ -70,6 +70,10 @@ export async function startTerminalBridge(): Promise<TerminalBridgeInfo & { clos
       } else if (action === "approval-mode") {
         if (body.mode !== "request" && body.mode !== "auto") throw new Error("mode must be request or auto");
         if (!hub.setApprovalMode(key, body.mode)) { sendJson(res, 409, { error: "this session cannot change approval mode" }); return; }
+      } else if (action === "agent-mode") {
+        if (!isAgentMode(body.mode)) throw new Error("invalid agent mode");
+        const result = hub.setAgentMode(key, body.mode);
+        if (!result.ok) { sendJson(res, 409, { error: result.error }); return; }
       } else if (action === "model") {
         const result = hub.configure(key, resolveModelSelection(body));
         if (!result.ok) { sendJson(res, 409, { error: result.error }); return; }

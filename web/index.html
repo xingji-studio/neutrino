@@ -129,6 +129,16 @@
           <div class="composer-inner">
             <div class="composer-card">
               <textarea id="input" rows="1" placeholder="Message Neutrino…" aria-label="Message" data-i18n-placeholder="Message Neutrino…"></textarea>
+              <details id="agent-mode-picker" class="agent-mode-picker">
+                <summary aria-label="Agent mode" data-i18n-aria-label="Agent mode"><strong id="agent-mode-label" data-i18n="Standard mode">Standard mode</strong><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg></summary>
+                <div class="agent-mode-menu" role="menu" aria-label="Agent mode" data-i18n-aria-label="Agent mode">
+                  <button type="button" role="menuitemradio" aria-checked="true" data-agent-mode="standard"><span><strong data-i18n="Standard mode">Standard mode</strong><small data-i18n="Full-featured Agent for every scenario">Full-featured Agent for every scenario</small></span><svg class="agent-mode-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg></button>
+                  <button type="button" role="menuitemradio" aria-checked="false" data-agent-mode="ptc"><span><strong data-i18n="PTC mode">PTC mode</strong><small data-i18n="All standard capabilities, with code-based planning to save tokens">All standard capabilities, with code-based planning to save tokens</small></span><svg class="agent-mode-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg></button>
+                  <button type="button" role="menuitemradio" aria-checked="false" data-agent-mode="fast"><span><strong data-i18n="Fast mode">Fast mode</strong><small data-i18n="Less thinking and fewer calls for quick answers">Less thinking and fewer calls for quick answers</small></span><svg class="agent-mode-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg></button>
+                  <button type="button" role="menuitemradio" aria-checked="false" data-agent-mode="pro"><span><strong data-i18n="Professional mode">Professional mode</strong><small data-i18n="Assign tasks to the best-suited models so multiple models complement each other">Assign tasks to the best-suited models so multiple models complement each other</small></span><svg class="agent-mode-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg></button>
+                </div>
+                <p id="agent-mode-feedback" class="agent-mode-feedback" role="status" aria-live="polite"></p>
+              </details>
               <details id="model-picker" class="model-picker pro-preset-control hidden">
                 <summary id="model-picker-summary" aria-label="Conversation model" data-i18n-aria-label="Conversation model"><span id="model-picker-label"></span><svg class="pro-preset-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg></summary>
                 <div class="pro-preset-card model-picker-card">

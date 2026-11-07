@@ -14,7 +14,7 @@
  */
 
 import type { ConversationContext } from "../compact.js";
-import { normalizeMode, type ApprovalMode, type Mode, type ResolvedModelSelection } from "../config.js";
+import { normalizeMode, type ApprovalMode, type Mode, type AgentMode, type ResolvedModelSelection } from "../config.js";
 import type { RiskAssessment } from "../llm/risk.js";
 import type { PlanState } from "../llm/plan.js";
 import type { ProFallback } from "../pro/config.js";
@@ -90,6 +90,9 @@ export interface LiveMeta {
   /** What a running sub-agent is doing right now, or null when none is running. */
   subagent?: string | null;
   approvalMode?: ApprovalMode;
+  agentMode?: AgentMode;
+  /** Strategy frozen for the running turn; agentMode selects the next turn. */
+  activeAgentMode?: AgentMode;
   pro?: {
     preset: string;
     checking: boolean;
@@ -134,6 +137,7 @@ export interface LiveAgent {
   /** Answer a pending approval. Returns false when nothing was pending. */
   liveApprove?(approved: boolean): boolean;
   liveSetApprovalMode?(mode: ApprovalMode): void;
+  liveSetAgentMode?(mode: AgentMode): ModelChangeResult;
   /** Empty the conversation in place (a new chat in the same folder). */
   liveClear?(): void;
   /** Apply a server-resolved choice to future turns, while idle or paused. */
@@ -325,6 +329,14 @@ class LiveHub {
     const entry = this.entries.get(key);
     if (!entry?.agent.liveSetProPreset) return { ok: false, error: "this session cannot change Pro presets" };
     const result = entry.agent.liveSetProPreset(preset);
+    if (result.ok) this.notify(key);
+    return result;
+  }
+
+  setAgentMode(key: string, mode: AgentMode): ModelChangeResult {
+    const entry = this.entries.get(key);
+    if (!entry?.agent.liveSetAgentMode) return { ok: false, error: "this session cannot change agent mode" };
+    const result = entry.agent.liveSetAgentMode(mode);
     if (result.ok) this.notify(key);
     return result;
   }
