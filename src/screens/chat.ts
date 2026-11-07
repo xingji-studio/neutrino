@@ -32,7 +32,7 @@ import { computeInputWindow, cursorFromColumn, drawInputBox, drawScrollbar, wrap
 import { drawSpans, renderMarkdownText, type Line, type Span } from "../markdown.js";
 import { ellipsize, displayWidth } from "../width.js";
 import { sanitizeText } from "../sanitize.js";
-import { TaskRuntime, currentTask, linkSignals, taskLimits, resumeTaskSnapshot, type AgentStatus, type TaskSnapshot } from "../llm/runtime.js";
+import { TaskRuntime, TaskControlError, currentTask, linkSignals, taskLimits, taskBudgetScope, resumeTaskSnapshot, type AgentStatus, type TaskSnapshot } from "../llm/runtime.js";
 import { prepareContext, outputAllowance, finalTaskReport } from "../llm/context.js";
 import { FINISH_STEP_TOOL, FINISH_STEP_DEFINITION, finishPlanStep, preparePlan, settlePlan } from "../llm/plan.js";
 import { LLMClient, describeError } from "../llm/client.js";
@@ -890,6 +890,7 @@ export class ChatScreen extends Screen implements LiveAgent {
     const runtime = new TaskRuntime({
       request: approvalContext.prompt, priorUserRequests: approvalContext.priorUserRequests,
       cwd: this.liveDir, signal: this.turnAbort?.signal, limits: taskLimits(loadConfig("standard")),
+      budgetScope: taskBudgetScope(loadConfig("standard")),
       journalDir: path.join(sessionDir("standard"), "tasks", path.basename(this.sessionId || "unsaved")),
     });
     this.taskRuntime = runtime;
@@ -1174,7 +1175,7 @@ export class ChatScreen extends Screen implements LiveAgent {
         if (client.outcome?.error?.code.endsWith("_budget") && currentTask()) {
           const report = await finalTaskReport(currentTask()!.runtime,
             () => new LLMClient(this.model, this.modelProvider, this.intensity),
-            usage => { this.tokens.prompt += usage.prompt; this.tokens.completion += usage.completion; });
+            usage => { this.tokens.prompt += usage.prompt; this.tokens.completion += usage.completion; }, apiMessages);
           if (token !== this.turnToken || this.paused) return false;
           this.taskOutcome = "partial";
           this.streamingContent = null;
@@ -1256,7 +1257,13 @@ export class ChatScreen extends Screen implements LiveAgent {
             continue;
           }
 
-          const result = await this.runTool(tc.name, args, toolMsg, token, apiMessages, approvalContext);
+          let result: string;
+          try { result = await this.runTool(tc.name, args, toolMsg, token, apiMessages, approvalContext); }
+          catch (error) {
+            toolMsg.result = `[Not executed: ${describeError(error)}]`;
+            this.save();
+            throw error;
+          }
           // A clear starts a different transcript while an old tool may finish.
           if (!this.messages.includes(toolMsg)) return false;
           toolMsg.result = result;
@@ -1270,6 +1277,16 @@ export class ChatScreen extends Screen implements LiveAgent {
       return true;
     } catch (e) {
       if (token !== this.turnToken) return false;
+      if (e instanceof TaskControlError && e.code.endsWith("_budget") && currentTask()) {
+        const report = await finalTaskReport(currentTask()!.runtime,
+          () => new LLMClient(this.model, this.modelProvider, this.intensity),
+          usage => { this.tokens.prompt += usage.prompt; this.tokens.completion += usage.completion; }, apiMessages);
+        if (token !== this.turnToken || this.paused) return false;
+        this.taskOutcome = "partial";
+        this.streamingContent = null;
+        this.messages.push({ role: "assistant", content: report });
+        return false;
+      }
       this.taskOutcome = "failed";
       const err = describeError(e);
       this.messages.push({ role: "assistant", content: (this.streamingContent ?? "") + `\n[Error: ${err}]` });

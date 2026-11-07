@@ -210,7 +210,8 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRun
   const owned = !options.runtime && !inherited;
   const controller = new AbortController();
   const linked = linkSignals(runtime.signal, options.signal, controller.signal);
-  const cancelled = () => linked.signal.aborted || options.cancelled?.() === true;
+  let scopeSignal: AbortSignal | undefined;
+  const cancelled = () => linked.signal.aborted || scopeSignal?.aborted === true || options.cancelled?.() === true;
   const poll = options.cancelled ? setInterval(() => {
     if (options.cancelled?.()) controller.abort("The parent turn was paused or replaced");
   }, 50) : undefined;
@@ -238,8 +239,16 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRun
     runtime.recordResult(result);
     return result;
   };
+  const stopped = (): SubAgentRun => {
+    const reason = scopeSignal?.reason;
+    if (reason instanceof TaskControlError && reason.code.endsWith("_budget")) {
+      return finish(evidence.length ? "partial" : "blocked", { code: reason.code, message: reason.message });
+    }
+    return finish("cancelled");
+  };
   const loop = async (): Promise<SubAgentRun> => {
     runId = currentTask()?.runId ?? runId;
+    scopeSignal = currentTask()?.signal;
     const messages: SubAgentMessage[] = [
       { role: "system", content: `${options.system}\n\n${runtime.instructions()}` },
       { role: "user", content: options.task },
@@ -250,7 +259,7 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRun
     let emptyReplies = 0;
     for (let round = 1; round <= maxRounds; round++) {
       rounds = round;
-      if (cancelled()) return finish("cancelled");
+      if (cancelled()) return stopped();
       const wrapUp = round === maxRounds;
       const availableTools = wrapUp ? [] : tools;
       const capacity = Number.isSafeInteger(options.contextWindow) && options.contextWindow! > 0 ? options.contextWindow! : 1_000_000;
@@ -260,7 +269,7 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRun
         onUsage: options.onUsage, onProgress: () => options.onProgress?.("compressing context"),
       });
       lastPromptTokens = 0;
-      if (cancelled()) return finish("cancelled");
+      if (cancelled()) return stopped();
       if (wrapUp) messages.push({ role: "user", content:
         "This is the final round and no tools are available. Write your report now from actual evidence and state what remains unverified. Do not claim unfinished work is complete.",
       });
@@ -271,13 +280,14 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRun
         signal: linked.signal, onRetry: options.onRetry, cancelled,
         maxOutputTokens: outputAllowance(capacity), final: wrapUp,
       })) {
-        if (cancelled()) return finish("cancelled");
+        if (cancelled()) return stopped();
         content += chunk;
       }
       if (client.usage) { options.onUsage?.(client.usage); lastPromptTokens = client.usage.prompt; }
-      if (cancelled() || client.outcome?.status === "cancelled") return finish("cancelled");
+      if (cancelled() || client.outcome?.status === "cancelled") return stopped();
       if (client.outcome?.status === "failed" || (!client.outcome && /^\s*\[Error:/.test(content))) {
-        return finish(evidence.length ? "partial" : "failed", client.outcome?.error ?? { code: "model_error", message: content.trim() });
+        return finish(evidence.length ? "partial" : client.outcome?.error?.code.endsWith("_budget") ? "blocked" : "failed",
+          client.outcome?.error ?? { code: "model_error", message: content.trim() });
       }
       const toolCalls = wrapUp ? [] : client.toolCalls;
       if (!content.trim() && !toolCalls.length) {
@@ -294,7 +304,7 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRun
       });
       if (!toolCalls.length) return finish(wrapUp ? "partial" : denied ? "blocked" : "completed", undefined, wrapUp);
       for (const call of toolCalls) {
-        if (cancelled()) return finish("cancelled");
+        if (cancelled()) return stopped();
         const args = parseArgs(call.arguments);
         calls++;
         options.onProgress?.(call.name);
@@ -311,7 +321,7 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRun
         } else {
           runtime.assertTool(call.name, args);
           const decision = await options.approve(call.name, args);
-          if (cancelled()) return finish("cancelled");
+          if (cancelled()) return stopped();
           if (decision.approved) result = await runtime.tool(call.name, args, () => options.execute(call.name, args));
           else {
             denied++;
@@ -322,7 +332,7 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRun
         }
         evidence.push(evidenceFor(call.name, args, result));
         messages.push({ role: "tool", tool_call_id: call.id, content: result });
-        if (cancelled()) return finish("cancelled");
+        if (cancelled()) return stopped();
       }
     }
     return finish("partial", undefined, true);
@@ -333,7 +343,8 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRun
       { readOnly: options.readOnly, writePaths: options.writePaths });
   } catch (error) {
     const code = error instanceof TaskControlError ? error.code : "agent_error";
-    return finish(cancelled() || code === "cancelled" ? "cancelled" : evidence.length ? "partial" : "failed",
+    if (cancelled()) return stopped();
+    return finish(code === "cancelled" ? "cancelled" : evidence.length ? "partial" : code.endsWith("_budget") ? "blocked" : "failed",
       { code, message: describeError(error) });
   } finally {
     if (poll) clearInterval(poll);

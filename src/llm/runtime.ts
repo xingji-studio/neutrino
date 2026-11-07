@@ -23,6 +23,22 @@ export interface TaskLimits {
   tokens: number;
   durationMs: number;
 }
+export type TaskBudgetScope = "task" | "delegation";
+export function taskBudgetScope(config: Record<string, unknown>): TaskBudgetScope {
+  const scope = config.task_budget_scope;
+  if (scope === undefined || scope === "delegation") return "delegation";
+  if (scope === "task") return "task";
+  throw new TaskControlError("invalid_budget_scope", "task_budget_scope must be task or delegation");
+}
+export interface TaskBudgetStop {
+  code: string;
+  scope: TaskBudgetScope;
+  limit: number;
+  used: number;
+  requested: number;
+  reserved?: number;
+  runId: string;
+}
 export const DEFAULT_TASK_LIMITS: Readonly<TaskLimits> = Object.freeze({
   agentRuns: 24, modelRequests: 128, toolCalls: 256, tokens: 2_000_000, durationMs: 30 * 60_000,
 });
@@ -68,6 +84,9 @@ export interface TaskSnapshot {
   state: "running" | "cancelling" | AgentStatus;
   counts: { agentRuns: number; modelRequests: number; toolCalls: number; tokens: number };
   limits: TaskLimits;
+  budgetScope?: TaskBudgetScope;
+  delegatedCounts?: { modelRequests: number; toolCalls: number; tokens: number };
+  budgetStop?: TaskBudgetStop;
   journal?: string;
   persistenceError?: string;
 }
@@ -116,7 +135,7 @@ function within(file: string, base: string): boolean {
   return relative === "" || (!path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`));
 }
 
-/** One user turn owns one ledger, cancellation signal and budget, across all roles. */
+/** One user turn owns one ledger and cancellation tree, with optional root limits. */
 export class TaskRuntime {
   readonly rootRunId = randomUUID();
   readonly signal: AbortSignal;
@@ -124,16 +143,23 @@ export class TaskRuntime {
   readonly priorUserRequests: readonly string[];
   readonly cwd: string;
   readonly limits: Readonly<TaskLimits>;
+  readonly budgetScope: TaskBudgetScope;
   readonly root: TaskScope;
   readonly evidence: ToolEvidence[] = [];
   readonly results: AgentResult[] = [];
   plan?: PlanState;
   private readonly controller = new AbortController();
-  private readonly deadline: ReturnType<typeof setTimeout>;
+  private readonly deadline?: ReturnType<typeof setTimeout>;
+  private readonly delegationController = new AbortController();
+  private delegationDeadline?: ReturnType<typeof setTimeout>;
+  private delegationStarted?: number;
   private readonly started = Date.now();
   private readonly pending = new Set<Promise<unknown>>();
   private readonly usage = { agentRuns: 0, modelRequests: 0, toolCalls: 0, tokens: 0 };
+  private readonly delegatedUsage = { modelRequests: 0, toolCalls: 0, tokens: 0 };
   private reservedTokens = 0;
+  private delegatedReservedTokens = 0;
+  private budgetStop?: TaskBudgetStop;
   private state: TaskSnapshot["state"] = "running";
   private persistenceError?: string;
   private readonly journal?: string;
@@ -143,9 +169,13 @@ export class TaskRuntime {
 
   constructor(options: {
     request: string; cwd?: string; priorUserRequests?: readonly string[]; limits?: Partial<TaskLimits>;
+    budgetScope?: TaskBudgetScope;
     signal?: AbortSignal; readOnly?: boolean; writePaths?: readonly string[]; journalDir?: string;
   }) {
     this.signal = this.controller.signal;
+    // Direct runtime callers retain strict limits. Conversation drivers opt into
+    // delegation-only limits so normal main-agent work can reach completion.
+    this.budgetScope = options.budgetScope ?? "task";
     this.originalRequest = options.request;
     this.priorUserRequests = Object.freeze([...(options.priorUserRequests ?? [])]);
     this.cwd = path.resolve(options.cwd || process.cwd());
@@ -163,9 +193,12 @@ export class TaskRuntime {
       this.detachSignal = () => options.signal!.removeEventListener("abort", abort);
       if (options.signal.aborted) abort();
     }
-    this.deadline = setTimeout(() => this.cancel("Task time budget exceeded"), this.limits.durationMs);
-    this.deadline.unref();
-    this.event("started", { request: this.originalRequest, priorUserRequests: this.priorUserRequests, cwd: this.cwd, limits: this.limits });
+    if (this.budgetScope === "task") {
+      this.deadline = setTimeout(() => this.expireTask(), this.limits.durationMs);
+      this.deadline.unref();
+    }
+    this.event("started", { request: this.originalRequest, priorUserRequests: this.priorUserRequests,
+      cwd: this.cwd, limits: this.limits, budgetScope: this.budgetScope });
   }
 
   run<T>(callback: () => T): T { return storage.run(this.root, callback); }
@@ -183,20 +216,35 @@ export class TaskRuntime {
     if (parent.signal.aborted) throw new TaskControlError("cancelled", "The parent task was cancelled");
     const fingerprint = createHash("sha256").update(`${role}\0${task.trim().replace(/\s+/g, " ")}`).digest("hex");
     if (parent.ancestors.includes(fingerprint)) throw new TaskControlError("delegation_cycle", "Repeated task in the delegation ancestry; finish locally instead of delegating it again");
-    if (this.usage.agentRuns >= this.limits.agentRuns) throw new TaskControlError("agent_budget", "Shared sub-agent budget exhausted");
+    if (this.usage.agentRuns >= this.limits.agentRuns) throw this.stopBudget("agent_budget", "Shared sub-agent budget exhausted", this.limits.agentRuns, this.usage.agentRuns, 1, "delegation");
+    if (this.budgetScope === "delegation") {
+      if (this.delegationController.signal.aborted) throw this.delegationController.signal.reason;
+      if (!this.delegationDeadline) {
+        this.delegationStarted = Date.now();
+        this.delegationDeadline = setTimeout(() => {
+          const error = this.stopBudget("duration_budget", "Shared sub-agent time budget exhausted",
+            this.limits.durationMs, Date.now() - this.delegationStarted!, 0, "delegation");
+          this.delegationController.abort(error);
+        }, this.limits.durationMs);
+        this.delegationDeadline.unref();
+      }
+    }
+    const linked = linkSignals(parent.signal, this.budgetScope === "delegation" ? this.delegationController.signal : undefined);
     const groups = [...parent.policy.writePathGroups];
     if (options.writePaths) groups.push(Object.freeze(options.writePaths.map(p => realPath(path.resolve(this.cwd, p)))));
-    const scope: TaskScope = Object.freeze({ runtime: this, signal: parent.signal, runId: randomUUID(), parentRunId: parent.runId, role,
+    const scope: TaskScope = Object.freeze({ runtime: this, signal: linked.signal, runId: randomUUID(), parentRunId: parent.runId, role,
       depth: parent.depth + 1, ancestors: Object.freeze([...parent.ancestors, fingerprint]),
       policy: Object.freeze({ readOnly: parent.policy.readOnly || options.readOnly === true, writePathGroups: Object.freeze(groups) }) });
     this.usage.agentRuns++;
     this.event("agent_started", { runId: scope.runId, parentRunId: parent.runId, role, task, depth: scope.depth });
-    return storage.run(scope, () => callback(scope));
+    try { return await storage.run(scope, () => callback(scope)); }
+    finally { linked.dispose(); }
   }
 
   check(): void {
     if (this.signal.aborted) throw new TaskControlError("cancelled", String(this.signal.reason ?? "Task cancelled"));
-    if (Date.now() - this.started >= this.limits.durationMs) { this.cancel("Task time budget exceeded"); this.check(); }
+    if (this.budgetScope === "task" && Date.now() - this.started >= this.limits.durationMs) { this.expireTask(); this.check(); }
+    if (this.isDelegated() && this.delegationController.signal.aborted) throw this.delegationController.signal.reason;
   }
   cancel(reason = "Task cancelled"): void {
     if (this.signal.aborted) return;
@@ -222,11 +270,14 @@ export class TaskRuntime {
   finish(status: AgentStatus): void {
     this.state = this.signal.aborted ? "cancelled" : status;
     clearTimeout(this.deadline);
+    clearTimeout(this.delegationDeadline);
     this.detachSignal?.();
     this.event("finished", { ...this.snapshot(), plan: this.plan });
   }
   snapshot(): TaskSnapshot {
     return { rootRunId: this.rootRunId, state: this.state, counts: { ...this.usage }, limits: { ...this.limits },
+      budgetScope: this.budgetScope, delegatedCounts: { ...this.delegatedUsage },
+      ...(this.budgetStop ? { budgetStop: { ...this.budgetStop } } : {}),
       ...(this.journal ? { journal: this.journal } : {}), ...(this.persistenceError ? { persistenceError: this.persistenceError } : {}) };
   }
   instructions(scope = currentTask() ?? this.root): string {
@@ -255,8 +306,13 @@ export class TaskRuntime {
   }
   async tool(name: string, args: Record<string, unknown>, execute: () => Promise<string>): Promise<string> {
     this.assertTool(name, args);
-    if (this.usage.toolCalls >= this.limits.toolCalls) throw new TaskControlError("tool_budget", "Shared tool-call budget exhausted");
+    const delegated = this.isDelegated();
+    const charged = this.budgetScope === "task" ? this.usage : this.delegatedUsage;
+    if ((this.budgetScope === "task" || delegated) && charged.toolCalls >= this.limits.toolCalls) {
+      throw this.stopBudget("tool_budget", "Shared tool-call budget exhausted", this.limits.toolCalls, charged.toolCalls, 1);
+    }
     this.usage.toolCalls++;
+    if (delegated) this.delegatedUsage.toolCalls++;
     const scope = currentTask() ?? this.root;
     const resultStart = this.results.length;
     const id = randomUUID();
@@ -266,9 +322,9 @@ export class TaskRuntime {
     catch (error) {
       result = `[Error: ${error instanceof Error ? error.message : String(error)}]`;
     }
-    const delegated = ["delegate", "call_pro_agent"].includes(name) ? this.results.slice(resultStart).at(-1) : undefined;
+    const delegatedResult = ["delegate", "call_pro_agent"].includes(name) ? this.results.slice(resultStart).at(-1) : undefined;
     this.recordTool(name, args, result, scope.signal.aborted ? "cancelled" :
-      (delegated && delegated.status !== "completed") || /^\[Error:|^Error:|\[exit code: (?!0\])/m.test(result) ? "failed" : "completed", id, scope.runId);
+      (delegatedResult && delegatedResult.status !== "completed") || /^\[Error:|^Error:|\[exit code: (?!0\])/m.test(result) ? "failed" : "completed", id, scope.runId);
     return result;
   }
   recordTool(name: string, args: Record<string, unknown>, result: string, status: ToolEvidence["status"], id = randomUUID(), runId = currentTask()?.runId ?? this.rootRunId): ToolEvidence {
@@ -289,22 +345,52 @@ export class TaskRuntime {
   request(inputTokens: number, outputTokens: number, final = false): { settle(used: number): void } {
     this.check();
     if (currentTask()?.signal.aborted) throw new TaskControlError("cancelled", "This task was cancelled");
-    const rootReport = final && (currentTask()?.runId ?? this.rootRunId) === this.rootRunId;
-    const reserveRequests = rootReport || this.limits.modelRequests === 1 ? 0 : 1;
+    const delegated = this.isDelegated();
+    const enforce = this.budgetScope === "task" || delegated;
+    const charged = this.budgetScope === "task" ? this.usage : this.delegatedUsage;
+    const held = this.budgetScope === "task" ? this.reservedTokens : this.delegatedReservedTokens;
+    const reporting = final && (this.budgetScope === "delegation" || (currentTask()?.runId ?? this.rootRunId) === this.rootRunId);
+    const reserveRequests = reporting || this.limits.modelRequests === 1 ? 0 : 1;
     const reserve = Math.max(1, Math.ceil(inputTokens)) + Math.max(1, Math.ceil(outputTokens));
-    if (this.usage.modelRequests >= this.limits.modelRequests - reserveRequests) throw new TaskControlError("request_budget", "Shared model-request budget exhausted; report the work completed so far");
-    if (this.usage.tokens + this.reservedTokens + reserve > this.limits.tokens) throw new TaskControlError("token_budget", "Shared token budget cannot accommodate this request");
+    if (enforce && charged.modelRequests >= this.limits.modelRequests - reserveRequests) {
+      throw this.stopBudget("request_budget", "Shared model-request budget exhausted", this.limits.modelRequests, charged.modelRequests, 1, this.budgetScope, reserveRequests, final && !delegated);
+    }
+    if (enforce && charged.tokens + held + reserve > this.limits.tokens) {
+      throw this.stopBudget("token_budget", "Shared token budget cannot accommodate this request", this.limits.tokens, charged.tokens, reserve, this.budgetScope, held, final && !delegated);
+    }
     this.usage.modelRequests++;
     this.reservedTokens += reserve;
-    this.event("model_started", { runId: currentTask()?.runId ?? this.rootRunId, request: this.usage.modelRequests, inputTokens, outputTokens });
+    if (delegated) { this.delegatedUsage.modelRequests++; this.delegatedReservedTokens += reserve; }
+    this.event("model_started", { runId: currentTask()?.runId ?? this.rootRunId, request: this.usage.modelRequests,
+      inputTokens, outputTokens, delegated });
     let settled = false;
     return { settle: used => {
       if (settled) return;
       settled = true;
       this.reservedTokens -= reserve;
       this.usage.tokens += Math.max(0, Math.ceil(used));
+      if (delegated) {
+        this.delegatedReservedTokens -= reserve;
+        this.delegatedUsage.tokens += Math.max(0, Math.ceil(used));
+      }
       this.event("model_finished", { runId: currentTask()?.runId ?? this.rootRunId, tokens: used });
     } };
+  }
+  private isDelegated(): boolean {
+    const scope = currentTask();
+    return scope?.runtime === this && scope.depth > 0;
+  }
+  private expireTask(): void {
+    if (this.signal.aborted) return;
+    const error = this.stopBudget("duration_budget", "Task time budget exceeded", this.limits.durationMs, Date.now() - this.started, 0);
+    this.cancel(error.message);
+  }
+  private stopBudget(code: string, message: string, limit: number, used: number, requested: number,
+    scope: TaskBudgetScope = this.budgetScope, reserved = 0, preservePrevious = false): TaskControlError {
+    const stop = { code, scope, limit, used, requested, reserved, runId: currentTask()?.runId ?? this.rootRunId };
+    if (!preservePrevious || !this.budgetStop) this.budgetStop = stop;
+    this.event("budget_stopped", stop);
+    return new TaskControlError(code, `${message} (${scope}: used ${used}, limit ${limit}, reserved ${reserved}, next ${requested})`);
   }
   private event(type: string, data: unknown): void {
     if (!this.journal || this.persistenceError || this.journalDiscarded) return;

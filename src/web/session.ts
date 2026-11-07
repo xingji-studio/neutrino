@@ -50,7 +50,7 @@ import {
   normalizeContext,
   type ConversationContext,
 } from "../compact.js";
-import { TaskRuntime, currentTask, linkSignals, taskLimits, resumeTaskSnapshot, type AgentStatus, type TaskSnapshot } from "../llm/runtime.js";
+import { TaskRuntime, TaskControlError, currentTask, linkSignals, taskLimits, taskBudgetScope, resumeTaskSnapshot, type AgentStatus, type TaskSnapshot } from "../llm/runtime.js";
 import { prepareContext, outputAllowance, finalTaskReport } from "../llm/context.js";
 import { FINISH_STEP_TOOL, FINISH_STEP_DEFINITION, finishPlanStep, preparePlan, settlePlan } from "../llm/plan.js";
 import { LLMClient, describeError } from "../llm/client.js";
@@ -606,6 +606,7 @@ export class WebSession implements LiveAgent {
     const runtime = new TaskRuntime({
       request: approvalContext.prompt, priorUserRequests: approvalContext.priorUserRequests,
       cwd: this.dir, signal: this.turnAbort?.signal, limits: taskLimits(loadConfig(this.mode)),
+      budgetScope: taskBudgetScope(loadConfig(this.mode)),
       journalDir: path.join(sessionDir(this.mode), "tasks", path.basename(this.sessionId || "unsaved")),
     });
     this.taskRuntime = runtime;
@@ -921,7 +922,7 @@ export class WebSession implements LiveAgent {
         if (client.outcome?.error?.code.endsWith("_budget") && currentTask()) {
           const report = await finalTaskReport(currentTask()!.runtime,
             () => team?.client("main_model") ?? new LLMClient(this.model, this.provider, this.intensity),
-            usage => { this.tokens.prompt += usage.prompt; this.tokens.completion += usage.completion; });
+            usage => { this.tokens.prompt += usage.prompt; this.tokens.completion += usage.completion; }, apiMessages);
           if (token !== this.turnToken || this.paused) return false;
           this.taskOutcome = "partial";
           this.streamingContent = null;
@@ -1015,7 +1016,12 @@ export class WebSession implements LiveAgent {
           try {
             result = await this.runTool(call.name, args, toolMsg, token, apiMessages, approvalContext);
           } catch (err) {
-      if (token === this.turnToken) this.taskOutcome = "failed";
+            if (err instanceof TaskControlError && err.code.endsWith("_budget")) {
+              toolMsg.result = `[Not executed: ${describeError(err)}]`;
+              this.save();
+              throw err;
+            }
+            if (token === this.turnToken) this.taskOutcome = "failed";
             result = `Error: ${err instanceof Error ? err.message : String(err)}`;
           }
           if (this.disposed) return false;
@@ -1030,6 +1036,16 @@ export class WebSession implements LiveAgent {
       }
     } catch (err) {
       if (token !== this.turnToken) return false;
+      if (err instanceof TaskControlError && err.code.endsWith("_budget") && currentTask()) {
+        const report = await finalTaskReport(currentTask()!.runtime,
+          () => team?.client("main_model") ?? new LLMClient(this.model, this.provider, this.intensity),
+          usage => { this.tokens.prompt += usage.prompt; this.tokens.completion += usage.completion; }, apiMessages);
+        if (token !== this.turnToken || this.paused) return false;
+        this.taskOutcome = "partial";
+        this.streamingContent = null;
+        this.messages.push({ role: "assistant", content: report });
+        return false;
+      }
       if (this.streamingContent) {
         this.messages.push({ role: "assistant", content: this.streamingContent });
       }

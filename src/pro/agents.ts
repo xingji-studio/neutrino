@@ -82,7 +82,7 @@ export class ProAgentTeam {
   async callResult(role: ProRole, task: string, context = "", depth = 1, readOnly = false, writePaths?: readonly string[]): Promise<SubAgentRun> {
     const failure = (code: string, message: string): SubAgentRun => {
       const result: SubAgentRun = { runId: currentTask()?.runId ?? this.runtime.rootRunId,
-        status: code === "cancelled" ? "cancelled" : "failed", report: "", evidenceIds: [], artifacts: [], blockers: [],
+        status: code === "cancelled" ? "cancelled" : code.endsWith("_budget") ? "blocked" : "failed", report: "", evidenceIds: [], artifacts: [], blockers: [],
         error: { code, message }, aborted: code === "cancelled", exhausted: false, rounds: 0, calls: 0 };
       this.runtime.recordResult(result);
       return result;

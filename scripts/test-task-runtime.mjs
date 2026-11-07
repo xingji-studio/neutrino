@@ -277,6 +277,7 @@ try {
   const { WebSession } = await import("../dist/web/session.js");
   seedProPresets();
   saveModels({ providers: [{ name: "Fixture", models: [model] }] });
+  saveConfig({ ...loadConfig("pro"), task_max_requests: 3 }, "pro");
   let acceptSteps = false;
   globalThis.fetch = async (_url, init) => {
     const body = JSON.parse(init.body);
@@ -300,6 +301,8 @@ try {
       assert.equal(saved.task_run.state, success ? "completed" : "partial");
       assert.ok(fs.existsSync(saved.task_run.journal));
       assert.equal(snapshot.task.counts.modelRequests, success ? 5 : 3, "preflight, planner and main use the same request ledger");
+      assert.equal(snapshot.task.budgetScope, "delegation");
+      assert.equal(snapshot.task.delegatedCounts.modelRequests, 1, "only planning spends delegated request capacity; the coordinator can continue past it");
       session.dispose();
       assert.equal(deleteSession(id, "pro"), true);
       session.taskRuntime.recordTool("read_file", { path: "late" }, "late cleanup", "cancelled");
@@ -307,7 +310,7 @@ try {
 
     } finally { session.dispose(); }
   }
-  saveConfig({ ...loadConfig(), task_timeout_ms: 100 });
+  saveConfig({ ...loadConfig(), task_budget_scope: "task", task_timeout_ms: 100 });
   globalThis.fetch = async (_url, init) => new Promise((_resolve, reject) => {
     const abort = () => reject(new DOMException("Aborted", "AbortError"));
     if (init.signal.aborted) abort(); else init.signal.addEventListener("abort", abort, { once: true });

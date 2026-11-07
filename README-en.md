@@ -186,15 +186,18 @@ The sub-agent's prompt is a file too: [`assets/subagent.txt`](./assets/subagent.
 
 Each user turn now owns a shared task runtime. Ordinary and Pro agents inherit the original user request, cancellation signal and execution policy. Pausing stops active model requests, searches and command trees; a replacement turn waits for pending operations to settle. Already completed changes remain recorded.
 
-Task limits apply to the whole tree, including preflight, planning, approval reviews, compression and network retries. Configure them in the workspace's `config.json`:
+By default, these limits are shared by delegated agents and all their descendants. Main-agent work continues until completion or user cancellation, while its usage is still recorded. Set `task_budget_scope` to `"task"` explicitly to impose the same hard limits on the entire turn, including the coordinator, preflight, planning, approval reviews, compression and retries. Configure them in the workspace's `config.json`:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
+| `task_budget_scope` | `"delegation"` | Limit delegated work; `"task"` also limits the main agent |
 | `task_max_agents` | 24 | Delegated agent runs per user turn |
 | `task_max_requests` | 128 | Actual model requests; one is reserved for reporting |
 | `task_max_tools` | 256 | Executed tool calls, including delegated calls |
 | `task_max_tokens` | 2000000 | Shared input/output token capacity, reserved before requests |
-| `task_timeout_ms` | 1800000 | Overall deadline in milliseconds |
+| `task_timeout_ms` | 1800000 | Shared deadline from first delegation; from turn start in `"task"` mode |
+
+`task_max_tokens` counts cumulative input/output usage across requests, including repeatedly sent history; it is separate from the model's context window. A child exceeding a budget reports the specific limit and lets the main agent continue locally. In `"task"` mode, reaching a limit ends the turn with a partial report that includes recent context, verification evidence and numeric stop diagnostics.
 
 `subagent_max_rounds` still limits each child. Reports have completed, partial, blocked, failed or cancelled outcomes; an empty completion gets at most one retry. Context capacity is checked before every model request, including the final report round. Full tool evidence is saved separately under `session/tasks/<session-id>/<run-id>.jsonl` (under `pro/session/tasks/` for Pro), while only compact reports enter parent context. Restarting never replays that ledger. Deleting a conversation also removes its evidence logs; late cleanup cannot recreate them. Missing provider usage is charged conservatively against reserved input/output capacity.
 

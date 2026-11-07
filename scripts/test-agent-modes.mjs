@@ -196,7 +196,7 @@ try {
     // The shared task deadline must also cancel PTC's pending approval.
     const originalConfig = config.loadConfig();
     try {
-      config.saveConfig({ ...originalConfig, task_timeout_ms: 600 });
+      config.saveConfig({ ...originalConfig, task_budget_scope: "task", task_timeout_ms: 600 });
       script = [{ calls: [call(program(`async () => {
         await codemode.write_file({path: ${JSON.stringify(outside)}, content: "x", reason: "Exercise the shared task deadline"});
       }`))] }, { text: "Task deadline reached." }];

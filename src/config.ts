@@ -210,6 +210,9 @@ export const DEFAULT_CONFIG: Record<string, unknown> = {
   // Rounds one sub-agent may take; the last round has no tools and exists so the
   // child writes its report instead of exploring until it is cut off.
   subagent_max_rounds: SUBAGENT_MAX_ROUNDS,
+  // Ordinary conversation continues until completion or user cancellation.
+  // Set "task" explicitly to impose these limits on the coordinator as well.
+  task_budget_scope: "delegation",
   task_max_agents: DEFAULT_TASK_LIMITS.agentRuns,
   task_max_requests: DEFAULT_TASK_LIMITS.modelRequests,
   task_max_tools: DEFAULT_TASK_LIMITS.toolCalls,
