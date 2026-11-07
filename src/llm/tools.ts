@@ -79,7 +79,8 @@ export function getSubAgentToolDefinitions(): ToolDefinition[] {
       function: {
         name: "run_command",
         description:
-          "Execute a shell command in the current working directory and return its stdout/stderr.",
+          "Execute a shell command in the current working directory and return its stdout/stderr. " +
+          "Prefer one command that answers many questions (findstr /S, dir /s, for /r) over one call per file.",
         parameters: {
           type: "object",
           properties: {

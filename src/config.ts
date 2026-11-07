@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { sameCwd } from "./cwd.js";
 import { normalizeContext, type ConversationContext } from "./compact.js";
 import type { PlanState } from "./llm/plan.js";
+import { SUBAGENT_MAX_ROUNDS } from "./llm/subagent.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(__dirname, "..");
@@ -195,6 +196,9 @@ export const DEFAULT_CONFIG: Record<string, unknown> = {
   sound_alerts: true,
   // Model that reviews approval requests. Empty = same model as the chat.
   approval_model: "",
+  // Rounds one sub-agent may take; the last round has no tools and exists so the
+  // child writes its report instead of exploring until it is cut off.
+  subagent_max_rounds: SUBAGENT_MAX_ROUNDS,
   // Mount the browser UI alongside the terminal UI unless it is turned off
   // here or on the command line.
   web_console: true,

@@ -1,8 +1,9 @@
 import { LLMClient, type UsageInfo } from "../llm/client.js";
 import type { ApprovalDecision } from "../llm/approval.js";
 import type { RetryNotice } from "../llm/retry.js";
-import { buildSubAgentTask, formatSubAgentResult, runSubAgent } from "../llm/subagent.js";
+import { buildSubAgentTask, formatSubAgentResult, runSubAgent, subAgentRounds } from "../llm/subagent.js";
 import { DELEGATE_TOOL, getSubAgentToolDefinitions, type ToolDefinition } from "../llm/tools.js";
+import { loadConfig } from "../config.js";
 import { ACTIVE_PRO_ROLES, PRO_ROLES, loadProPrompt, type ProResolvedModel, type ProRole } from "./config.js";
 
 export const PRO_AGENT_TOOL = "call_pro_agent";
@@ -77,14 +78,16 @@ export class ProAgentTeam {
     const names = new Set(tools.map((tool) => tool.function.name));
     const label = `${role} · ${selection.model.name} · ${depth}/${this.maxDepth}`;
     try {
+      const maxRounds = subAgentRounds(loadConfig("pro").subagent_max_rounds);
       const result = await runSubAgent({
         createClient: () => this.client(role),
         system: `${loadProPrompt(role)}\n\nDelegation depth: ${depth}/${this.maxDepth}. ` +
           (onlyRead ? "This consultation is read-only. Do not modify files or execute commands, including through another agent." :
             "Use the shared approval gate for every tool call. Return a self-contained report with changes, evidence and unresolved work."),
-        task: buildSubAgentTask({ task, context, cwd: this.options.cwd }),
+        task: buildSubAgentTask({ task, context, cwd: this.options.cwd, rounds: maxRounds }),
         tools,
         contextWindow: selection.context_window,
+        maxRounds,
         approve: (name, args) => {
           if (!names.has(name) && name !== DELEGATE_TOOL) return Promise.resolve({
             approved: false, source: "input", reason: "This tool is not available to this Pro agent",

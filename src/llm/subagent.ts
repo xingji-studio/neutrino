@@ -8,6 +8,11 @@
  * survey that reads thirty files must not fill the parent's context with thirty
  * files.
  *
+ * That dropped transcript is why the loop keeps its own evidence. The last
+ * round is sent without tools, so a child that has spent its budget can only
+ * write; and a child that still runs out hands back what it actually ran and
+ * read, instead of the half-sentence it happened to say last.
+ *
  * This module owns the child loop and nothing else. Everything that touches the
  * app — which model, how a call is approved, where progress is shown, how tokens
  * are counted — is passed in, so the terminal session and the browser session
@@ -70,10 +75,25 @@ export interface SubAgentRun {
   calls: number;
 }
 
-/** Enough for real work, few enough that a runaway child cannot cost a fortune. */
-export const SUBAGENT_MAX_ROUNDS = 12;
+/**
+ * Rounds one sub-agent may take, the last of which has no tools. Enough for real
+ * work, few enough that a runaway child cannot cost a fortune.
+ */
+export const SUBAGENT_MAX_ROUNDS = 16;
+/** A wrap-up round is only worth anything with at least one round of work before it. */
+export const SUBAGENT_MIN_ROUNDS = 2;
 /** A report is evidence for the parent, not a transcript of the child. */
 export const SUBAGENT_MAX_REPORT = 8000;
+
+/** How much of the accumulated evidence an exhausted child still hands back. */
+const EVIDENCE_LINES = 24;
+const EVIDENCE_CHARS = 200;
+
+/** The configured round budget, reconciled with what the loop can honour. */
+export function subAgentRounds(configured: unknown): number {
+  const raw = Number(configured);
+  return Number.isFinite(raw) && raw >= SUBAGENT_MIN_ROUNDS ? Math.floor(raw) : SUBAGENT_MAX_ROUNDS;
+}
 
 function parseArgs(raw: string): Record<string, unknown> {
   const text = raw?.trim() ?? "";
@@ -87,13 +107,71 @@ function parseArgs(raw: string): Record<string, unknown> {
   return { value: text };
 }
 
-/** The task brief handed to the child: where it works, what to do, what it must know. */
-export function buildSubAgentTask(input: { task: string; context?: string; cwd?: string }): string {
+/** The task brief handed to the child: where it works, what it has, what to do. */
+export function buildSubAgentTask(input: { task: string; context?: string; cwd?: string; rounds?: number }): string {
   const parts: string[] = [];
   if (input.cwd) parts.push(`Working directory: ${input.cwd}`);
+  const rounds = Number.isFinite(input.rounds) && (input.rounds ?? 0) > 0 ? Math.floor(input.rounds!) : 0;
+  if (rounds) {
+    // Without this the child explores as if the budget were unlimited: it reads
+    // one file per round and discovers the limit only when the loop stops.
+    parts.push(
+      `Budget: ${rounds} rounds. One round is one reply and may carry several tool calls; ` +
+      "the last round has no tools, so leave room to write the report.",
+    );
+  }
   parts.push(`Task:\n${input.task.trim()}`);
   const context = (input.context ?? "").trim();
   if (context) parts.push(`What the agent that delegated this task already knows:\n${context}`);
+  return parts.join("\n\n");
+}
+
+/** One thing the child learned, kept so an exhausted child can still report. */
+interface Evidence {
+  name: string;
+  /** The call's own material: a command or a path. */
+  detail: string;
+  /** The first line of what it returned. */
+  result: string;
+}
+
+function clip(text: string, limit = EVIDENCE_CHARS): string {
+  const line = text.trim();
+  return line.length > limit ? `${line.slice(0, limit)}…` : line;
+}
+
+function firstLine(text: string): string {
+  return clip(text.split("\n").map((part) => part.trim()).find((part) => part.length > 0) ?? "");
+}
+
+function evidenceFor(name: string, args: Record<string, unknown>, result: string): Evidence {
+  return {
+    name,
+    detail: clip(String(args.command ?? args.path ?? "")),
+    result: firstLine(result),
+  };
+}
+
+/**
+ * The report of a child that was cut short. The parent never sees the child's
+ * transcript, so without this it would receive whatever sentence came last —
+ * usually "let me start by exploring".
+ */
+function composePartial(input: { text: string; evidence: Evidence[]; denied: number; calls: number }): string {
+  const parts: string[] = [];
+  if (input.text) parts.push(input.text);
+  const shown = input.evidence.slice(-EVIDENCE_LINES);
+  if (shown.length) {
+    const denied = input.denied ? `, ${input.denied} denied` : "";
+    const omitted = input.evidence.length - shown.length;
+    parts.push(
+      `Work recorded before the budget ran out (${input.calls} call${input.calls === 1 ? "" : "s"}${denied}):\n` +
+      shown.map((entry) => `- ${entry.name}${entry.detail ? ` ${entry.detail}` : ""}${entry.result ? ` -> ${entry.result}` : ""}`).join("\n") +
+      (omitted > 0 ? `\n- …${omitted} earlier call${omitted === 1 ? "" : "s"} omitted` : ""),
+    );
+  }
+  if (!parts.length) return "";
+  parts.push("Anything the task asked for that is not listed above is still unverified.");
   return parts.join("\n\n");
 }
 
@@ -106,20 +184,31 @@ export function buildSubAgentTask(input: { task: string; context?: string; cwd?:
  * complete on its own.
  */
 export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRun> {
-  const maxRounds = Math.max(1, options.maxRounds ?? SUBAGENT_MAX_ROUNDS);
+  const maxRounds = Math.max(SUBAGENT_MIN_ROUNDS, Math.floor(options.maxRounds ?? SUBAGENT_MAX_ROUNDS));
   const messages: SubAgentMessage[] = [
     { role: "system", content: options.system },
     { role: "user", content: options.task },
   ];
   let report = "";
   let calls = 0;
+  let denied = 0;
   let lastPromptTokens = 0;
-  const aborted = (rounds: number): SubAgentRun => ({ report, aborted: true, exhausted: false, rounds, calls });
+  const evidence: Evidence[] = [];
+  // A child that is stopped mid-work still owes the parent what it found.
+  const aborted = (rounds: number): SubAgentRun => ({
+    report: composePartial({ text: report, evidence, denied, calls }),
+    aborted: true,
+    exhausted: false,
+    rounds,
+    calls,
+  });
 
   for (let round = 1; round <= maxRounds; round++) {
     if (options.cancelled?.()) return aborted(round - 1);
+    // The last round is a wrap-up: no tools, so the only way out is a report.
+    const wrapUp = round === maxRounds;
     const capacity = options.contextWindow;
-    if (capacity && messages.length > 2 &&
+    if (!wrapUp && capacity && messages.length > 2 &&
         Math.max(lastPromptTokens, Math.ceil(JSON.stringify(messages).length / 3)) >= capacity * 0.8) {
       // Only split at an assistant boundary: every retained tool result must
       // still have the assistant/tool_calls message that produced it.
@@ -147,11 +236,19 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRun
         lastPromptTokens = 0;
       }
     }
-    options.onProgress?.("thinking");
+    if (wrapUp) {
+      messages.push({
+        role: "user",
+        content:
+          "Your round budget is used up: this is the final round and no tools are available. " +
+          "Write your report now from what you have already found, and say what is still unverified.",
+      });
+    }
+    options.onProgress?.(wrapUp ? "writing report" : "thinking");
 
     const client = options.createClient();
     let content = "";
-    for await (const chunk of client.streamTurn(messages, options.tools, {
+    for await (const chunk of client.streamTurn(messages, wrapUp ? [] : options.tools, {
       onRetry: options.onRetry,
       cancelled: options.cancelled,
     })) {
@@ -163,7 +260,9 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRun
       lastPromptTokens = client.usage.prompt;
     }
 
-    const toolCalls = client.toolCalls;
+    // A call offered in the wrap-up round is not executed: there is no tool
+    // result to feed back, and the round exists to produce the report.
+    const toolCalls = wrapUp ? [] : client.toolCalls;
     if (content.trim()) report = content.trim();
     if (content.trim() || toolCalls.length > 0) {
       messages.push({
@@ -185,7 +284,10 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRun
       });
     }
     if (toolCalls.length === 0) {
-      return { report, aborted: false, exhausted: false, rounds: round, calls };
+      // A report in the wrap-up round still means the budget is what ended the
+      // work, so the parent is told the survey is partial.
+      if (!wrapUp) return { report, aborted: false, exhausted: false, rounds: round, calls };
+      break;
     }
 
     for (const call of toolCalls) {
@@ -203,6 +305,7 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRun
           result = `[Error: ${describeError(error)}]`;
         }
       } else {
+        denied++;
         // The note goes to the child, not to the user: it must not retry the same
         // call unchanged, and it must say what was blocked in its report.
         result =
@@ -211,27 +314,36 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRun
             : `[Not executed: approval denied (${decision.source}): ${decision.reason}] ` +
               "Do not retry this call unchanged; work around it or report it as blocked.";
       }
+      evidence.push(evidenceFor(call.name, args, result));
       messages.push({ role: "tool", tool_call_id: call.id, content: result });
     }
   }
 
-  return { report, aborted: false, exhausted: true, rounds: maxRounds, calls };
+  return {
+    report: composePartial({ text: report, evidence, denied, calls }),
+    aborted: false,
+    exhausted: true,
+    rounds: maxRounds,
+    calls,
+  };
 }
 
 /** The tool result the parent sees: the report, or why there is none. */
 export function formatSubAgentResult(run: SubAgentRun): string {
-  if (run.aborted) {
-    return "[Sub-agent stopped: the turn was paused or replaced before it reported back.]";
-  }
+  const clipReport = (text: string): string => text.length > SUBAGENT_MAX_REPORT
+    ? `${text.slice(0, SUBAGENT_MAX_REPORT)}\n…[report truncated]`
+    : text;
   const report = run.report.trim();
+  if (run.aborted) {
+    const stopped = "[Sub-agent stopped: the turn was paused or replaced before it reported back.]";
+    return report ? `${stopped}\nWhat it had done so far:\n${clipReport(report)}` : stopped;
+  }
   if (!report) {
     return run.exhausted
       ? `[Sub-agent used all ${run.rounds} rounds without producing a report.]`
       : "[Sub-agent finished without a report.]";
   }
-  const text = report.length > SUBAGENT_MAX_REPORT
-    ? `${report.slice(0, SUBAGENT_MAX_REPORT)}\n…[report truncated]`
-    : report;
+  const text = clipReport(report);
   return run.exhausted
     ? `${text}\n\n[Sub-agent stopped after ${run.rounds} rounds without finishing; treat this report as partial.]`
     : text;

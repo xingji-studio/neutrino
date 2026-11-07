@@ -68,6 +68,7 @@ import {
   buildSubAgentTask,
   formatSubAgentResult,
   runSubAgent as runSubAgentTask,
+  subAgentRounds,
 } from "../llm/subagent.js";
 import { assessToolCall, type RiskAssessment } from "../llm/risk.js";
 import { ApprovalGate, captureApprovalContext, describeApprovalIntent, type ApprovalDecision, type ApprovalContext } from "../llm/approval.js";
@@ -1026,11 +1027,13 @@ export class WebSession implements LiveAgent {
     if (!task) return "[Error: delegate needs a task: what should the sub-agent do?]";
     const context = typeof args.context === "string" ? args.context.trim() : "";
     const approval = { ...approvalContext, context: captureApprovalContext(apiMessages).context };
+    const maxRounds = subAgentRounds(loadConfig(this.mode).subagent_max_rounds);
     const run = await runSubAgentTask({
       createClient: () => new LLMClient(this.model, this.provider, this.intensity),
       system: loadSubAgentPrompt(),
-      task: buildSubAgentTask({ task, context, cwd: this.dir }),
+      task: buildSubAgentTask({ task, context, cwd: this.dir, rounds: maxRounds }),
       tools: SUB_AGENT_TOOLS,
+      maxRounds,
       approve: (name, callArgs) => this.requestApproval(name, callArgs, approval),
       execute: (name, callArgs) =>
         name === DELEGATE_TOOL

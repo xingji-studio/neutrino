@@ -11,6 +11,9 @@
 //   * a paused parent aborts the child and says so in the tool result,
 //   * a denied call is reported to the child, not retried, and the child's round
 //     limit bounds the cost,
+//   * the last round is sent without tools, so the child writes instead of
+//     exploring, and a child that still runs out hands back the calls it made
+//     rather than its last half-sentence,
 //   * the terminal and the browser sessions run the same sub-agent.
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -159,7 +162,18 @@ function scriptedClient(script, requests) {
   });
   assert.equal(limited.exhausted, true, "the child stops at the round limit");
   assert.equal(limited.rounds, 3);
-  assert.match(subagent.formatSubAgentResult(limited), /treat this report as partial/);
+  assert.deepEqual(looping.at(-1).tools, [], "the last round is sent without tools");
+  assert.match(
+    looping.at(-1).messages.at(-1).content,
+    /final round and no tools are available/,
+    "the child is told why it can no longer explore",
+  );
+  assert.equal(limited.calls, 2, "a call offered in the wrap-up round is not executed");
+  const partial = subagent.formatSubAgentResult(limited);
+  assert.match(partial, /treat this report as partial/);
+  assert.match(partial, /round 3, still looking/, "the last words of the child are kept");
+  assert.match(partial, /- list_files/, "and the calls it actually made");
+  assert.match(partial, /still unverified/, "the parent is told what is left to check");
 
   // A paused parent aborts the child mid-round.
   const abortRequests = [];
@@ -185,6 +199,14 @@ function scriptedClient(script, requests) {
   assert.ok(task.includes("Working directory: C:/work"));
   assert.ok(task.includes("Task:\ndo the thing"));
   assert.ok(task.includes("the user wants it small"));
+  assert.ok(!task.includes("Budget:"), "no budget line without a budget");
+  const briefed = subagent.buildSubAgentTask({ task: "do the thing", cwd: "C:/work", rounds: 8 });
+  assert.match(briefed, /Budget: 8 rounds/, "the child is told how many rounds it has");
+  assert.match(briefed, /the last round has no tools/, "and that the last one is for the report");
+  assert.equal(subagent.subAgentRounds(undefined), subagent.SUBAGENT_MAX_ROUNDS, "an absent budget uses the default");
+  assert.equal(subagent.subAgentRounds("8"), 8, "a configured budget is honoured");
+  assert.equal(subagent.subAgentRounds(1), subagent.SUBAGENT_MAX_ROUNDS, "a budget with no room to wrap up is rejected");
+  assert.match(loadSubAgentPrompt(), /^Budget:/m, "the sub-agent prompt states the budget rules");
   console.log("ok sub-agent: catalog, isolation, denial, round limit, abort and report shaping");
 }
 
@@ -251,6 +273,11 @@ try {
     assert.equal(childFirst.messages[0].content, loadSubAgentPrompt(), "the child gets the sub-agent prompt");
     assert.match(childFirst.messages[1].content, /Read fixture\.txt/);
     assert.ok(childFirst.messages[1].content.includes(`Working directory: ${testHome}`), "the child knows where it works");
+    assert.match(
+      childFirst.messages[1].content,
+      new RegExp(`Budget: ${subagent.SUBAGENT_MAX_ROUNDS} rounds`),
+      "the child is told the budget it is actually on",
+    );
     assert.deepEqual(childFirst.tools.sort(), ["list_files", "read_file", "run_command", "write_file"], "the child cannot delegate");
     assert.match(calls[2].messages.at(-1).content, /hello from the fixture/, "the child saw its own tool result");
 
