@@ -67,15 +67,24 @@ const mock = http.createServer(async (req, res) => {
   } else if (body.model.endsWith("confirm_model")) {
     complete(JSON.stringify({ approve: true, safety_score: 100, relevance_score: 100, hard_block: false, obvious_mismatch: false, mismatch_evidence: "", reason: "A bounded project operation requested by the user" }));
   } else if (body.model.endsWith("main_model")) {
+    const accept = () => complete("", Array.from({ length: singleStep ? 1 : 2 }, (_, index) => ({
+      index, id: `accept-${index + 1}`, type: "function", function: {
+        name: "finish_step", arguments: JSON.stringify({ step_id: `step-${index + 1}`, status: "done",
+          summary: "Integrated and verified the professional result", artifact_paths: ["pro-result.txt"], reason: "Accept the verified deliverable" }),
+      },
+    })));
+    const accepted = results.some(entry => String(entry.tool_call_id).startsWith("accept-"));
     if (longMain) {
       longMainRounds++;
       if (longMainRounds <= 26) complete("", [{ index: 0, id: `long-${longMainRounds}`, type: "function", function: {
         name: "read_file", arguments: JSON.stringify({ path: "pro-result.txt", reason: "Inspect the task result" }),
       } }]);
+      else if (!accepted) accept();
       else complete("Long professional task complete.");
     } else if (emptyMain) complete("");
     else if (!results.length) complete("", [tool("front_output_model")]);
     else if (results.length === 1) complete("", [tool("modeling_model")]);
+    else if (!accepted) accept();
     else complete("All professional tasks completed.");
   } else if (body.model.endsWith("front_output_model")) {
     if (!results.length) complete("", [tool("backend_output_model")]);
@@ -171,10 +180,10 @@ try {
   await waitFor(() => !hub.snapshot(key).busy);
   longMain = false;
   const longTurn = hub.snapshot(key);
-  assert.equal(longMainRounds, 27, "Pro continues past 24 model/tool rounds");
+  assert.equal(longMainRounds, 28, "Pro continues past 24 model/tool rounds and explicitly accepts each step");
   assert.equal(longTurn.messages.at(-1).content, "Long professional task complete.");
   assert.ok(longTurn.plan.steps.every((entry) => entry.status === "done"));
-  assert.equal(longTurn.messages.slice(-27, -1).filter((entry) => entry.role === "tool").length, 26);
+  assert.equal(longTurn.messages.slice(-29, -1).filter((entry) => entry.role === "tool" && entry.name === "read_file").length, 26);
 
   // Pausing a stalled availability request cannot mutate the replacement turn.
   stallProbe = true;

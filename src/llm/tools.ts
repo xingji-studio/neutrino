@@ -2,6 +2,7 @@ import { exec, execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { webSearch } from "./search.js";
+import { currentTask, linkSignals } from "./runtime.js";
 
 const MAX_OUTPUT = 20000;
 const MAX_FILE_SIZE = 200000;
@@ -61,6 +62,8 @@ const DELEGATE_TOOL_DEFINITION: ToolDefinition = {
             "made, a constraint from the user). Keep it short - it does not replace reading the code.",
         },
         reason: REASON_PROPERTY,
+        read_only: { type: "boolean", description: "Restrict this task to read-only tools." },
+        write_paths: { type: "array", items: { type: "string" }, description: "Optional allowed file write paths; disables arbitrary shell commands for this task." },
       },
       required: ["task", "reason"],
     },
@@ -175,10 +178,13 @@ export async function executeTool(
 ): Promise<string> {
   // Tools always operate inside the directory the conversation belongs to, which
   // is not necessarily the directory the current process was started in.
-  if (signal?.aborted) return "[Error: command cancelled]";
+  const linked = linkSignals(signal, currentTask()?.signal);
+  signal = linked.signal;
+  if (signal.aborted) { linked.dispose(); return "[Error: command cancelled]"; }
   const base = cwd || process.cwd();
   let result: string;
   try {
+    currentTask()?.runtime.assertTool(name, args);
     switch (name) {
       case "web_search":
         result = await webSearch(args, signal);
@@ -202,6 +208,8 @@ export async function executeTool(
     }
   } catch (e) {
     result = `[Error: ${e instanceof Error ? e.message : String(e)}]`;
+  } finally {
+    linked.dispose();
   }
   return result.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }

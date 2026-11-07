@@ -12,11 +12,22 @@
  * The model calls themselves live in the two agent loops.
  */
 import { displayWidth, ellipsize } from "../width.js";
+import fs from "node:fs";
+import path from "node:path";
+import { currentTask, type TaskRuntime } from "./runtime.js";
+import type { ToolDefinition } from "./tools.js";
 
 /** `active` is the step the worker is on; the rest are its past and future. */
-export type PlanStepStatus = "pending" | "active" | "done" | "failed";
+export type PlanStepStatus = "pending" | "active" | "done" | "failed" | "blocked" | "cancelled" | "skipped";
 
 export interface PlanStep {
+  id?: string;
+  dependsOn?: string[];
+  acceptanceCriteria?: string[];
+  evidenceIds?: string[];
+  artifacts?: string[];
+  summary?: string;
+  deliverable?: string;
   /** One imperative action, in the language of the request. */
   title: string;
   /** What the step needs: files, parameters, acceptance criteria. */
@@ -113,11 +124,16 @@ function normalizeStep(value: unknown): PlanStep | null {
   const title = cleanText(o.title ?? o.step ?? o.task ?? o.action, PLAN_MAX_TITLE);
   if (!title) return null;
   const detail = cleanText(o.detail ?? o.description ?? o.how ?? o.acceptance, PLAN_MAX_DETAIL);
-  return { title, status: "pending", ...(detail ? { detail } : {}) };
+  const id = cleanText(o.id, 80);
+  const strings = (value: unknown) => Array.isArray(value) ? value.filter((v): v is string => typeof v === "string").slice(0, 10).map(v => cleanText(v, PLAN_MAX_DETAIL)) : undefined;
+  const dependsOn = strings(o.dependsOn ?? o.depends_on);
+  const acceptanceCriteria = strings(o.acceptanceCriteria ?? o.acceptance_criteria);
+  return { title, status: "pending", ...(detail ? { detail } : {}), ...(id ? { id } : {}),
+    ...(dependsOn ? { dependsOn } : {}), ...(acceptanceCriteria ? { acceptanceCriteria } : {}) };
 }
 
 /** Turn an already-parsed planner answer into a plan, or null when unusable. */
-export function normalizePlan(value: unknown): PlanState | null {
+export function normalizePlan(value: unknown, minSteps = PLAN_MIN_STEPS): PlanState | null {
   if (!value || typeof value !== "object") return null;
   const o = value as Record<string, unknown>;
   const rawSteps = Array.isArray(value) ? value : Array.isArray(o.steps) ? o.steps : Array.isArray(o.plan) ? o.plan : null;
@@ -128,7 +144,7 @@ export function normalizePlan(value: unknown): PlanState | null {
     if (step) steps.push(step);
     if (steps.length >= PLAN_MAX_STEPS) break;
   }
-  if (steps.length < PLAN_MIN_STEPS) return null;
+  if (steps.length < minSteps) return null;
   const goal = cleanText(o.goal ?? o.title ?? o.summary ?? o.request, 240);
   return { goal, steps };
 }
@@ -172,7 +188,7 @@ function jsonCandidates(text: string): string[] {
 }
 
 /** A numbered or bulleted list, for a planner that answered in prose. */
-function planFromList(text: string): PlanState | null {
+function planFromList(text: string, minSteps = PLAN_MIN_STEPS): PlanState | null {
   const steps: PlanStep[] = [];
   for (const line of text.split("\n")) {
     // "1." "1)" "1、" and bullets all show up in practice, with or without a
@@ -184,7 +200,7 @@ function planFromList(text: string): PlanState | null {
     steps.push({ title, status: "pending" });
     if (steps.length >= PLAN_MAX_STEPS) break;
   }
-  if (steps.length < PLAN_MIN_STEPS) return null;
+  if (steps.length < minSteps) return null;
   return { goal: "", steps };
 }
 
@@ -193,7 +209,7 @@ function planFromList(text: string): PlanState | null {
  * then a numbered list so a model that ignores the format still produces a
  * usable plan. Anything else is "no plan": the turn then runs as before.
  */
-export function parsePlan(text: string): PlanState | null {
+export function parsePlan(text: string, minSteps = PLAN_MIN_STEPS): PlanState | null {
   const raw = String(text ?? "").trim();
   if (!raw || /^\[Error/.test(raw)) return null;
   for (const candidate of jsonCandidates(raw)) {
@@ -203,10 +219,10 @@ export function parsePlan(text: string): PlanState | null {
     } catch {
       continue;
     }
-    const plan = normalizePlan(value);
+    const plan = normalizePlan(value, minSteps);
     if (plan) return plan;
   }
-  return planFromList(raw);
+  return planFromList(raw, minSteps);
 }
 
 // ---------------------------------------------------------------- prompting
@@ -301,7 +317,7 @@ export function resumePlan(loaded: PlanState | null | undefined): PlanState | nu
   if (steps.length === 0) return null;
   loaded.steps = steps;
   for (const step of steps) {
-    if (step.status !== "pending" && step.status !== "active" && step.status !== "done" && step.status !== "failed") {
+    if (!["pending", "active", "done", "failed", "blocked", "cancelled", "skipped"].includes(step.status)) {
       step.status = "pending";
     }
     if (step.status === "active") {
@@ -403,6 +419,9 @@ export type PlanRowKind =
   | "step-done"
   | "step-pending"
   | "step-failed"
+  | "step-blocked"
+  | "step-cancelled"
+  | "step-skipped"
   | "connector"
   | "more"
   | "line";
@@ -419,6 +438,9 @@ const STEP_GLYPH: Record<PlanStepStatus, string> = {
   active: "●",
   done: "✓",
   failed: "✗",
+  blocked: "!",
+  cancelled: "⊘",
+  skipped: "–",
 };
 
 /**
@@ -491,4 +513,72 @@ export function planRowsWidth(rows: PlanRow[]): number {
   let width = 0;
   for (const row of rows) width = Math.max(width, displayWidth(row.text));
   return width;
+}
+
+/** Pro plans use explicit step acceptance instead of inferring success from prose. */
+export const FINISH_STEP_TOOL = "finish_step";
+export const FINISH_STEP_DEFINITION: ToolDefinition = {
+  type: "function", function: {
+    name: FINISH_STEP_TOOL,
+    description: "Record acceptance of one plan step. Only the main coordinator can accept steps. For done, reference actual successful evidence IDs or existing artifact paths, or provide the final text deliverable. Use blocked/failed for unresolved work. Finishing a reply never completes plan steps automatically.",
+    parameters: { type: "object", properties: {
+      step_id: { type: "string" },
+      status: { type: "string", enum: ["done", "blocked", "failed", "skipped"] },
+      summary: { type: "string" },
+      evidence_ids: { type: "array", items: { type: "string" } },
+      artifact_paths: { type: "array", items: { type: "string" } },
+      deliverable: { type: "string", description: "The actual final content, only for a text deliverable." },
+      reason: { type: "string" },
+    }, required: ["step_id", "status", "summary", "reason"] },
+  },
+};
+
+export function preparePlan(plan: PlanState): PlanState {
+  const ids = new Set<string>();
+  for (let i = 0; i < plan.steps.length; i++) {
+    const step = plan.steps[i];
+    step.id ||= `step-${i + 1}`;
+    if (ids.has(step.id)) throw new Error("Plan contains duplicate step IDs");
+    const dependencies = step.dependsOn ?? (i ? [plan.steps[i - 1].id!] : []);
+    if (dependencies.some(id => !ids.has(id))) throw new Error("Plan dependencies must refer to earlier steps");
+    ids.add(step.id);
+    step.dependsOn = dependencies;
+    step.acceptanceCriteria ??= [step.detail || step.title];
+  }
+  return plan;
+}
+
+export function finishPlanStep(plan: PlanState | null, args: Record<string, unknown>, runtime: TaskRuntime): string {
+  if (currentTask()?.runId !== runtime.rootRunId) return "[Error: only the root coordinator can accept plan steps]";
+  const step = plan?.steps.find(entry => entry.id === args.step_id);
+  if (!plan || !step) return "[Error: unknown plan step_id]";
+  const status = String(args.status);
+  if (!["done", "blocked", "failed", "skipped"].includes(status) || typeof args.summary !== "string" || !args.summary.trim()) {
+    return "[Error: finish_step requires a valid status and a nonempty summary]";
+  }
+  const ids = Array.isArray(args.evidence_ids) ? args.evidence_ids.filter((id): id is string => typeof id === "string") : [];
+  const artifacts = Array.isArray(args.artifact_paths) ? args.artifact_paths.filter((p): p is string => typeof p === "string") : [];
+  if (status === "done") {
+    if (step.dependsOn?.some(id => plan.steps.find(entry => entry.id === id)?.status !== "done")) return "[Error: step dependencies have not been completed]";
+    if (ids.some(id => !runtime.evidence.some(entry => entry.id === id && entry.status === "completed"))) return "[Error: completion references missing or unsuccessful evidence]";
+    if (artifacts.some(p => !fs.existsSync(path.resolve(runtime.cwd, p)))) return "[Error: completion references a missing artifact]";
+    if (!ids.length && !artifacts.length && !(typeof args.deliverable === "string" && args.deliverable.trim())) {
+      return "[Error: done requires actual evidence, an existing artifact, or the final text deliverable]";
+    }
+  }
+  step.status = status as PlanStepStatus;
+  step.summary = args.summary.trim();
+  if (typeof args.deliverable === "string") step.deliverable = args.deliverable;
+  step.evidenceIds = ids;
+  step.artifacts = artifacts;
+  plan.stopped = plan.steps.some(entry => ["blocked", "failed", "cancelled"].includes(entry.status));
+  const next = plan.steps.find(entry => entry.status === "pending" && entry.dependsOn?.every(id => plan.steps.find(s => s.id === id)?.status === "done"));
+  if (status === "done" && next) next.status = "active";
+  return JSON.stringify({ step_id: step.id, status: step.status, summary: step.summary });
+}
+
+export function settlePlan(plan: PlanState | null, cancelled = false): void {
+  if (!plan) return;
+  for (const step of plan.steps) if (step.status === "active") step.status = cancelled ? "cancelled" : "blocked";
+  if (plan.steps.some(step => step.status !== "done" && step.status !== "skipped")) plan.stopped = true;
 }

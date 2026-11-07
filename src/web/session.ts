@@ -1,3 +1,4 @@
+import path from "node:path";
 /**
  * Headless conversation runner for the web UI.
  *
@@ -15,6 +16,8 @@ import { randomUUID } from "node:crypto";
 import {
   findModel,
   contextCompressionThreshold,
+  modelContextWindow,
+  sessionDir,
   intensityForModel,
   loadConfig,
   loadPlannerPrompt,
@@ -47,6 +50,9 @@ import {
   normalizeContext,
   type ConversationContext,
 } from "../compact.js";
+import { TaskRuntime, currentTask, linkSignals, taskLimits, resumeTaskSnapshot, type AgentStatus, type TaskSnapshot } from "../llm/runtime.js";
+import { prepareContext, outputAllowance, finalTaskReport } from "../llm/context.js";
+import { FINISH_STEP_TOOL, FINISH_STEP_DEFINITION, finishPlanStep, preparePlan, settlePlan } from "../llm/plan.js";
 import { LLMClient, describeError } from "../llm/client.js";
 import { defaultProPreset, loadProModels, loadProPrompt, proMaxRecursionDepth, requireProPreset, type ProRole } from "../pro/config.js";
 import { resolveProTeam, ProPreflightError } from "../pro/preflight.js";
@@ -91,7 +97,7 @@ import {
 /** Same in-memory shape the TUI uses. */
 type Msg =
   | { role: "user" | "assistant" | "system"; content: string }
-  | { role: "tool"; name: string; arguments: Record<string, unknown>; result: string }
+  | { role: "tool"; name: string; arguments: Record<string, unknown>; result: string; evidenceId?: string; executionStatus?: string }
   | { role: "summary"; content: string; count: number };
 
 interface ApiMessage {
@@ -266,6 +272,9 @@ export class WebSession implements LiveAgent {
     this.publishLive();
     return saved;
   });
+  private taskRuntime: TaskRuntime | null = null;
+  private lastTask: TaskSnapshot | undefined;
+  private taskOutcome: AgentStatus = "completed";
   private turnToken = 0;
   private agentMode: AgentMode = "standard";
   private activeAgentMode: AgentMode = "standard";
@@ -299,6 +308,7 @@ export class WebSession implements LiveAgent {
     this.messages = (source.messages as Msg[]).slice();
     this.context = normalizeContext(source.context, this.messages.filter((m) => m.role !== "system").length);
     this.plan = resumePlan(source.plan ?? null);
+    this.lastTask = resumeTaskSnapshot(source.task_run);
     this.tokens = {
       prompt: source.tokens?.prompt ?? 0,
       completion: source.tokens?.completion ?? 0,
@@ -384,6 +394,7 @@ export class WebSession implements LiveAgent {
       approvalMode: this.approvalMode,
       agentMode: this.agentMode,
       activeAgentMode: this.busy ? this.activeAgentMode : this.agentMode,
+      task: this.taskRuntime?.snapshot() ?? this.lastTask,
       busy: this.busy,
       paused: this.paused,
       queued: this.queued,
@@ -444,11 +455,9 @@ export class WebSession implements LiveAgent {
     this.retainStreamingContent();
     this.subagent = null;
     if (this.proState) this.proState.checking = false;
-    if (this.mode === "pro") {
-      this.reviewing = null;
-      this.retrying = null;
-      this.planning = false;
-    }
+    this.reviewing = null;
+    this.retrying = null;
+    this.planning = false;
     stopPlan(this.plan);
     this.save();
     this.publishLive();
@@ -508,6 +517,8 @@ export class WebSession implements LiveAgent {
     this.proState = undefined;
     this.turnAbort?.abort();
     this.turnToken++;
+    this.taskRuntime = null;
+    this.lastTask = undefined;
     if (this.pendingApproval) {
       const pending = this.pendingApproval;
       this.pendingApproval = null;
@@ -558,6 +569,18 @@ export class WebSession implements LiveAgent {
   }
 
   private startTurn(): void {
+    if (this.taskRuntime?.settling) {
+      const previous = this.taskRuntime;
+      this.queued = lastRequestText(this.messages);
+      void previous.drain().then(() => {
+        if (this.taskRuntime === previous && this.queued && !this.paused) {
+          this.queued = null;
+          this.startTurn();
+        }
+      });
+      this.publishLive();
+      return;
+    }
     const turnMessages = this.messages.slice();
     const approvalContext = captureApprovalContext(turnMessages);
     this.busy = true;
@@ -580,6 +603,38 @@ export class WebSession implements LiveAgent {
    * pass, exactly as it did before planning existed.
    */
   private async runTurn(token: number, turnMessages: Msg[], approvalContext: ApprovalContext): Promise<void> {
+    const runtime = new TaskRuntime({
+      request: approvalContext.prompt, priorUserRequests: approvalContext.priorUserRequests,
+      cwd: this.dir, signal: this.turnAbort?.signal, limits: taskLimits(loadConfig(this.mode)),
+      journalDir: path.join(sessionDir(this.mode), "tasks", path.basename(this.sessionId || "unsaved")),
+    });
+    this.taskRuntime = runtime;
+    this.taskOutcome = "completed";
+    let failed = false;
+    try {
+      await runtime.run(() => this.runTaskTurn(token, turnMessages, approvalContext));
+    } catch (error) { failed = true; throw error; }
+    finally {
+      await runtime.drain();
+      if (runtime.signal.aborted) settlePlan(runtime.plan ?? null, true);
+      runtime.finish(runtime.signal.aborted ? "cancelled" : failed ? "failed" :
+        runtime.plan?.steps.some(step => step.status === "failed") ? "failed" :
+        runtime.plan?.steps.some(step => !["done", "skipped"].includes(step.status)) ? "partial" : this.taskOutcome);
+      if (this.taskRuntime === runtime && !this.disposed) {
+        if (runtime.signal.aborted && token === this.turnToken && this.busy && !this.paused) {
+          if ((this.taskOutcome as AgentStatus) !== "cancelled") this.messages.push({ role: "assistant", content: `[Task stopped: ${String(runtime.signal.reason)}]\n${runtime.partialReport()}` });
+          this.streamingContent = null;
+          this.onTurnFinished();
+        }
+        if (this.taskRuntime === runtime) {
+          this.lastTask = runtime.snapshot();
+          this.save(); this.publishLive();
+        }
+      }
+    }
+  }
+
+  private async runTaskTurn(token: number, turnMessages: Msg[], approvalContext: ApprovalContext): Promise<void> {
     if (this.mode === "pro") return this.runProTurn(token, turnMessages, approvalContext);
     await this.autoCompress(token);
     if (token !== this.turnToken || this.paused) return;
@@ -590,6 +645,7 @@ export class WebSession implements LiveAgent {
 
     if (plan) {
       this.plan = plan;
+      if (currentTask()) currentTask()!.runtime.plan = plan;
       this.messages.push({ role: "assistant", content: planMessage(plan) });
       this.save();
       this.publishLive();
@@ -603,7 +659,7 @@ export class WebSession implements LiveAgent {
           approvalContext,
         );
         if (token !== this.turnToken || this.paused) return;
-        this.setStep(i, finished ? "done" : "failed");
+        this.setStep(i, currentTask()?.signal.aborted ? "cancelled" : finished ? "done" : "failed");
         if (!finished) break;
       }
     } else {
@@ -615,7 +671,8 @@ export class WebSession implements LiveAgent {
 
   /** Freeze one resolved team per task, plan first, then give the whole brief to main. */
   private async runProTurn(token: number, turnMessages: Msg[], approvalContext: ApprovalContext): Promise<void> {
-    const cancelled = () => token !== this.turnToken || this.paused || this.disposed;
+    const taskSignal = currentTask()?.signal;
+    const cancelled = () => token !== this.turnToken || this.paused || this.disposed || taskSignal?.aborted === true;
     const controller = new AbortController();
     this.proAbort = controller;
     this.proTeam = null;
@@ -636,6 +693,7 @@ export class WebSession implements LiveAgent {
       this.proState.fallbacks = resolved.fallbacks;
       this.proState.checking = false;
       const team = new ProAgentTeam({
+        runtime: currentTask()?.runtime, request: approvalContext.prompt,
         models: resolved.models, maxDepth: proMaxRecursionDepth(), cwd: this.dir, cancelled,
         approve: (name, args) => this.requestApproval(name, args, {
           ...approvalContext, context: captureApprovalContext(this.turnView(turnMessages)).context,
@@ -655,43 +713,38 @@ export class WebSession implements LiveAgent {
       this.publishLive();
       this.planning = true;
       this.publishLive();
-      const planning = await team.call("plan_model", buildPlannerInput({
+      const planningResult = await team.callResult("plan_model", buildPlannerInput({
         request: approvalContext.prompt, cwd: this.dir, transcript: planTranscript(turnMessages),
       }), "Plan the task before execution. Do not modify files or execute commands.", 0, true);
+      const planning = planningResult.report;
       if (cancelled()) return;
       this.planning = false;
       this.subagent = null;
       this.retrying = null;
-      if (!planning.trim() || /\[Error:|\[Sub-agent .*without.*report/.test(planning)) {
-        throw new Error(`Pro planning failed: ${planning}`);
+      if (planningResult.status !== "completed" || !planning.trim()) {
+        throw new Error(`Pro planning failed: ${planningResult.error?.message ?? planning}`);
       }
-      this.plan = parsePlan(planning);
-      if (!this.plan) {
-        // Standard planning skips single actions; Pro plans every task.
-        try {
-          const single = JSON.parse(planning.trim().replace(/^```(?:json)?\s*|\s*```$/g, "")) as {
-            goal?: string; steps?: Array<{ title?: string; detail?: string }>;
-          };
-          if (single.steps?.length === 1 && typeof single.steps[0].title === "string" && single.steps[0].title.trim()) {
-            this.plan = { goal: String(single.goal ?? "").slice(0, 240), steps: [{
-              title: single.steps[0].title.slice(0, 160), detail: String(single.steps[0].detail ?? "").slice(0, 400), status: "pending",
-            }] };
-          }
-        } catch { /* A useful prose plan can still guide the main agent. */ }
-      }
+      this.plan = parsePlan(planning, 1);
+      if (!this.plan) throw new Error("Pro planning failed: no usable plan steps were returned");
       await this.autoCompress(token);
       if (cancelled()) return;
+      if (this.plan) {
+        preparePlan(this.plan);
+        if (currentTask()) currentTask()!.runtime.plan = this.plan;
+      }
       this.messages.push({ role: "assistant", content: this.plan ? planMessage(this.plan) : planning });
       this.save();
       this.publishLive();
-      const directive = `The planning agent produced this plan for the current user request:\n${planning}\n\n` +
-        "Execute the complete task, using the appropriate professional agents for reasoning, frontend, backend and modeling work. Verify the result and report the outcome.";
+      const directive = `The planning agent produced this plan for the current user request:\n${JSON.stringify(this.plan ?? planning)}\n\n` +
+        "Execute the complete task using the appropriate professional agents. Own integration and verification. " +
+        "Call finish_step for each accepted step using its step_id and actual evidence IDs, existing artifact paths, or the final text deliverable. " +
+        "Record blocked or failed steps explicitly. Ending a reply never completes plan steps.";
       if (this.plan?.steps.length) this.setStep(0, "active");
       const finished = await this.agentLoop(this.buildApiMessages(this.turnView(turnMessages), directive), token, approvalContext);
       if (cancelled()) return;
       if (this.plan) {
-        if (finished) for (let i = 0; i < this.plan.steps.length; i++) this.setStep(i, "done");
-        else this.setStep(0, "failed");
+        settlePlan(this.plan, currentTask()?.signal.aborted === true);
+        if (!finished && this.taskOutcome !== "partial" && this.plan.steps[0]?.status === "blocked") this.setStep(0, "failed");
       }
     } catch (error) {
       if (cancelled()) return;
@@ -766,9 +819,11 @@ export class WebSession implements LiveAgent {
     } catch {
       return null;
     } finally {
-      this.planning = false;
-      this.retrying = null;
-      if (token === this.turnToken) this.publishLive();
+      if (token === this.turnToken) {
+        this.planning = false;
+        this.retrying = null;
+        this.publishLive();
+      }
     }
   }
 
@@ -793,7 +848,8 @@ export class WebSession implements LiveAgent {
     // something the user just said.
     const prompt = this.mode === "pro" ? loadProPrompt("main_model") : loadAgentPrompt(this.activeAgentMode);
     const api: ApiMessage[] = [
-      { role: "system", content: directive ? `${prompt}\n\n${directive}` : prompt },
+      { role: "system", content: (directive ? `${prompt}\n\n${directive}` : prompt) +
+        (currentTask() ? `\n\n${currentTask()!.runtime.instructions()}` : "") },
     ];
     for (const m of modelHistory(messages, this.context)) {
       if (m.role === "user" || m.role === "assistant") {
@@ -811,22 +867,30 @@ export class WebSession implements LiveAgent {
    * the caller owns the turn's end because a planned turn runs this per step.
    */
   private async agentLoop(apiMessages: ApiMessage[], token: number, approvalContext: ApprovalContext): Promise<boolean> {
-    const tools = this.mode === "pro" ? getProToolDefinitions() : [
+    const tools = this.mode === "pro" ? [...getProToolDefinitions(), FINISH_STEP_DEFINITION] : [
       ...getToolDefinitions(),
       ...(this.activeAgentMode === "ptc" ? [(await import("../llm/codemode.js")).getCodeToolDefinition()] : []),
     ];
     const team = this.proTeam;
+    let emptyReplies = 0;
     try {
       while (true) {
         if (token !== this.turnToken || this.paused) return false;
         // Match the terminal: long tasks can keep using tools until the model
         // finishes, while older tool results are trimmed near the context limit.
         apiMessages = this.trimApiMessages(apiMessages);
+        if (currentTask()) await prepareContext({
+          messages: apiMessages, tools, capacity: team?.contextWindow("main_model") ?? modelContextWindow(this.provider, this.model, this.mode),
+          createClient: () => team?.client("main_model") ?? new LLMClient(this.model, this.provider, this.intensity),
+          stream: { signal: currentTask()!.runtime.signal, cancelled: () => token !== this.turnToken || this.paused },
+          onUsage: usage => { this.tokens.prompt += usage.prompt; this.tokens.completion += usage.completion; },
+        });
         const client = team ? team.client("main_model") : new LLMClient(this.model, this.provider, this.intensity);
         let text = "";
         this.streamingContent = "";
         this.publishLive();
         for await (const chunk of client.streamTurn(apiMessages, tools, {
+          maxOutputTokens: outputAllowance(team?.contextWindow("main_model") ?? modelContextWindow(this.provider, this.model, this.mode)),
           onRetry: (notice) => {
             this.retrying = notice;
             this.publishLive();
@@ -847,6 +911,31 @@ export class WebSession implements LiveAgent {
           this.tokens.prompt += client.usage.prompt;
           this.tokens.completion += client.usage.completion;
           this.lastPromptTokens = client.usage.prompt;
+        }
+        if (currentTask()?.signal.aborted || client.outcome?.status === "cancelled") {
+          this.taskOutcome = "cancelled";
+          this.streamingContent = null;
+          this.messages.push({ role: "assistant", content: `[Task stopped: ${String(currentTask()?.signal.reason ?? "Task cancelled")}]\n${currentTask()?.runtime.partialReport() ?? ""}` });
+          return false;
+        }
+        if (client.outcome?.error?.code.endsWith("_budget") && currentTask()) {
+          const report = await finalTaskReport(currentTask()!.runtime,
+            () => team?.client("main_model") ?? new LLMClient(this.model, this.provider, this.intensity),
+            usage => { this.tokens.prompt += usage.prompt; this.tokens.completion += usage.completion; });
+          if (token !== this.turnToken || this.paused) return false;
+          this.taskOutcome = "partial";
+          this.streamingContent = null;
+          this.messages.push({ role: "assistant", content: report });
+          return false;
+        }
+        if (client.outcome?.status === "failed") {
+          const recorded = currentTask()?.runtime.evidence.length ? currentTask()!.runtime.partialReport() : "";
+          const message = client.outcome.error?.message ?? "Model request failed";
+          this.taskOutcome = recorded ? "partial" : "failed";
+          this.streamingContent = null;
+          this.messages.push({ role: "assistant", content: text +
+            (text.includes(message) ? "" : `\n[Error: ${message}]`) + (recorded ? `\n\n${recorded}` : "") });
+          return false;
         }
         const toolCalls = client.toolCalls;
         if (text.trim()) {
@@ -877,11 +966,15 @@ export class WebSession implements LiveAgent {
         this.publishLive();
 
         if (toolCalls.length === 0) {
-          if (this.mode === "pro" && !text.trim()) {
+          if (!text.trim() && emptyReplies++ === 0) continue;
+          if (!text.trim()) {
+            this.taskOutcome = "failed";
             this.messages.push({ role: "assistant", content: "[Error: Pro main model returned an empty completion.]" });
             return false;
           }
-          return !/\[Error:/.test(text);
+          const success = client.outcome ? client.outcome.status === "completed" : !/\[Error:/.test(text);
+          if (!success) this.taskOutcome = "failed";
+          return success;
         }
         for (const call of toolCalls) {
           if (token !== this.turnToken || this.paused) return false;
@@ -911,6 +1004,7 @@ export class WebSession implements LiveAgent {
                   describeApprovalIntent(approvalContext) +
                   "Do not retry this call unchanged; ask the user how to proceed.";
             toolMsg.result = denied;
+            currentTask()?.runtime.recordTool(call.name, args, denied, "denied");
             apiMessages.push({ role: "tool", content: denied, tool_call_id: call.id });
             this.save();
             this.publishLive();
@@ -921,13 +1015,15 @@ export class WebSession implements LiveAgent {
           try {
             result = await this.runTool(call.name, args, toolMsg, token, apiMessages, approvalContext);
           } catch (err) {
+      if (token === this.turnToken) this.taskOutcome = "failed";
             result = `Error: ${err instanceof Error ? err.message : String(err)}`;
           }
           if (this.disposed) return false;
           toolMsg.result = result;
           this.save();
           if (token !== this.turnToken || this.paused) return false;
-          apiMessages.push({ role: "tool", content: result, tool_call_id: call.id });
+          apiMessages.push({ role: "tool", content: toolMsg.evidenceId
+            ? `${result}\n[Task evidence: ${toolMsg.evidenceId}; status=${toolMsg.executionStatus}]` : result, tool_call_id: call.id });
           this.publishLive();
         }
         this.save();
@@ -964,10 +1060,14 @@ export class WebSession implements LiveAgent {
     tool: string,
     args: Record<string, unknown>,
     context = captureApprovalContext(this.messages),
-    signal = this.turnAbort?.signal,
+    signal = currentTask()?.runtime.signal ?? this.turnAbort?.signal,
   ): Promise<ApprovalDecision> {
+    const linked = linkSignals(signal, currentTask()?.signal);
+    signal = linked.signal;
+    try { currentTask()?.runtime.assertTool(tool, args); }
+    catch (error) { linked.dispose(); return { approved: false, source: "input", reason: error instanceof Error ? error.message : String(error) }; }
     const risk = assessToolCall(tool, args, this.dir);
-    if (!risk) return { approved: true, source: "prompt", reason: "routine call" };
+    if (!risk) { linked.dispose(); return { approved: true, source: "prompt", reason: "routine call" }; }
     const approvalToken = this.turnToken;
     const team = this.proTeam;
     const gate = new ApprovalGate({
@@ -1006,11 +1106,12 @@ export class WebSession implements LiveAgent {
       pending.resolve(false);
       this.publishLive();
     };
-    signal?.addEventListener("abort", abortApproval, { once: true });
+    signal.addEventListener("abort", abortApproval, { once: true });
     try {
       return await gate.decide({ tool, args, cwd: this.dir, ...context, risk });
     } finally {
-      signal?.removeEventListener("abort", abortApproval);
+      signal.removeEventListener("abort", abortApproval);
+      linked.dispose();
     }
   }
 
@@ -1030,13 +1131,14 @@ export class WebSession implements LiveAgent {
   private async runProgram(args: Record<string, unknown>, token: number, apiMessages: ApiMessage[], approvalContext: ApprovalContext): Promise<string> {
     if (this.activeAgentMode !== "ptc") return "[Error: execute_ts requires PTC mode]";
     const { executeCodeProgram, ProgramToolDenied } = await import("../llm/codemode.js");
-    const signal = this.turnAbort?.signal;
+    const signal = currentTask()?.runtime.signal ?? this.turnAbort?.signal;
     const cancelled = () => token !== this.turnToken || this.paused || signal?.aborted;
     const result = await executeCodeProgram(args, {
       signal,
       onPlan: plan => {
         if (cancelled()) return;
         this.plan = plan;
+        if (currentTask()) currentTask()!.runtime.plan = plan;
         this.save(); this.publishLive();
       },
       onStep: (index, status) => { if (!cancelled()) this.setStep(index, status); },
@@ -1087,20 +1189,43 @@ export class WebSession implements LiveAgent {
    * approval gate and abort signal live.
    */
   private async runTool(
+    name: string, args: Record<string, unknown>, toolMsg: Msg & { role: "tool" },
+    token: number, apiMessages: ApiMessage[], approvalContext: ApprovalContext,
+    executionSignal?: AbortSignal,
+  ): Promise<string> {
+    const runtime = currentTask()?.runtime;
+    const execute = () => this.dispatchTool(name, args, toolMsg, token, apiMessages, approvalContext, executionSignal);
+    if (!runtime) return execute();
+    const result = await runtime.tool(name, args, execute);
+    const evidence = runtime.evidence.at(-1);
+    if (evidence && this.mode === "pro") {
+      toolMsg.evidenceId = evidence.id;
+      toolMsg.executionStatus = evidence.status;
+    }
+    return result;
+  }
+
+  private async dispatchTool(
     name: string,
     args: Record<string, unknown>,
     toolMsg: Msg & { role: "tool" },
     token: number,
     apiMessages: ApiMessage[],
     approvalContext: ApprovalContext,
-    signal = this.turnAbort?.signal,
+    signal = currentTask()?.runtime.signal ?? this.turnAbort?.signal,
   ): Promise<string> {
+    if (name === FINISH_STEP_TOOL && currentTask()) {
+      const result = finishPlanStep(this.plan, args, currentTask()!.runtime);
+      this.save(); this.publishLive();
+      return result;
+    }
     if (this.mode === "pro" && (name === "call_pro_agent" || name === DELEGATE_TOOL)) {
       const team = this.proTeam;
       if (!team) return "[Error: Pro models have not passed preflight]";
       return team.call(String(args.role ?? "backend_output_model") as ProRole, String(args.task ?? ""),
         `${typeof args.context === "string" ? args.context : ""}\n\nCurrent user request: ${approvalContext.prompt}\n` +
-        captureApprovalContext(apiMessages).context, 1);
+        captureApprovalContext(apiMessages).context, 1, args.read_only === true,
+        Array.isArray(args.write_paths) ? args.write_paths.filter((p): p is string => typeof p === "string") : undefined);
     }
     if (name === "execute_ts") return this.runProgram(args, token, apiMessages, approvalContext);
     if (name !== DELEGATE_TOOL) return executeTool(name, args, this.dir, signal);
@@ -1118,14 +1243,21 @@ export class WebSession implements LiveAgent {
     token: number,
     apiMessages: ApiMessage[],
     approvalContext: ApprovalContext,
-    signal = this.turnAbort?.signal,
+    executionSignal?: AbortSignal,
   ): Promise<string> {
     const task = String(args.task ?? "").trim();
     if (!task) return "[Error: delegate needs a task: what should the sub-agent do?]";
     const context = typeof args.context === "string" ? args.context.trim() : "";
     const approval = { ...approvalContext, context: captureApprovalContext(apiMessages).context };
     const maxRounds = subAgentRounds(loadConfig(this.mode).subagent_max_rounds);
+    const runtime = currentTask()?.runtime;
+    const signal = executionSignal ?? runtime?.signal ?? this.turnAbort?.signal;
+    const stopped = () => token !== this.turnToken || this.paused || signal?.aborted === true;
     const run = await runSubAgentTask({
+      runtime, signal,
+      readOnly: args.read_only === true,
+      writePaths: Array.isArray(args.write_paths) ? args.write_paths.filter((p): p is string => typeof p === "string") : undefined,
+      contextWindow: modelContextWindow(this.provider, this.model, this.mode),
       createClient: () => new LLMClient(this.model, this.provider, this.intensity),
       system: loadSubAgentPrompt(),
       task: buildSubAgentTask({ task, context, cwd: this.dir, rounds: maxRounds }),
@@ -1137,24 +1269,29 @@ export class WebSession implements LiveAgent {
           ? Promise.resolve("[Error: sub-agents cannot delegate further]")
           : executeTool(name, callArgs, this.dir, signal),
       onProgress: (label) => {
+        if (stopped()) return;
         this.subagent = label;
         toolMsg.result = `… ${label}`;
         this.publishLive();
       },
       onUsage: (usage) => {
+        if (stopped()) return;
         this.tokens.prompt += usage.prompt;
         this.tokens.completion += usage.completion;
       },
       onRetry: (notice) => {
+        if (stopped()) return;
         this.retrying = notice;
         this.publishLive();
       },
-      cancelled: () => token !== this.turnToken || this.paused || this.disposed,
+      cancelled: stopped,
     });
+    if (!stopped()) {
     this.subagent = null;
     this.retrying = null;
     toolMsg.result = TOOL_PENDING;
     this.publishLive();
+    }
     return formatSubAgentResult(run);
   }
 
@@ -1276,6 +1413,7 @@ export class WebSession implements LiveAgent {
         this.mode,
         this.proPreset ?? undefined,
         this.agentMode,
+        this.taskRuntime?.snapshot() ?? this.lastTask,
       );
       this.saveError = null;
       return true;

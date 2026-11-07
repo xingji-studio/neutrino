@@ -61,8 +61,8 @@ try {
     } else yield messages.at(-1).content;
   };
   const limited = await new ProAgentTeam(options({ maxDepth: 3 })).call("backend_output_model", "begin");
-  assert.equal(recursiveCalls, 3);
-  assert.match(limited, /recursion limit \(3\) reached/);
+  assert.equal(recursiveCalls, 2, "a repeated ancestor task is stopped before the depth limit");
+  assert.match(limited, /Repeated task|delegation_cycle|recursion limit/);
 
   // Planning and review remain read-only even through a nested coding agent.
   let executions = 0;
@@ -110,8 +110,8 @@ try {
       yield "finished";
     }
   };
-  const small = { ...models, backend_output_model: { ...models.backend_output_model, context_window: 2000 } };
-  const compacted = await new ProAgentTeam(options({ models: small, execute: async () => "x".repeat(8000) }))
+  const small = { ...models, backend_output_model: { ...models.backend_output_model, context_window: 8000 } };
+  const compacted = await new ProAgentTeam(options({ models: small, execute: async () => "x".repeat(40000) }))
     .call("backend_output_model", "inspect file");
   assert.equal(compacted, "finished");
   assert.equal(compressed, true);

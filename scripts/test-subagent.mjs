@@ -120,7 +120,7 @@ function scriptedClient(script, requests) {
   assert.equal(result.calls, 1);
   assert.equal(result.report, "FINAL REPORT: the fixture says hello.");
   assert.deepEqual(progress, ["thinking", "read_file", "thinking"], "the parent can see the child's phase");
-  assert.equal(requests[0].messages[0].content, "SUB-AGENT SYSTEM", "the child gets its own system prompt");
+  assert.ok(requests[0].messages[0].content.startsWith("SUB-AGENT SYSTEM"), "the child gets its own system prompt");
   assert.equal(requests[0].messages[1].content, "Task:\nread the fixture");
   assert.equal(requests[1].messages.at(-1).role, "tool", "the tool result travels in the child's own transcript");
   assert.match(requests[1].messages.at(-1).content, /RESULT of read_file/);
@@ -143,7 +143,9 @@ function scriptedClient(script, requests) {
   });
   assert.match(deniedRequests[1].messages.at(-1).content, /Not executed: approval denied/);
   assert.match(deniedRequests[1].messages.at(-1).content, /Do not retry this call unchanged/);
-  assert.equal(denied.report, "REPORT: blocked.");
+  assert.match(denied.report, /REPORT: blocked/);
+  assert.equal(denied.status, "blocked");
+  assert.equal(denied.evidenceIds.length, 1);
 
   // The round limit bounds a child that keeps asking for tools.
   const looping = [];
@@ -270,7 +272,7 @@ try {
 
     // The child's conversation.
     const childFirst = calls[1];
-    assert.equal(childFirst.messages[0].content, loadSubAgentPrompt(), "the child gets the sub-agent prompt");
+    assert.ok(childFirst.messages[0].content.startsWith(loadSubAgentPrompt()), "the child gets the sub-agent prompt");
     assert.match(childFirst.messages[1].content, /Read fixture\.txt/);
     assert.ok(childFirst.messages[1].content.includes(`Working directory: ${testHome}`), "the child knows where it works");
     assert.match(
@@ -278,7 +280,7 @@ try {
       new RegExp(`Budget: ${subagent.SUBAGENT_MAX_ROUNDS} rounds`),
       "the child is told the budget it is actually on",
     );
-    assert.deepEqual(childFirst.tools.sort(), ["list_files", "read_file", "run_command", "web_search", "write_file"], "the child cannot delegate");
+    assert.deepEqual(childFirst.tools.sort(), ["finish_task", "list_files", "read_file", "run_command", "web_search", "write_file"], "the child cannot delegate");
     assert.match(calls[2].messages.at(-1).content, /hello from the fixture/, "the child saw its own tool result");
 
     // The parent's next round sees the report and not the child's transcript.
@@ -384,8 +386,8 @@ try {
       const toolMessage = snapshot.messages.find((message) => message.role === "tool" && message.name === DELEGATE_TOOL);
       assert.ok(toolMessage, "the browser sees the delegated call");
       assert.match(toolMessage.result, /WEB SUB-AGENT REPORT/);
-      assert.equal(calls[1].messages[0].content, loadSubAgentPrompt(), "the browser's child uses the same prompt");
-      assert.deepEqual(calls[1].tools.sort(), ["list_files", "read_file", "run_command", "web_search", "write_file"]);
+      assert.ok(calls[1].messages[0].content.startsWith(loadSubAgentPrompt()), "the browser's child uses the same prompt");
+      assert.deepEqual(calls[1].tools.sort(), ["finish_task", "list_files", "read_file", "run_command", "web_search", "write_file"]);
       assert.ok(loadSession("subagent-web").messages.some((message) => message.result?.includes("WEB SUB-AGENT REPORT")));
       console.log("ok web: the browser session delegates with the same sub-agent");
     } finally {

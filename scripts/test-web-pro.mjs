@@ -330,6 +330,7 @@ try {
     const context = vm.createContext({
       PRO_TRANSITION_KEY: "neutrino.pro.transition",
       proTransitionStarted: true,
+      el: { modePicker: null },
       document: {
         querySelectorAll(selector) {
           assert.equal(selector, ".pro-curtain");

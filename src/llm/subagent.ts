@@ -23,6 +23,8 @@ import { describeError } from "./retry.js";
 import type { RetryNotice } from "./retry.js";
 import type { ApprovalDecision } from "./approval.js";
 import type { ToolDefinition } from "./tools.js";
+import { prepareContext, outputAllowance } from "./context.js";
+import { currentTask, TaskRuntime, TaskControlError, linkSignals, type AgentResult, type AgentStatus, type TaskScope } from "./runtime.js";
 
 /** One message of the child's private transcript. */
 export interface SubAgentMessage {
@@ -40,6 +42,11 @@ export interface SubAgentMessage {
 }
 
 export interface SubAgentOptions {
+  runtime?: TaskRuntime;
+  scope?: TaskScope;
+  readOnly?: boolean;
+  writePaths?: readonly string[];
+  signal?: AbortSignal;
   /** A fresh client per round; the loop owns usage and retries. */
   createClient(): LLMClient;
   /** The sub-agent's system prompt (see `loadSubAgentPrompt`). */
@@ -64,7 +71,7 @@ export interface SubAgentOptions {
   contextWindow?: number;
 }
 
-export interface SubAgentRun {
+export interface SubAgentRun extends AgentResult {
   /** The child's final message: the only thing the parent receives. */
   report: string;
   /** The parent turn ended before the child finished. */
@@ -165,7 +172,7 @@ function composePartial(input: { text: string; evidence: Evidence[]; denied: num
     const denied = input.denied ? `, ${input.denied} denied` : "";
     const omitted = input.evidence.length - shown.length;
     parts.push(
-      `Work recorded before the budget ran out (${input.calls} call${input.calls === 1 ? "" : "s"}${denied}):\n` +
+      `Work recorded before the agent stopped (${input.calls} call${input.calls === 1 ? "" : "s"}${denied}):\n` +
       shown.map((entry) => `- ${entry.name}${entry.detail ? ` ${entry.detail}` : ""}${entry.result ? ` -> ${entry.result}` : ""}`).join("\n") +
       (omitted > 0 ? `\n- …${omitted} earlier call${omitted === 1 ? "" : "s"} omitted` : ""),
     );
@@ -183,149 +190,156 @@ function composePartial(input: { text: string; evidence: Evidence[]; denied: num
  * message, which is why the sub-agent prompt insists that the report be
  * complete on its own.
  */
+export const FINISH_TASK_TOOL = "finish_task";
+export const FINISH_TASK_DEFINITION: ToolDefinition = {
+  type: "function", function: {
+    name: FINISH_TASK_TOOL,
+    description: "Finish this delegated task with an explicit status and factual, self-contained report. Use partial or blocked for unfinished work. This ends your task.",
+    parameters: { type: "object", properties: {
+      status: { type: "string", enum: ["completed", "partial", "blocked", "failed"] },
+      report: { type: "string" },
+      blockers: { type: "array", items: { type: "string" } },
+      reason: { type: "string" },
+    }, required: ["status", "report", "reason"] },
+  },
+};
+
 export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRun> {
-  const maxRounds = Math.max(SUBAGENT_MIN_ROUNDS, Math.floor(options.maxRounds ?? SUBAGENT_MAX_ROUNDS));
-  const messages: SubAgentMessage[] = [
-    { role: "system", content: options.system },
-    { role: "user", content: options.task },
-  ];
-  let report = "";
+  const inherited = currentTask();
+  const runtime = options.runtime ?? inherited?.runtime ?? new TaskRuntime({ request: options.task, signal: options.signal });
+  const owned = !options.runtime && !inherited;
+  const controller = new AbortController();
+  const linked = linkSignals(runtime.signal, options.signal, controller.signal);
+  const cancelled = () => linked.signal.aborted || options.cancelled?.() === true;
+  const poll = options.cancelled ? setInterval(() => {
+    if (options.cancelled?.()) controller.abort("The parent turn was paused or replaced");
+  }, 50) : undefined;
+  poll?.unref();
+  const maxRounds = subAgentRounds(options.maxRounds);
+  let rounds = 0;
   let calls = 0;
   let denied = 0;
-  let lastPromptTokens = 0;
+  let report = "";
+  let runId = options.scope?.runId ?? runtime.rootRunId;
   const evidence: Evidence[] = [];
-  // A child that is stopped mid-work still owes the parent what it found.
-  const aborted = (rounds: number): SubAgentRun => ({
-    report: composePartial({ text: report, evidence, denied, calls }),
-    aborted: true,
-    exhausted: false,
-    rounds,
-    calls,
-  });
-
-  for (let round = 1; round <= maxRounds; round++) {
-    if (options.cancelled?.()) return aborted(round - 1);
-    // The last round is a wrap-up: no tools, so the only way out is a report.
-    const wrapUp = round === maxRounds;
-    const capacity = options.contextWindow;
-    if (!wrapUp && capacity && messages.length > 2 &&
-        Math.max(lastPromptTokens, Math.ceil(JSON.stringify(messages).length / 3)) >= capacity * 0.8) {
-      // Only split at an assistant boundary: every retained tool result must
-      // still have the assistant/tool_calls message that produced it.
-      const starts = messages.flatMap((message, index) => index >= 2 && message.role === "assistant" ? [index] : []);
-      let keep = starts.length > 1 ? starts.at(-1)! : messages.length;
-      if (JSON.stringify(messages.slice(keep)).length > capacity) keep = messages.length;
-      const head = messages.slice(2, keep);
-      if (head.length) {
-        options.onProgress?.("compressing context");
-        const compressor = options.createClient();
-        const transcript = JSON.stringify(head);
-        // A single tool can produce more text than the role can hold. Bound
-        // the compression request itself, retaining its beginning and end.
-        const budget = Math.max(256, Math.floor(capacity * 0.6));
-        const input = transcript.length > budget
-          ? `${transcript.slice(0, Math.floor(budget / 2))}\n[Earlier activity truncated for compression]\n${transcript.slice(-Math.floor(budget / 2))}`
-          : transcript;
-        const summary = await compressor.summarize(input, { cancelled: options.cancelled, onRetry: options.onRetry });
-        if (compressor.usage) options.onUsage?.(compressor.usage);
-        if (options.cancelled?.()) return aborted(round - 1);
-        messages.splice(2, keep - 2, {
-          role: "assistant",
-          content: summary || "Earlier specialist activity was compressed. Inspect the working directory for any evidence needed to continue.",
-        });
-        lastPromptTokens = 0;
-      }
-    }
-    if (wrapUp) {
-      messages.push({
-        role: "user",
-        content:
-          "Your round budget is used up: this is the final round and no tools are available. " +
-          "Write your report now from what you have already found, and say what is still unverified.",
+  const finish = (status: AgentStatus, error?: { code: string; message: string }, exhausted = false, blockers: string[] = []): SubAgentRun => {
+    const records = runtime.evidenceFor(runId);
+    if (status === "completed" && records.some(entry => entry.status === "denied")) status = "blocked";
+    if (status === "completed" && records.some(entry => entry.status !== "completed")) status = "partial";
+    const result: SubAgentRun = {
+      runId, status,
+      report: status === "completed" ? report : composePartial({ text: report, evidence, denied, calls }),
+      evidenceIds: records.map(entry => entry.id),
+      artifacts: records.filter(entry => entry.name === "write_file" && entry.status === "completed")
+        .map(entry => String(entry.arguments.path ?? "")),
+      blockers, ...(error ? { error } : {}),
+      aborted: status === "cancelled", exhausted, rounds, calls,
+    };
+    runtime.recordResult(result);
+    return result;
+  };
+  const loop = async (): Promise<SubAgentRun> => {
+    runId = currentTask()?.runId ?? runId;
+    const messages: SubAgentMessage[] = [
+      { role: "system", content: `${options.system}\n\n${runtime.instructions()}` },
+      { role: "user", content: options.task },
+    ];
+    const tools = runtime.availableTools([...options.tools.filter(tool => tool.function.name !== FINISH_TASK_TOOL), FINISH_TASK_DEFINITION]);
+    const names = new Set(tools.map(tool => tool.function.name));
+    let lastPromptTokens = 0;
+    let emptyReplies = 0;
+    for (let round = 1; round <= maxRounds; round++) {
+      rounds = round;
+      if (cancelled()) return finish("cancelled");
+      const wrapUp = round === maxRounds;
+      const availableTools = wrapUp ? [] : tools;
+      const capacity = Number.isSafeInteger(options.contextWindow) && options.contextWindow! > 0 ? options.contextWindow! : 1_000_000;
+      await prepareContext({ messages, tools: availableTools, capacity, lastPromptTokens, preserveBrief: true,
+        createClient: options.createClient,
+        stream: { signal: linked.signal, cancelled, onRetry: options.onRetry },
+        onUsage: options.onUsage, onProgress: () => options.onProgress?.("compressing context"),
       });
-    }
-    options.onProgress?.(wrapUp ? "writing report" : "thinking");
-
-    const client = options.createClient();
-    let content = "";
-    for await (const chunk of client.streamTurn(messages, wrapUp ? [] : options.tools, {
-      onRetry: options.onRetry,
-      cancelled: options.cancelled,
-    })) {
-      if (options.cancelled?.()) return aborted(round - 1);
-      content += chunk;
-    }
-    if (client.usage) {
-      options.onUsage?.(client.usage);
-      lastPromptTokens = client.usage.prompt;
-    }
-
-    // A call offered in the wrap-up round is not executed: there is no tool
-    // result to feed back, and the round exists to produce the report.
-    const toolCalls = wrapUp ? [] : client.toolCalls;
-    if (content.trim()) report = content.trim();
-    if (content.trim() || toolCalls.length > 0) {
-      messages.push({
-        role: "assistant",
-        content,
-        // A tool-call turn must carry the thinking that produced it back to a
-        // thinking-mode endpoint, or its next request is rejected.
+      lastPromptTokens = 0;
+      if (cancelled()) return finish("cancelled");
+      if (wrapUp) messages.push({ role: "user", content:
+        "This is the final round and no tools are available. Write your report now from actual evidence and state what remains unverified. Do not claim unfinished work is complete.",
+      });
+      options.onProgress?.(wrapUp ? "writing report" : "thinking");
+      const client = options.createClient();
+      let content = "";
+      for await (const chunk of client.streamTurn(messages, availableTools, {
+        signal: linked.signal, onRetry: options.onRetry, cancelled,
+        maxOutputTokens: outputAllowance(capacity), final: wrapUp,
+      })) {
+        if (cancelled()) return finish("cancelled");
+        content += chunk;
+      }
+      if (client.usage) { options.onUsage?.(client.usage); lastPromptTokens = client.usage.prompt; }
+      if (cancelled() || client.outcome?.status === "cancelled") return finish("cancelled");
+      if (client.outcome?.status === "failed" || (!client.outcome && /^\s*\[Error:/.test(content))) {
+        return finish(evidence.length ? "partial" : "failed", client.outcome?.error ?? { code: "model_error", message: content.trim() });
+      }
+      const toolCalls = wrapUp ? [] : client.toolCalls;
+      if (!content.trim() && !toolCalls.length) {
+        if (!wrapUp && emptyReplies++ === 0) { messages.push({ role: "user", content: "The response was empty. Return a factual final report, or continue using the available tools." }); continue; }
+        report = "";
+        return finish(evidence.length ? "partial" : "failed", { code: "empty_completion", message: "Sub-agent returned an empty completion" }, wrapUp);
+      }
+      if (content.trim()) report = content.trim();
+      messages.push({ role: "assistant", content,
         ...(client.reasoningContent ? { reasoning_content: client.reasoningContent } : {}),
         ...(client.anthropicContent?.length ? { anthropic_content: client.anthropicContent } : {}),
-        ...(toolCalls.length > 0
-          ? {
-            tool_calls: toolCalls.map((call) => ({
-              id: call.id,
-              type: "function" as const,
-              function: { name: call.name, arguments: call.arguments },
-            })),
-          }
-          : {}),
+        ...(toolCalls.length ? { tool_calls: toolCalls.map(call => ({ id: call.id, type: "function" as const,
+          function: { name: call.name, arguments: call.arguments } })) } : {}),
       });
-    }
-    if (toolCalls.length === 0) {
-      // A report in the wrap-up round still means the budget is what ended the
-      // work, so the parent is told the survey is partial.
-      if (!wrapUp) return { report, aborted: false, exhausted: false, rounds: round, calls };
-      break;
-    }
-
-    for (const call of toolCalls) {
-      if (options.cancelled?.()) return aborted(round);
-      const args = parseArgs(call.arguments);
-      calls++;
-      options.onProgress?.(call.name);
-      const decision = await options.approve(call.name, args);
-      if (options.cancelled?.()) return aborted(round);
-      let result: string;
-      if (decision.approved) {
-        try {
-          result = await options.execute(call.name, args);
-        } catch (error) {
-          result = `[Error: ${describeError(error)}]`;
+      if (!toolCalls.length) return finish(wrapUp ? "partial" : denied ? "blocked" : "completed", undefined, wrapUp);
+      for (const call of toolCalls) {
+        if (cancelled()) return finish("cancelled");
+        const args = parseArgs(call.arguments);
+        calls++;
+        options.onProgress?.(call.name);
+        if (call.name === FINISH_TASK_TOOL && ["completed", "partial", "blocked", "failed"].includes(String(args.status)) &&
+            typeof args.report === "string" && args.report.trim()) {
+          report = args.report.trim();
+          return finish(args.status as AgentStatus, undefined, false,
+            Array.isArray(args.blockers) ? args.blockers.filter((v): v is string => typeof v === "string") : []);
         }
-      } else {
-        denied++;
-        // The note goes to the child, not to the user: it must not retry the same
-        // call unchanged, and it must say what was blocked in its report.
-        result =
-          decision.source === "input"
-            ? `[Not executed: ${decision.reason}]`
-            : `[Not executed: approval denied (${decision.source}): ${decision.reason}] ` +
-              "Do not retry this call unchanged; work around it or report it as blocked.";
+        let result: string;
+        if (!names.has(call.name) || call.name === FINISH_TASK_TOOL) {
+          result = "[Not executed: this tool is not available, or its final result is invalid]";
+          runtime.recordTool(call.name, args, result, "denied");
+        } else {
+          runtime.assertTool(call.name, args);
+          const decision = await options.approve(call.name, args);
+          if (cancelled()) return finish("cancelled");
+          if (decision.approved) result = await runtime.tool(call.name, args, () => options.execute(call.name, args));
+          else {
+            denied++;
+            result = decision.source === "input" ? `[Not executed: ${decision.reason}]`
+              : `[Not executed: approval denied (${decision.source}): ${decision.reason}] Do not retry this call unchanged; work around it or report it as blocked.`;
+            runtime.recordTool(call.name, args, result, "denied");
+          }
+        }
+        evidence.push(evidenceFor(call.name, args, result));
+        messages.push({ role: "tool", tool_call_id: call.id, content: result });
+        if (cancelled()) return finish("cancelled");
       }
-      evidence.push(evidenceFor(call.name, args, result));
-      messages.push({ role: "tool", tool_call_id: call.id, content: result });
     }
-  }
-
-  return {
-    report: composePartial({ text: report, evidence, denied, calls }),
-    aborted: false,
-    exhausted: true,
-    rounds: maxRounds,
-    calls,
+    return finish("partial", undefined, true);
   };
+  try {
+    const execute = () => runtime.withSignal(linked.signal, loop);
+    return options.scope ? await execute() : await runtime.child("subagent", options.task, execute,
+      { readOnly: options.readOnly, writePaths: options.writePaths });
+  } catch (error) {
+    const code = error instanceof TaskControlError ? error.code : "agent_error";
+    return finish(cancelled() || code === "cancelled" ? "cancelled" : evidence.length ? "partial" : "failed",
+      { code, message: describeError(error) });
+  } finally {
+    if (poll) clearInterval(poll);
+    linked.dispose();
+    if (owned) { await runtime.drain(); runtime.finish(cancelled() ? "cancelled" : runtime.results.at(-1)?.status ?? "failed"); }
+  }
 }
 
 /** The tool result the parent sees: the report, or why there is none. */
@@ -339,11 +353,15 @@ export function formatSubAgentResult(run: SubAgentRun): string {
     return report ? `${stopped}\nWhat it had done so far:\n${clipReport(report)}` : stopped;
   }
   if (!report) {
+    if (run.error) return `[Sub-agent ${run.status ?? "failed"}: ${run.error.code}: ${run.error.message}]`;
     return run.exhausted
       ? `[Sub-agent used all ${run.rounds} rounds without producing a report.]`
       : "[Sub-agent finished without a report.]";
   }
   const text = clipReport(report);
+  if (run.error) return `${text}\n\n[Sub-agent ${run.status}: ${run.error.code}: ${run.error.message}]`;
+  if (run.status === "blocked" || run.status === "failed") return `${text}\n\n[Sub-agent ${run.status}${run.blockers.length ? `: ${run.blockers.join("; ")}` : ""}]`;
+  if (run.status === "partial" && !run.exhausted) return `${text}\n\n[Sub-agent result is partial; unfinished work remains unverified.]`;
   return run.exhausted
     ? `${text}\n\n[Sub-agent stopped after ${run.rounds} rounds without finishing; treat this report as partial.]`
     : text;

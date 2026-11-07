@@ -1,5 +1,7 @@
 import { loadModels, type ModelsData } from "../config.js";
-import type { UsageInfo } from "../llm/client.js";
+import { completionLimit, type UsageInfo } from "../llm/client.js";
+import { currentTask, TaskControlError } from "../llm/runtime.js";
+import { inputTokenBound, DEFAULT_OUTPUT_TOKENS } from "../llm/context.js";
 import {
   ACTIVE_PRO_ROLES, loadProModels,
   type ProFallback, type ProModelReference, type ProModelSetting, type ProPreset,
@@ -68,6 +70,12 @@ function resolveSetting(
 /** An authenticated, tiny inference validates the same intensity/tool contract. */
 async function probe(model: ProResolvedModel, options: ProPreflightOptions): Promise<ProbeResult> {
   const controller = new AbortController();
+  const runtime = currentTask()?.runtime;
+  const outputTokens = runtime ? DEFAULT_OUTPUT_TOKENS : 4096;
+  const release = runtime?.activity();
+  const rootAbort = () => controller.abort(runtime?.signal.reason);
+  runtime?.signal.addEventListener("abort", rootAbort, { once: true });
+  if (runtime?.signal.aborted) rootAbort();
   const relay = () => controller.abort(options.signal?.reason);
   if (options.signal?.aborted) relay();
   else options.signal?.addEventListener("abort", relay, { once: true });
@@ -78,16 +86,20 @@ async function probe(model: ProResolvedModel, options: ProPreflightOptions): Pro
     name: "pro_availability_check", description: "A harmless availability check; this tool is never executed.",
   };
   const payload = anthropic ? {
-    model: model.model.name, stream: false, max_tokens: 4096,
+    model: model.model.name, stream: false, max_tokens: outputTokens,
     output_config: { effort: model.intensity },
     messages: [{ role: "user", content: "Availability check. Reply only OK. Do not call tools." }],
     tools: [{ ...tool, input_schema: parameters }],
   } : {
     model: model.model.name, stream: false, reasoning_effort: model.intensity,
+    ...(runtime ? completionLimit(model.model, model.provider, outputTokens) : {}),
     messages: [{ role: "user", content: "Availability check. Reply only OK. Do not call tools." }],
     tools: [{ type: "function", function: { ...tool, parameters } }],
   };
+  let reservation: ReturnType<NonNullable<typeof runtime>["request"]> | undefined;
+  let used = inputTokenBound(payload) + outputTokens;
   try {
+    reservation = runtime?.request(inputTokenBound(payload), outputTokens);
     const response = await fetch(model.model.url.replace(/\/+$/, "") + (anthropic ? "/messages" : "/chat/completions"), {
       method: "POST", signal: controller.signal,
       headers: {
@@ -115,13 +127,19 @@ async function probe(model: ProResolvedModel, options: ProPreflightOptions): Pro
     if (body.usage) {
       const prompt = body.usage.prompt_tokens ?? body.usage.input_tokens ?? 0;
       const completion = body.usage.completion_tokens ?? body.usage.output_tokens ?? 0;
+      used = prompt + completion;
       options.onUsage?.({ prompt, completion, total: prompt + completion });
     }
     return { ok: true, reason: "" };
-  } catch {
+  } catch (error) {
+    if (error instanceof TaskControlError) throw error;
+    if (runtime?.signal.aborted) throw new Error("Pro availability check was cancelled");
     if (options.signal?.aborted) throw new Error("Pro availability check was cancelled");
     return { ok: false, reason: controller.signal.aborted ? "availability request timed out" : "availability request failed" };
   } finally {
+    reservation?.settle(used);
+    release?.();
+    runtime?.signal.removeEventListener("abort", rootAbort);
     clearTimeout(timer);
     options.signal?.removeEventListener("abort", relay);
   }

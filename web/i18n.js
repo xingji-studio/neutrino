@@ -284,6 +284,10 @@ const ZH = {
 
   // -- live status --------------------------------------------------------
   "paused": "已暂停",
+  "Stopping tasks…": "正在停止任务…",
+  "Blocked": "受阻",
+  "Cancelled": "已取消",
+  "Skipped": "已跳过",
   "working": "处理中",
   "idle": "空闲",
   "compressing": "正在压缩上下文",

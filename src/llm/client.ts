@@ -1,5 +1,7 @@
 import { INTENSITY_PARAMS, intensityForModel, modelUsesReasoning, type ModelInfo } from "../config.js";
 import type { ToolDefinition } from "./tools.js";
+import { currentTask, TaskControlError, type AgentError } from "./runtime.js";
+import { inputTokenBound, DEFAULT_OUTPUT_TOKENS } from "./context.js";
 import {
   HttpStatusError,
   describeError,
@@ -28,6 +30,14 @@ export interface UsageInfo {
   total: number;
 }
 
+/** OpenAI reasoning models require max_completion_tokens; other compatible APIs use max_tokens. */
+export function completionLimit(model: ModelInfo, provider: string, tokens: number): Record<string, number> {
+  let official = false;
+  try { official = new URL(model.url).hostname === "api.openai.com"; } catch { /* Test/local endpoints may omit a URL. */ }
+  return official || /^openai$/i.test(provider) || /^(?:o\d|gpt-[5-9])(?:\b|[.-])/i.test(model.name)
+    ? { max_completion_tokens: tokens } : { max_tokens: tokens };
+}
+
 interface ApiMessage {
   role: string;
   content?: string;
@@ -43,6 +53,9 @@ interface ApiMessage {
 const CONNECT_TIMEOUT_MS = 120_000;
 
 export interface StreamOptions {
+  maxOutputTokens?: number;
+  /** Reserved final request after normal request capacity has been spent. */
+  final?: boolean;
   /** Cancels both the connection and an in-progress response body. */
   signal?: AbortSignal;
   /**
@@ -126,6 +139,8 @@ export class LLMClient {
   top_p: number;
   toolCalls: ToolCall[] = [];
   usage: UsageInfo | null = null;
+  outcome: { status: "completed" | "failed" | "cancelled"; error?: AgentError } | null = null;
+  finishReason: string | null = null;
   /**
    * The thinking text streamed alongside the reply. DeepSeek's thinking mode
    * requires it to be echoed back on the assistant message that carries a tool
@@ -163,7 +178,7 @@ export class LLMClient {
     let out = "";
     for await (const chunk of this.streamTurn(messages, undefined, options)) out += chunk;
     const text = out.trim();
-    if (!text || text.startsWith("[Error")) return "";
+    if (this.outcome?.status === "failed" || !text || text.startsWith("[Error")) return "";
     return text;
   }
 
@@ -183,7 +198,7 @@ export class LLMClient {
     )) {
       out += chunk;
     }
-    return out.trim();
+    return this.outcome?.status === "failed" ? `[Error: ${this.outcome.error?.message ?? "model request failed"}]` : out.trim();
   }
 
   async *streamTurn(
@@ -193,9 +208,17 @@ export class LLMClient {
   ): AsyncGenerator<string> {
     this.toolCalls = [];
     this.usage = null;
+    this.outcome = null;
+    this.finishReason = null;
     this.reasoningContent = "";
     this.anthropicContent = [];
     const controller = new AbortController();
+    const runtime = currentTask()?.runtime;
+    const taskSignal = currentTask()?.signal;
+    const release = runtime?.activity();
+    const rootAbort = () => controller.abort(taskSignal?.reason);
+    taskSignal?.addEventListener("abort", rootAbort, { once: true });
+    if (taskSignal?.aborted) rootAbort();
     const abort = () => controller.abort(options.signal?.reason);
     if (options.signal?.aborted) abort();
     else options.signal?.addEventListener("abort", abort, { once: true });
@@ -203,7 +226,7 @@ export class LLMClient {
     const timer = options.cancelled ? setInterval(() => {
       if (options.cancelled?.()) controller.abort();
     }, 100) : null;
-    const requestOptions = { ...options, signal: controller.signal, cancelled };
+    const requestOptions = { ...options, maxOutputTokens: options.maxOutputTokens ?? (runtime ? DEFAULT_OUTPUT_TOKENS : undefined), signal: controller.signal, cancelled };
     try {
       if (controller.signal.aborted) return;
       if (this.provider === "Anthropic") {
@@ -212,8 +235,17 @@ export class LLMClient {
       }
       yield* this.streamOpenAI(messages, tools, requestOptions);
     } catch (e) {
+      this.outcome = { status: cancelled() ? "cancelled" : "failed", error: {
+        code: e instanceof TaskControlError ? e.code : "model_error", message: describeError(e),
+      } };
       if (!cancelled()) yield `\n[Error: ${describeError(e)}]`;
     } finally {
+      if (!this.outcome && ["length", "max_tokens"].includes(this.finishReason ?? "")) {
+        this.outcome = { status: "failed", error: { code: "output_limit", message: "Model output reached its limit before completion; no tool calls from this response were executed" } };
+      }
+      this.outcome ??= { status: cancelled() ? "cancelled" : "completed" };
+      taskSignal?.removeEventListener("abort", rootAbort);
+      release?.();
       if (timer) clearInterval(timer);
       options.signal?.removeEventListener("abort", abort);
       controller.abort();
@@ -240,9 +272,14 @@ export class LLMClient {
     const policy = resolvePolicy(options);
     for (let attempt = 1; ; attempt++) {
       this.toolCalls = [];
+      this.usage = null;
+      this.finishReason = null;
       this.reasoningContent = "";
       let produced = false;
+      const inputTokens = inputTokenBound({ messages, tools });
+      let reservation: ReturnType<NonNullable<ReturnType<typeof currentTask>>["runtime"]["request"]> | undefined;
       try {
+        reservation = currentTask()?.runtime.request(inputTokens, options.maxOutputTokens ?? 4096, options.final);
         for await (const token of this.openAIAttempt(messages, tools, options)) {
           produced = true;
           yield token;
@@ -251,6 +288,8 @@ export class LLMClient {
       } catch (e) {
         if (produced || attempt >= policy.attempts || !isRetriableFailure(e)) throw e;
         if (!(await pauseForRetry(attempt, policy, e, options))) return;
+      } finally {
+        reservation?.settle((this.usage as UsageInfo | null)?.total ?? inputTokens + (options.maxOutputTokens ?? DEFAULT_OUTPUT_TOKENS));
       }
     }
   }
@@ -289,6 +328,7 @@ export class LLMClient {
     const payload: Record<string, unknown> = {
       model: this.model.name,
       messages: this.wireMessages(messages),
+      ...(options.maxOutputTokens ? completionLimit(this.model, this.provider, options.maxOutputTokens) : {}),
       ...(this.professional ? { reasoning_effort: this.intensity } : {
         temperature: this.temperature,
         top_p: this.top_p,
@@ -314,11 +354,12 @@ export class LLMClient {
     }
     if (this.model.supports_streaming === false || resp.headers.get("content-type")?.includes("application/json")) {
       const body = await resp.json() as {
-        choices?: Array<{ message?: { content?: string; reasoning_content?: string; reasoning?: string;
+        choices?: Array<{ finish_reason?: string; message?: { content?: string; reasoning_content?: string; reasoning?: string;
           tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> } }>;
         usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
       };
       const message = body.choices?.[0]?.message;
+      this.finishReason = body.choices?.[0]?.finish_reason ?? null;
       if (!message) throw new Error("endpoint did not return a valid model completion");
       this.reasoningContent = message.reasoning_content ?? message.reasoning ?? "";
       this.toolCalls = (message.tool_calls ?? []).map((call) => ({
@@ -333,8 +374,7 @@ export class LLMClient {
       return;
     }
     if (!resp.body) {
-      yield "\n[Error: empty response body]";
-      return;
+      throw new Error("empty response body");
     }
 
     const toolCallsByIndex: Record<number, ToolCall> = {};
@@ -374,7 +414,8 @@ export class LLMClient {
               total: usage.total_tokens ?? (usage.prompt_tokens ?? 0) + (usage.completion_tokens ?? 0),
             };
           }
-          const choice = (chunk as { choices?: Array<{ delta?: Record<string, unknown> }> }).choices?.[0];
+          const choice = (chunk as { choices?: Array<{ delta?: Record<string, unknown>; finish_reason?: string }> }).choices?.[0];
+          if (choice?.finish_reason) this.finishReason = choice.finish_reason;
           const delta = choice?.delta ?? {};
           // DeepSeek calls it reasoning_content; other compatible endpoints use
           // the shorter `reasoning`. Neither is part of the visible reply.
@@ -421,9 +462,14 @@ export class LLMClient {
     const policy = resolvePolicy(options);
     for (let attempt = 1; ; attempt++) {
       this.toolCalls = [];
+      this.usage = null;
+      this.finishReason = null;
       this.anthropicContent = [];
       let produced = false;
+      const inputTokens = inputTokenBound({ messages, tools });
+      let reservation: ReturnType<NonNullable<ReturnType<typeof currentTask>>["runtime"]["request"]> | undefined;
       try {
+        reservation = currentTask()?.runtime.request(inputTokens, options.maxOutputTokens ?? 4096, options.final);
         for await (const token of this.anthropicAttempt(messages, tools, options)) {
           produced = true;
           yield token;
@@ -432,6 +478,8 @@ export class LLMClient {
       } catch (e) {
         if (produced || attempt >= policy.attempts || !isRetriableFailure(e)) throw e;
         if (!(await pauseForRetry(attempt, policy, e, options))) return;
+      } finally {
+        reservation?.settle((this.usage as UsageInfo | null)?.total ?? inputTokens + (options.maxOutputTokens ?? DEFAULT_OUTPUT_TOKENS));
       }
     }
   }
@@ -476,7 +524,7 @@ export class LLMClient {
     const payload: Record<string, unknown> = {
       model: this.model.name,
       messages: chatMessages,
-      max_tokens: 4096,
+      max_tokens: options.maxOutputTokens ?? 4096,
       ...(this.professional ? { output_config: { effort: this.intensity } } : { temperature: this.temperature }),
       stream: this.model.supports_streaming !== false,
     };
@@ -503,10 +551,12 @@ export class LLMClient {
     if (this.model.supports_streaming === false || resp.headers.get("content-type")?.includes("application/json")) {
       const body = await resp.json() as {
         content?: Array<Record<string, unknown>>;
+        stop_reason?: string;
         usage?: { input_tokens?: number; output_tokens?: number };
       };
       if (!Array.isArray(body.content)) throw new Error("endpoint did not return a valid model completion");
       this.captureAnthropicContent(body.content);
+      this.finishReason = body.stop_reason ?? null;
       if (body.usage) {
         const prompt = body.usage.input_tokens ?? 0;
         const completion = body.usage.output_tokens ?? 0;
@@ -516,8 +566,7 @@ export class LLMClient {
       return;
     }
     if (!resp.body) {
-      yield "\n[Error: empty response body]";
-      return;
+      throw new Error("empty response body");
     }
 
     const reader = resp.body.getReader();
@@ -551,12 +600,13 @@ export class LLMClient {
           }
           const event = chunk as {
             type?: string; index?: number; content_block?: Record<string, unknown>;
-            delta?: { text?: string; partial_json?: string; thinking?: string; signature?: string };
+            delta?: { text?: string; partial_json?: string; thinking?: string; signature?: string; stop_reason?: string };
             message?: { usage?: { input_tokens?: number; output_tokens?: number } };
             usage?: { output_tokens?: number };
             error?: { message?: string };
           };
           const type = event.type;
+          if (event.delta?.stop_reason) this.finishReason = event.delta.stop_reason;
           if (type === "error") throw new Error(event.error?.message ?? "Anthropic stream failed");
           if (type === "message_start") {
             const input = event.message?.usage?.input_tokens ?? 0;

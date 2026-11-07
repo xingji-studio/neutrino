@@ -7,6 +7,7 @@ import { sameCwd } from "./cwd.js";
 import { normalizeContext, type ConversationContext } from "./compact.js";
 import type { PlanState } from "./llm/plan.js";
 import { SUBAGENT_MAX_ROUNDS } from "./llm/subagent.js";
+import { DEFAULT_TASK_LIMITS, type TaskSnapshot } from "./llm/runtime.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(__dirname, "..");
@@ -209,6 +210,11 @@ export const DEFAULT_CONFIG: Record<string, unknown> = {
   // Rounds one sub-agent may take; the last round has no tools and exists so the
   // child writes its report instead of exploring until it is cut off.
   subagent_max_rounds: SUBAGENT_MAX_ROUNDS,
+  task_max_agents: DEFAULT_TASK_LIMITS.agentRuns,
+  task_max_requests: DEFAULT_TASK_LIMITS.modelRequests,
+  task_max_tools: DEFAULT_TASK_LIMITS.toolCalls,
+  task_max_tokens: DEFAULT_TASK_LIMITS.tokens,
+  task_timeout_ms: DEFAULT_TASK_LIMITS.durationMs,
   // Mount the browser UI alongside the terminal UI unless it is turned off
   // here or on the command line.
   web_console: true,
@@ -321,6 +327,7 @@ export interface TokenUsage {
 }
 
 export interface SessionData {
+  task_run?: TaskSnapshot;
   id: string;
   created_at: string;
   updated_at: string;
@@ -484,6 +491,7 @@ export function saveSession(
   mode: Mode = "standard",
   proPreset?: string,
   agentMode?: AgentMode,
+  taskRun?: TaskSnapshot,
 ): string {
   ensureDirs(mode);
   const now = new Date();
@@ -510,6 +518,7 @@ export function saveSession(
     title,
     messages,
     tokens,
+    ...((taskRun ?? existing?.task_run) ? { task_run: taskRun ?? existing?.task_run } : {}),
     approval_mode: normalizeApprovalMode(approvalMode ?? existing?.approval_mode),
     agent_mode: mode === "pro" ? "standard" : normalizeAgentMode(agentMode ?? existing?.agent_mode),
     ...(mode === "pro" && (proPreset ?? existing?.pro_preset)
@@ -557,6 +566,7 @@ export function deleteSession(sessionId: string, mode: Mode = "standard"): boole
   const filePath = path.join(sessionDir(mode), `${sessionId}.json`);
   if (fs.existsSync(filePath)) {
     fs.unlinkSync(filePath);
+    fs.rmSync(path.join(sessionDir(mode), "tasks", path.basename(sessionId)), { recursive: true, force: true });
     return true;
   }
   return false;

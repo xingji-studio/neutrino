@@ -184,6 +184,22 @@ conversation's usage.
 
 The sub-agent's prompt is a file too: [`assets/subagent.txt`](./assets/subagent.txt).
 
+Each user turn now owns a shared task runtime. Ordinary and Pro agents inherit the original user request, cancellation signal and execution policy. Pausing stops active model requests, searches and command trees; a replacement turn waits for pending operations to settle. Already completed changes remain recorded.
+
+Task limits apply to the whole tree, including preflight, planning, approval reviews, compression and network retries. Configure them in the workspace's `config.json`:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `task_max_agents` | 24 | Delegated agent runs per user turn |
+| `task_max_requests` | 128 | Actual model requests; one is reserved for reporting |
+| `task_max_tools` | 256 | Executed tool calls, including delegated calls |
+| `task_max_tokens` | 2000000 | Shared input/output token capacity, reserved before requests |
+| `task_timeout_ms` | 1800000 | Overall deadline in milliseconds |
+
+`subagent_max_rounds` still limits each child. Reports have completed, partial, blocked, failed or cancelled outcomes; an empty completion gets at most one retry. Context capacity is checked before every model request, including the final report round. Full tool evidence is saved separately under `session/tasks/<session-id>/<run-id>.jsonl` (under `pro/session/tasks/` for Pro), while only compact reports enter parent context. Restarting never replays that ledger. Deleting a conversation also removes its evidence logs; late cleanup cannot recreate them. Missing provider usage is charged conservatively against reserved input/output capacity.
+
+Delegation accepts `read_only` and optional `write_paths`; descendants can only tighten these restrictions. Restricted write paths disable arbitrary shell execution. Pro's root coordinator accepts each plan step with `finish_step`, citing real evidence IDs, existing artifacts or the actual text deliverable. Ending a reply does not automatically mark the plan complete.
+
 ## Configuration
 
 Settings are stored under `~/.neutrino/`:

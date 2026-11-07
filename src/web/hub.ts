@@ -62,6 +62,7 @@ export interface LiveRetryNotice {
 
 /** The small, frequently-changing part of a live session. */
 export interface LiveMeta {
+  task?: import("../llm/runtime.js").TaskSnapshot;
   /** On-disk session id, or null until the conversation is first saved. */
   sessionId: string | null;
   title: string;

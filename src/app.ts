@@ -1023,6 +1023,7 @@ export class App {
     screen.loadedContext = data.context ?? null;
     screen.loadedApprovalMode = data.approval_mode ?? null;
     screen.loadedPlan = data.plan ?? null;
+    screen.loadedTask = data.task_run;
     screen.loadedAgentMode = data.agent_mode ?? null;
     if (data.provider) this.state.selectedProvider = data.provider;
     if (data.model) this.state.selectedModelName = data.model;

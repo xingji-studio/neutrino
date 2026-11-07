@@ -1874,7 +1874,7 @@ function renderControls(snapshot) {
   // review callback is still winding down.
   const reviewing = snapshot.approval ? null : snapshot.reviewing;
   const subagent = snapshot.subagent;
-  badge.textContent = snapshot.paused
+  badge.textContent = snapshot.task?.state === "cancelling" ? tr("Stopping tasks…") : snapshot.paused
     ? tr("paused")
     : snapshot.busy
       ? snapshot.compressing
@@ -1889,10 +1889,10 @@ function renderControls(snapshot) {
       : tr("idle");
   el.controls.appendChild(badge);
 
-  if (snapshot.saveError) {
+  if (snapshot.saveError || snapshot.task?.persistenceError) {
     const warning = document.createElement("span");
     warning.className = "badge paused";
-    warning.textContent = tr("History save failed: {error}", { error: snapshot.saveError });
+    warning.textContent = tr("History save failed: {error}", { error: snapshot.saveError || snapshot.task?.persistenceError });
     el.controls.appendChild(warning);
   }
 
@@ -2786,6 +2786,9 @@ function planStatusLabel(status) {
   if (status === "done") return tr("Done");
   if (status === "active") return tr("Active");
   if (status === "failed") return tr("Failed");
+  if (status === "blocked") return tr("Blocked");
+  if (status === "cancelled") return tr("Cancelled");
+  if (status === "skipped") return tr("Skipped");
   return tr("Pending");
 }
 
@@ -2830,7 +2833,7 @@ function renderPlanCard(source) {
     steps.className = "plan-steps";
     let done = 0;
     for (const step of plan.steps) {
-      const status = ["done", "active", "failed", "pending"].includes(step.status) ? step.status : "pending";
+      const status = ["done", "active", "failed", "pending", "blocked", "cancelled", "skipped"].includes(step.status) ? step.status : "pending";
       if (status === "done") done += 1;
       const row = document.createElement("div");
       row.className = `plan-step ${status}`;
