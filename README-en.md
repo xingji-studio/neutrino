@@ -11,7 +11,7 @@ A CLI coding agent that lives in your terminal. Neutrino gives you an interactiv
 - **Faithful log rendering** — text in the chat log keeps its indentation, blank lines and column alignment; when a long tool-output line wraps, continuation lines stay indented instead of snapping back to the left margin.
 - **Scrollable context log** — a vertical scrollbar is drawn on the right edge of the chat (and the agent-conversation viewer) whenever the conversation is taller than the view. Scroll with the wheel, `PgUp`/`PgDn` or `↑`/`↓`, or grab the scrollbar with the mouse and drag it like in a GUI.
 - **LLM providers** — ships with DeepSeek, OpenAI, and Anthropic presets; works with any OpenAI-compatible endpoint.
-- **Tool calling** — the agent can run shell commands, read files, write files, and list directories in your working directory.
+- **Tool calling** — the agent can run shell commands, read files, write files, and list directories in your working directory, and search the web with `web_search`.
 - **Streaming responses** — token-by-token output with pause/resume (`ESC ESC`).
 - **Intensity control** — tune `temperature`/`top_p` from `Low` to `Ultra`, limited to the levels each model declares in `model.json`.
 - **Session history** — messages are saved before a turn starts, streamed replies are checkpointed every second, and tool calls/results are saved immediately. The history screen lists conversations started in the current working directory. Failed saves are shown in the terminal and browser UI.
@@ -28,7 +28,7 @@ A CLI coding agent that lives in your terminal. Neutrino gives you an interactiv
 
 ## Requirements
 
-- Node.js **>= 18.0.0**
+- Node.js **>= 18.17.0**
 - An interactive terminal (TTY)
 
 ## Installation
@@ -565,7 +565,16 @@ The agent can call the following tools during a conversation:
 - `read_file` — read a text file (capped at 200KB).
 - `write_file` — write content to a file.
 - `list_files` — list directory contents.
+- `web_search` — search public sources and return titles, source URLs and snippets. Pass `query` and optionally `max_results` (1–10, default 5); `site:` filters are supported.
 - `delegate` — hand one self-contained sub-task to a sub-agent and return its report.
+
+Search needs no API key. Defaults are Bing China, [360 Search](https://www.so.com/), global Bing and [DuckDuckGo HTML](https://duckduckgo.com/duckduckgo-help-pages/features/non-javascript). Optional `BOCHA_API_KEY` enables the China-hosted [Bocha API](https://open.bochaai.com/); `TAVILY_API_KEY` enables the [Tavily Search API](https://docs.tavily.com/documentation/api-reference/endpoint/search). Configured APIs are tried first, with automatic fallback to other sources. Keys authenticate only their corresponding API requests: they never enter tool arguments or query URLs and are never forwarded to another engine. Terminal chats, browser chats, sub-agents and Pro specialists share the tool and the existing approval policy.
+
+DNS failures, timeouts, rate limits, CAPTCHA pages and unexpected responses trigger failover. A slow request starts a backup after 900 ms, with at most two sources in flight; success cancels the rest. Each source has a 6-second deadline and the entire search request has a 20-second deadline. Failed sources cool down for 60 seconds, and working sources are preferred. Every engine returns the same title, direct source URL and snippet fields, although coverage and ranking can differ.
+
+Search honors `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY`, including lowercase equivalents (lowercase takes precedence). Without these variables, Windows/WSL also checks static Windows system proxy settings. HTTP(S) proxies resolve destination hostnames through CONNECT, avoiding broken local DNS for search; direct connections use IPv4/IPv6 family selection and retain normal TLS verification. Optional `NEUTRINO_SEARCH_PROXY=http://127.0.0.1:7890` forces a proxy; `direct` forces direct connections. An explicitly selected proxy is never bypassed; a stale environment/system proxy may fall back to direct access.
+
+Ask: "Search online for the official TypeScript documentation and include source links." Advanced diagnostics can set `NEUTRINO_SEARCH_ENGINES=bing-cn,360,bing,duckduckgo` to choose the candidate order/subset (plus `bocha` and `tavily` when their keys are configured). An aggregate error is returned only when all usable sources fail. Snippets are not full pages; agents treat results as external evidence and cite source URLs.
 
 Every tool takes an additional `reason` argument: one sentence saying what the
 call is for and why it is needed now. It is what the approval card shows and what
@@ -596,6 +605,9 @@ node scripts/test-render.mjs     # fuzz the diff renderer + render the chat scre
 node scripts/test-sanitize.mjs   # verify ANSI/control codes never reach the screen
 node scripts/test-drift.mjs      # verify the input area self-heals after terminal drift
 node scripts/test-fetch.mjs      # verify streamed requests release aborts, retry drops and the 7-attempt backoff
+node scripts/test-web-search.mjs # verify providers, failover, approvals, deadlines and key handling
+node scripts/test-search-network.mjs # exercise real local proxy sockets, remote DNS, exclusions and recovery
+node scripts/test-web-search-live.mjs # optional live search; --fail-primary verifies live backup after primary failure
 node scripts/test-compact.mjs    # verify context-compression planning
 node scripts/test-history-fold.mjs # verify full-history retention, folding and resume
 node scripts/test-web-history.mjs  # verify browser history disclosures and streaming state

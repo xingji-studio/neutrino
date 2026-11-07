@@ -87,7 +87,7 @@ function scriptedClient(script, requests) {
   assert.ok(!child.includes(DELEGATE_TOOL), "a sub-agent cannot delegate again");
   assert.deepEqual(
     [...child].sort(),
-    ["list_files", "read_file", "run_command", "write_file"],
+    ["list_files", "read_file", "run_command", "web_search", "write_file"],
     "a sub-agent keeps every other tool",
   );
   const definition = getToolDefinitions().find((tool) => tool.function.name === DELEGATE_TOOL).function;
@@ -278,7 +278,7 @@ try {
       new RegExp(`Budget: ${subagent.SUBAGENT_MAX_ROUNDS} rounds`),
       "the child is told the budget it is actually on",
     );
-    assert.deepEqual(childFirst.tools.sort(), ["list_files", "read_file", "run_command", "write_file"], "the child cannot delegate");
+    assert.deepEqual(childFirst.tools.sort(), ["list_files", "read_file", "run_command", "web_search", "write_file"], "the child cannot delegate");
     assert.match(calls[2].messages.at(-1).content, /hello from the fixture/, "the child saw its own tool result");
 
     // The parent's next round sees the report and not the child's transcript.
@@ -385,7 +385,7 @@ try {
       assert.ok(toolMessage, "the browser sees the delegated call");
       assert.match(toolMessage.result, /WEB SUB-AGENT REPORT/);
       assert.equal(calls[1].messages[0].content, loadSubAgentPrompt(), "the browser's child uses the same prompt");
-      assert.deepEqual(calls[1].tools.sort(), ["list_files", "read_file", "run_command", "write_file"]);
+      assert.deepEqual(calls[1].tools.sort(), ["list_files", "read_file", "run_command", "web_search", "write_file"]);
       assert.ok(loadSession("subagent-web").messages.some((message) => message.result?.includes("WEB SUB-AGENT REPORT")));
       console.log("ok web: the browser session delegates with the same sub-agent");
     } finally {

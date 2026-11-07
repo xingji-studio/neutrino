@@ -344,6 +344,10 @@ export function assessCommand(command: string, cwd: string): { level: RiskLevel;
 }
 
 function summarizeArgs(name: string, args: Record<string, unknown>): string {
+  if (name === "web_search") {
+    const query = typeof args.query === "string" ? args.query : "";
+    return `${name} ${query}`.slice(0, 400);
+  }
   if (name === "run_command") {
     const command = typeof args.command === "string" ? args.command : "";
     return command.length > 400 ? `${command.slice(0, 397)}…` : command;
@@ -364,6 +368,13 @@ export function assessToolCall(
 ): RiskAssessment | null {
   const workingDir = path.resolve(cwd || process.cwd());
   const summary = summarizeArgs(name, args);
+
+  if (name === "web_search") {
+    return {
+      level: "high", tool: name, summary,
+      reasons: ["sends the search query to an external search provider over the network"],
+    };
+  }
 
   if (name === "run_command") {
     const command = typeof args.command === "string" ? args.command : "";

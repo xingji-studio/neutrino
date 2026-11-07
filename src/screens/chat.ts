@@ -1759,7 +1759,7 @@ export class ChatScreen extends Screen implements LiveAgent {
         // The line under the tool name is the call's own material: a command, a
         // path, or — for `delegate` — the task handed to the sub-agent.
         const argText = sanitizeText(
-          (m.arguments.command as string) ?? (m.arguments.path as string) ?? (m.arguments.task as string) ?? "",
+          (m.arguments.command as string) ?? (m.arguments.path as string) ?? (m.arguments.query as string) ?? (m.arguments.task as string) ?? "",
           { singleLine: true },
         );
         if (argText) add({ spans: [{ text: "  " + argText, style: { fg: C.dim } }] }, mi);

@@ -13,7 +13,7 @@
 - **忠实的日志渲染**——聊天日志中的文本保留缩进、空行和列对齐；长工具输出换行时，续行会保持缩进，而不会退回到左侧页边距。
 - **可滚动的上下文日志**——当对话高度超过视图时，聊天区域（以及代理对话查看器）右边缘会绘制垂直滚动条。可用滚轮、`PgUp`/`PgDn` 或 `↑`/`↓` 滚动，也可以像 GUI 一样用鼠标抓住滚动条拖动。
 - **LLM 服务商**——内置 DeepSeek、OpenAI 和 Anthropic 预设；兼容任何 OpenAI 兼容端点。
-- **工具调用**——代理可以在你的工作目录中执行 shell 命令、读取文件、写入文件和列出目录。
+- **工具调用**——代理可以在你的工作目录中执行 shell 命令、读取文件、写入文件和列出目录，并通过 `web_search` 联网搜索。
 - **流式响应**——逐 token 输出，支持暂停/恢复（`ESC ESC`）。
 - **强度控制**——可在 `Low` 到 `Ultra` 之间调节 `temperature`/`top_p`，范围限于每个模型在 `model.json` 中声明的级别。
 - **会话历史**——消息会在回合开始前保存，流式回复每秒建立检查点，工具调用/结果会立即保存。历史记录页面列出在当前工作目录中开始的对话。保存失败会在终端和浏览器界面中显示。
@@ -30,7 +30,7 @@
 
 ## 环境要求
 
-- Node.js **>= 18.0.0**
+- Node.js **>= 18.17.0**
 - 一个交互式终端（TTY）
 
 ## 安装
@@ -306,7 +306,16 @@ Open the address that matches your device:
 - `read_file` — 读取文本文件（上限 200KB）。
 - `write_file` — 将内容写入文件。
 - `list_files` — 列出目录内容。
+- `web_search` — 联网搜索公开资料，返回标题、来源 URL 和摘要。`query` 为搜索词，`max_results` 默认为 5，可设为 1–10；支持 `site:` 限定来源。
 - `delegate` — 将一个自包含的子任务交给子代理并返回其报告。
+
+搜索无需 API Key：默认按中国区 Bing、[360 搜索](https://www.so.com/)、国际区 Bing、[DuckDuckGo HTML](https://duckduckgo.com/duckduckgo-help-pages/features/non-javascript) 的顺序尝试。可选配置 `BOCHA_API_KEY` 使用国内的[博查 Search API](https://open.bochaai.com/)，或配置 `TAVILY_API_KEY` 使用 [Tavily Search API](https://docs.tavily.com/documentation/api-reference/endpoint/search)；已配置的 API 会优先尝试，失败后继续使用其他源。密钥仅用于对应服务端请求认证，不放进工具参数或搜索 URL，也不会转发给备用引擎。终端、Web、普通子代理及 Pro 专家共用同一个工具和现有审批策略。
+
+DNS 故障、连接超时、限流、验证码和异常页面都会触发自动切换。慢请求在 900 毫秒后启动备用请求，最多同时请求两个源；成功后取消其余请求。单源最多等待 6 秒，整个搜索请求最多 20 秒；近期失败源会暂避 60 秒，成功源会优先复用。无论使用哪个引擎，调用参数和返回的标题、直接来源 URL、摘要格式都相同；不同引擎的收录和排序可能不同。
+
+搜索请求支持 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY` 及 `NO_PROXY`，也识别对应的小写变量（小写优先）。没有环境变量时，Windows/WSL 会尝试读取 Windows 静态系统代理。HTTP(S) 代理通过 CONNECT 处理目标域名，避免搜索依赖失效的本地 DNS；直连启用 IPv4/IPv6 自动选择，TLS 证书仍正常校验。可选环境变量 `NEUTRINO_SEARCH_PROXY=http://127.0.0.1:7890` 强制搜索走指定代理，或设为 `direct` 强制直连；显式指定的代理不会被自动绕过，失效的环境/系统代理则允许回退直连。
+
+一般直接对代理说：“联网搜索 TypeScript 官方文档，给出来源链接”即可。高级诊断可用 `NEUTRINO_SEARCH_ENGINES=bing-cn,360,bing,duckduckgo` 调整候选顺序/范围（还支持已配置密钥的 `bocha`、`tavily`）。所有源都失败时才报告汇总错误。摘要不等于网页全文；代理会把结果视为外部证据并引用来源链接。
 
 每个工具都接受一个额外的 `reason` 参数：用一句话说明该调用的目的以及为什么现在需要它。审批卡片会显示它，审查者也会对照它检查参数，因此即使是通常无需询问的调用也必须提供。
 
@@ -334,6 +343,9 @@ node scripts/test-render.mjs     # 对 diff 渲染器进行模糊测试并渲染
 node scripts/test-sanitize.mjs   # 验证 ANSI/控制码永远不会到达屏幕
 node scripts/test-drift.mjs      # 验证输入区域在终端漂移后能自愈
 node scripts/test-fetch.mjs      # 验证流式请求会释放中止、断线时重试，以及 7 次尝试的退避
+node scripts/test-web-search.mjs # 验证多引擎解析、自动切换、审批、超时及密钥保护
+node scripts/test-search-network.mjs # 本地真实套接字验证代理、远端 DNS、NO_PROXY 和失效代理回退
+node scripts/test-web-search-live.mjs # 可选真实联网验证；加 --fail-primary 验证主源失败后的真实备用搜索
 node scripts/test-compact.mjs    # 验证上下文压缩规划
 node scripts/test-history-fold.mjs # 验证完整历史保留、折叠和恢复
 node scripts/test-web-history.mjs  # 验证浏览器历史记录披露和流式状态

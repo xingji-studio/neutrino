@@ -69,6 +69,7 @@ try {
   LLMClient.prototype.streamTurn = async function* (messages, tools) {
     this.toolCalls = [];
     assert.ok(!tools.some(entry => entry.function.name === "write_file" || entry.function.name === "run_command"));
+    assert.ok(tools.some(entry => entry.function.name === "web_search"), "read-only specialists can research public sources through the approval gate");
     if (messages.length === 2 && this.model.name === "plan_model") {
       tool(this, PRO_AGENT_TOOL, { role: "backend_output_model", task: "inspect", reason: "consult" });
     } else if (messages.length === 2) {

@@ -74,7 +74,7 @@ export class ProAgentTeam {
     // Reviewers are always read-only, including when consulted as specialists.
     const onlyRead = readOnly || role === "confirm_model";
     const tools = getProToolDefinitions().filter((tool) => !onlyRead ||
-      ["read_file", "list_files", PRO_AGENT_TOOL].includes(tool.function.name));
+      ["read_file", "list_files", "web_search", PRO_AGENT_TOOL].includes(tool.function.name));
     const names = new Set(tools.map((tool) => tool.function.name));
     const label = `${role} · ${selection.model.name} · ${depth}/${this.maxDepth}`;
     try {

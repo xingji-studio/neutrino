@@ -129,7 +129,7 @@ export function buildSubAgentTask(input: { task: string; context?: string; cwd?:
 /** One thing the child learned, kept so an exhausted child can still report. */
 interface Evidence {
   name: string;
-  /** The call's own material: a command or a path. */
+  /** The call's own material: a command, path or search query. */
   detail: string;
   /** The first line of what it returned. */
   result: string;
@@ -147,7 +147,7 @@ function firstLine(text: string): string {
 function evidenceFor(name: string, args: Record<string, unknown>, result: string): Evidence {
   return {
     name,
-    detail: clip(String(args.command ?? args.path ?? "")),
+    detail: clip(String(args.command ?? args.path ?? args.query ?? "")),
     result: firstLine(result),
   };
 }
