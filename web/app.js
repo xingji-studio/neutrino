@@ -2589,7 +2589,7 @@ async function submitNewChat() {
   }
 }
 
-/** Create a browser-owned conversation in `cwd` and reveal its folder. */
+/** Create a browser-owned conversation in `cwd` and show all sidebar directories. */
 async function createConversation(cwd, selection, approvalMode, proPreset = currentProPreset()) {
   const payload = { cwd };
   if (PRO_MODE) payload.pro_preset = proPreset;
@@ -2605,7 +2605,7 @@ async function createConversation(cwd, selection, approvalMode, proPreset = curr
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(apiError(data, `HTTP ${response.status}`));
-  setWorkspace({ path: data.cwd || cwd });
+  setWorkspace(null);
   await loadOverview({ silent: true });
   return data;
 }
