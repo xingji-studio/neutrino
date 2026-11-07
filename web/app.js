@@ -1,7 +1,7 @@
 import { createSettingsUI } from "./settings.js";
 import { createProUI } from "./pro.js";
 import { renderMarkdown as renderMarkdownHtml } from "./markdown.js";
-import { turnAnswerIndex, turnFolds, turnPreview, turnRanges } from "./turns.js";
+import { turnAnswerIndex, turnFolds, turnRanges } from "./turns.js";
 import { applyTranslations, getLanguage as currentLanguage, locale as currentLocale, setLanguage as setI18nLanguage, t as translate } from "./i18n.js";
 
 // Neutrino web UI — a dependency-free single page app.
@@ -1953,30 +1953,48 @@ function renderMessageList(messages, streaming, options) {
     context.end <= original.length && typeof context.summary === "string" && context.summary.trim()
     ? context.end : 0;
   if (end) {
-    const details = document.createElement("details");
-    details.className = "conversation-history";
-    const summary = document.createElement("summary");
-    summary.textContent = typeof tr === "function"
-      ? tr("Earlier conversation · {n} messages", { n: end })
-      : `Earlier conversation · ${end} messages`;
-    details.appendChild(summary);
-    const body = document.createElement("div");
-    body.className = "history-messages";
-    details.appendChild(body);
-    const populate = () => {
-      if (body.childNodes.length) return;
-      original.slice(0, end).forEach((message, index) => body.appendChild(renderMessage(message, index)));
-    };
-    details.open = state.openContext === end;
-    if (details.open) populate();
-    details.addEventListener("toggle", () => {
-      // Detached disclosures can emit a delayed toggle during a stream repaint.
-      if (!details.isConnected) return;
-      state.openContext = details.open ? end : null;
-      if (details.open) populate();
-      else body.replaceChildren();
-    });
-    el.messages.appendChild(details);
+    // Keep user input in place and fold only the AI output between prompts.
+    // The disclosures share one expansion state for this compressed prefix.
+    const sections = [];
+    for (let index = 0; index < end;) {
+      if (original[index].role === "user") {
+        el.messages.appendChild(renderMessage(original[index], index));
+        index++;
+        continue;
+      }
+      const start = index;
+      while (index < end && original[index].role !== "user") index++;
+      const archived = original.slice(start, index);
+      const details = document.createElement("details");
+      details.className = "conversation-history";
+      const summary = document.createElement("summary");
+      summary.textContent = typeof tr === "function"
+        ? tr("Earlier conversation · {n} messages", { n: archived.length })
+        : `Earlier conversation · ${archived.length} messages`;
+      details.appendChild(summary);
+      const body = document.createElement("div");
+      body.className = "history-messages";
+      details.appendChild(body);
+      const populate = () => {
+        if (body.childNodes.length) return;
+        archived.forEach((message, offset) => body.appendChild(renderMessage(message, start + offset)));
+      };
+      const sync = (open) => {
+        if (details.open !== open) details.open = open;
+        if (open) populate();
+        else body.replaceChildren();
+      };
+      sections.push(sync);
+      sync(state.openContext === end);
+      details.addEventListener("toggle", () => {
+        // Detached disclosures can emit a delayed toggle during a stream repaint.
+        if (!details.isConnected) return;
+        const open = details.open;
+        state.openContext = open ? end : null;
+        for (const sync of sections) sync(open);
+      });
+      el.messages.appendChild(details);
+    }
   }
   // Render the tail one turn at a time: a finished turn folds its work behind a
   // summary line and keeps its reply; a running one stays fully open. The turn in
@@ -2058,8 +2076,8 @@ function renderMessage(message, index) {
 }
 
 /**
- * A finished turn: its work folded behind one control line, its reply always on
- * screen below it. The folded messages are rendered on first open and dropped
+ * A finished turn: its complete user input above the fold, its reply below it.
+ * The folded AI messages are rendered on first open and dropped
  * again on close, so a long transcript costs nothing until the reader asks for
  * it. Nothing is lost either way: this is presentation only, and the saved
  * transcript always holds every message.
@@ -2071,25 +2089,27 @@ function renderTurnFold(start, messages) {
     ? tr(text, values)
     : String(text).replace(/\{(\w+)\}/g, (match, name) =>
       values && Object.prototype.hasOwnProperty.call(values, name) ? String(values[name]) : match));
-  // The reply is never folded away, so a turn renders as a group: the fold (the
-  // prompt line plus the work it hides) and, right below it, the answer itself.
+  // User input and the reply stay outside the disclosure, in transcript order.
   const reply = turnAnswerIndex(messages);
   const group = document.createElement("div");
   group.className = "turn-group";
+  messages.forEach((message, offset) => {
+    if (message.role === "user") group.appendChild(renderMessage(message, start + offset));
+  });
 
   const details = document.createElement("details");
   details.className = "turn";
   details.open = state.openTurns.has(start);
 
-  const hidden = reply < 0 ? messages.length : messages.length - 1;
+  const hidden = messages.filter((message, offset) => message.role !== "user" && offset !== reply).length;
   const summary = document.createElement("summary");
   const chevron = document.createElement("span");
   chevron.className = "turn-chevron";
   chevron.innerHTML =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>';
-  const you = document.createElement("span");
-  you.className = "turn-you";
-  you.textContent = tx("You: {text}", { text: truncate(turnPreview(messages, "user"), 110) });
+  const label = document.createElement("span");
+  label.className = "turn-label";
+  label.textContent = "Neutrino";
   const meta = document.createElement("span");
   meta.className = "turn-meta";
   meta.textContent = tx("{n} of {m} messages folded", { n: hidden, m: messages.length });
@@ -2098,7 +2118,7 @@ function renderTurnFold(start, messages) {
   hint.className = "turn-hint";
   meta.appendChild(hint);
   summary.appendChild(chevron);
-  summary.appendChild(you);
+  summary.appendChild(label);
   summary.appendChild(meta);
   details.appendChild(summary);
   group.appendChild(details);
@@ -2114,7 +2134,7 @@ function renderTurnFold(start, messages) {
   const populate = () => {
     if (body.childNodes.length) return;
     messages.forEach((message, offset) => {
-      if (offset === reply) return; // the answer is never inside the fold
+      if (message.role === "user" || offset === reply) return;
       body.appendChild(renderMessage(message, start + offset));
     });
   };

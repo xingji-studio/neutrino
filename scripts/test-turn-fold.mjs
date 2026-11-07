@@ -1,7 +1,7 @@
 // A finished turn folds the work it took — never the answer it produced.
 //
-//   * the reply of a finished turn always stays on screen; the fold only hides
-//     the process around it (prompt body, thinking, tool calls),
+//   * the full user input and reply always stay on screen; the fold only hides
+//     AI work (thinking and tool calls),
 //   * a turn collapses only once the model has finished it: never while it is
 //     streaming, and never because the user pressed ESC ESC,
 //   * a turn with nothing worth hiding stays open, however long its answer,
@@ -52,6 +52,7 @@ async function waitFor(predicate, label) {
 const MARKER = "END-OF-SECRET";
 const reply = (tag) => `Short summary for ${tag}.\n\nSECRET-BODY ${"z".repeat(TURN_FOLD_MIN_CHARS)} ${MARKER}`;
 const THINKING = `Let me look into that. ${"t".repeat(TURN_FOLD_MIN_CHARS)}`;
+const USER_PROMPT = "FIRST PROMPT\n\nUSER INPUT SECOND PARAGRAPH\n\n```ts\nconst userInput = 'USER CODE END';\n```";
 const toolCall = (file, result) => ({ role: "tool", name: "read_file", arguments: { path: file }, result });
 
 /** One turn that took real work: prompt, thinking, a tool call, then the answer. */
@@ -122,11 +123,16 @@ try {
 
   // 2. A turn that did real work folds that work, and keeps its answer.
   {
-    const screen = makeScreen({ messages: workTurn("FIRST PROMPT", "turn one") });
-    let buf = draw(screen);
+    const screen = makeScreen({ messages: workTurn(USER_PROMPT, "turn one") });
+    let buf = draw(screen, 100, 60);
     let text = textOf(buf);
-    assert.ok(text.includes("You: FIRST PROMPT"), "the folded turn names the prompt");
-    assert.match(text, /3 of 4 messages folded/);
+    assert.ok(text.includes("FIRST PROMPT"), "the prompt stays outside the fold");
+    assert.ok(text.includes("USER INPUT SECOND PARAGRAPH"), "later prompt paragraphs stay visible");
+    assert.ok(text.includes("USER CODE END"), "the user's code stays visible");
+    assert.match(text, /2 of 4 messages folded/);
+    assert.equal(screen.messages[1].content, USER_PROMPT, "the full prompt is preserved");
+    const promptRow = rowOf(buf, "USER INPUT SECOND PARAGRAPH");
+    assert.equal(screen.turnRows.has(promptRow), false, "user input is not a fold toggle target");
     assert.ok(text.includes("click to expand"));
     assert.ok(text.includes(MARKER), "the whole answer stays on screen while the work is folded");
     assert.ok(!text.includes("Let me look into that"), "the thinking is folded away");
@@ -138,19 +144,20 @@ try {
     assert.ok(transcript[3].content.includes(MARKER), "including the whole reply");
 
     // One click brings the whole round back.
-    clickRow(screen, buf, "You: FIRST PROMPT");
-    buf = draw(screen);
+    clickRow(screen, buf, "2 of 4 messages folded");
+    buf = draw(screen, 100, 60);
     text = textOf(buf);
     assert.ok(text.includes("Let me look into that"), "expanding shows the thinking");
     assert.ok(text.includes("read_file"), "and the tool call");
-    assert.ok(text.includes("FIRST PROMPT"), "and the original prompt");
+    assert.ok(text.includes("USER INPUT SECOND PARAGRAPH"), "the complete prompt stays visible");
+    assert.equal(text.match(/FIRST PROMPT/g)?.length, 1, "expanding never duplicates the prompt");
     assert.ok(text.includes(MARKER), "while the answer was never taken away");
     assert.ok(text.includes("click to collapse"));
-    assert.ok(!text.includes("You: FIRST PROMPT"), "the header switches to its expanded form");
 
     clickRow(screen, buf, "click to collapse");
     text = textOf(draw(screen));
     assert.ok(!text.includes("Let me look into that"), "clicking again folds the work");
+    assert.ok(text.includes("USER INPUT SECOND PARAGRAPH") && text.includes("USER CODE END"), "folding keeps all user input visible");
     assert.ok(text.includes(MARKER), "and leaves the answer in place");
     assert.equal(screen.messages.filter((m) => m.role !== "system").length, 4, "folding deletes nothing");
   }
@@ -183,7 +190,7 @@ try {
       ],
     });
     const text = textOf(draw(screen));
-    assert.ok(text.includes("You: FIRST PROMPT"), "the older turn with work is folded");
+    assert.ok(text.includes("FIRST PROMPT") && text.includes("2 of 4 messages folded"), "the older turn folds only its AI work");
     assert.ok(text.includes(MARKER), "its answer is still on screen");
     assert.ok(text.includes("SECOND PROMPT") && text.includes("short answer"), "the newest short turn stays open");
   }
@@ -229,19 +236,48 @@ try {
     let buf = draw(screen);
     let text = textOf(buf);
     assert.ok(text.includes("Earlier conversation (4 messages)"), "the prefix folds first");
-    assert.ok(!text.includes("ARCHIVED PROMPT"), "the archived turn is hidden with it");
+    assert.ok(text.includes("ARCHIVED PROMPT"), "archived user input stays visible");
+    assert.ok(!text.includes(MARKER), "the archived AI output is folded");
 
     clickRow(screen, buf, "Earlier conversation");
     buf = draw(screen);
     text = textOf(buf);
-    assert.ok(text.includes("You: ARCHIVED PROMPT"), "the turn fold appears under the prefix");
+    assert.ok(text.includes("ARCHIVED PROMPT") && text.includes("2 of 4 messages folded"), "the turn fold appears after the full prompt");
     assert.ok(!text.includes("Let me look into that"), "and it still hides its own work");
     assert.ok(text.includes(MARKER), "while the archived answer is back on screen");
 
-    clickRow(screen, buf, "You: ARCHIVED PROMPT");
+    clickRow(screen, buf, "2 of 4 messages folded");
     text = textOf(draw(screen));
     assert.ok(text.includes("Let me look into that"), "both folds open to the work");
     assert.ok(text.includes(MARKER), "and to the answer");
+  }
+
+  // Long user input and its code never cause a turn to fold by themselves.
+  {
+    const messages = [
+      { role: "user", content: `LONG USER INPUT ${"u".repeat(TURN_FOLD_MIN_CHARS)}\n\n${USER_PROMPT}` },
+      { role: "assistant", content: "A short progress update." },
+      { role: "assistant", content: "done" },
+    ];
+    const screen = makeScreen({ messages });
+    const text = screen.buildLines(96).map((line) => line.spans.map((span) => span.text).join("")).join("\n");
+    assert.ok(text.includes("USER CODE END"), "the end of a long user prompt is rendered");
+    assert.ok(text.includes("A short progress update."));
+    assert.ok(!text.includes("messages folded"), "visible user input does not count toward folding");
+    assert.equal(webTurns.turnFolds(messages), false, "the browser ignores user input in the threshold too");
+  }
+
+  // Only AI blocks count toward the block threshold in both UIs.
+  for (const blocks of [TURN_FOLD_MIN_BLOCKS - 1, TURN_FOLD_MIN_BLOCKS]) {
+    const messages = [
+      { role: "user", content: USER_PROMPT },
+      ...Array.from({ length: blocks }, (_, i) => ({ role: "assistant", content: `Step ${i}` })),
+      { role: "assistant", content: "done" },
+    ];
+    const screen = makeScreen({ messages });
+    const folded = screen.buildLines(96).some((line) => line.spans.some((span) => span.text.includes("messages folded")));
+    assert.equal(folded, blocks >= TURN_FOLD_MIN_BLOCKS);
+    assert.equal(webTurns.turnFolds(messages), folded, "both UIs count only AI work");
   }
 
   // 7. Clearing the conversation clears the fold bookkeeping too.
@@ -334,7 +370,7 @@ try {
   );
   const renderList = context.renderList;
 
-  const longTurn = workTurn("BROWSER PROMPT", "browser turn");
+  const longTurn = workTurn(USER_PROMPT, "browser turn");
   const shortTurn = [
     { role: "user", content: "thanks" },
     { role: "assistant", content: "anytime" },
@@ -346,18 +382,21 @@ try {
   assert.equal(pane.children.length, 3, "one folded group plus the two short messages");
   let group = pane.children[0];
   assert.equal(group.className, "turn-group");
-  let fold = group.children[0];
+  const prompt = group.children[0];
+  assert.equal(prompt.message.content, USER_PROMPT, "all prompt paragraphs and code render outside the fold");
+  assert.equal(prompt.index, 0, "the prompt keeps its original index");
+  let fold = group.children[1];
   assert.equal(fold.className, "turn");
   assert.equal(fold.open, false, "a finished turn starts folded");
-  assert.equal(fold.children[0].children[1].textContent, "You: BROWSER PROMPT");
-  assert.equal(fold.children[0].children[2].textContent, "3 of 4 messages folded");
+  assert.equal(fold.children[0].children[1].textContent, "Neutrino");
+  assert.equal(fold.children[0].children[2].textContent, "2 of 4 messages folded");
   assert.match(fold.children[0].children[2].children[0].textContent, /click to expand/);
   assert.equal(fold.children[1].children.length, 0, "a folded turn builds no hidden DOM");
   assert.deepEqual(pane.children.slice(1).map((element) => element.index), [4, 5]);
   assert.equal(pane.children[1].message.content, "thanks", "the short turn is not folded");
 
   // The answer is part of the group, outside the fold, and never dropped.
-  const answer = group.children[1];
+  const answer = group.children[2];
   assert.ok(answer.message.content.includes(MARKER), "the whole answer is on screen while folded");
   assert.equal(answer.index, 3, "it keeps its original index");
 
@@ -365,22 +404,25 @@ try {
   fold.open = true;
   fold.fire("toggle");
   assert.ok(browserState.openTurns.has(0), "the opened turn is remembered");
-  assert.deepEqual(fold.children[1].children.map((element) => element.index), [0, 1, 2], "the work is rendered on demand");
+  assert.deepEqual(fold.children[1].children.map((element) => element.index), [1, 2], "only AI work is rendered on demand");
   assert.match(fold.children[0].children[2].children[0].textContent, /click to collapse/);
-  assert.equal(group.children[1], answer, "the answer stays where it was");
+  assert.equal(group.children[0], prompt, "the prompt stays where it was");
+  assert.equal(group.children[2], answer, "the answer stays where it was");
 
   // A repaint (a streamed token elsewhere) keeps it open and populated.
   renderList([...longTurn, ...shortTurn], "streaming", { readOnly: false, active: true });
   group = pane.children[0];
-  fold = group.children[0];
+  fold = group.children[1];
   assert.equal(fold.open, true, "a repaint does not collapse what the reader opened");
-  assert.equal(fold.children[1].children.length, 3);
+  assert.equal(fold.children[1].children.length, 2);
+  assert.equal(group.children[0].message.content, USER_PROMPT, "streaming repaints keep the complete prompt");
 
   fold.open = false;
   fold.fire("toggle");
   assert.equal(browserState.openTurns.has(0), false);
   assert.equal(fold.children[1].children.length, 0, "closing frees the DOM again");
-  assert.ok(group.children[1].message.content.includes(MARKER), "and the answer stays on screen");
+  assert.equal(group.children[0].message.content, USER_PROMPT, "closing keeps all user input visible");
+  assert.ok(group.children[2].message.content.includes(MARKER), "and the answer stays on screen");
 
   // The turn being answered never folds, however long it is: the reader is
   // watching it. `active` covers both streaming and a paused turn.
@@ -400,8 +442,9 @@ try {
   renderList(running, null, { readOnly: false, active: false });
   assert.equal(pane.children[0].message.content, "thanks", "the short turn is still open");
   assert.equal(pane.children[2].className, "turn-group", "the finished turn is folded");
-  assert.equal(pane.children[2].children[0].open, false);
-  assert.ok(pane.children[2].children[1].message.content.includes(MARKER), "and its answer is rendered");
+  assert.equal(pane.children[2].children[0].message.content, USER_PROMPT, "the complete prompt stays visible on completion");
+  assert.equal(pane.children[2].children[1].open, false);
+  assert.ok(pane.children[2].children[2].message.content.includes(MARKER), "and its answer is rendered");
 
   // The server keeps sending everything: the browser only chooses what to draw.
   const webModel = { name: "test", url: "", api_key: "", supports_streaming: true };

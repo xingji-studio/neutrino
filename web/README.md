@@ -6,8 +6,9 @@ A small, dependency-free single page app that is served by the Neutrino CLI at
 - browse every saved conversation grouped by working directory (like Codex),
   with only the five latest transcripts per path shown and the rest collapsed;
 - watch a running terminal conversation stream in real time: the work behind every
-  finished turn folds into one line that opens on a click, while the reply itself
-  stays on screen (the turn being answered is open, and a pause is not a fold);
+  finished turn folds into one line that opens on a click, while the full user
+  input and final reply stay on screen; earlier history also folds only AI output
+  (the turn being answered is open, and a pause is not a fold);
 - read replies as rendered markdown: headings, nested/task lists, tables, block
   quotes, code fences, emphasis, safe links and images; raw HTML is escaped;
 - start a new conversation in a working directory you choose, including a folder

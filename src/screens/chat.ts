@@ -107,8 +107,8 @@ const TOOLS = getToolDefinitions();
 const SUB_AGENT_TOOLS = getSubAgentToolDefinitions();
 
 /**
- * A finished turn folds its *work* away — the prompt body, the thinking and the
- * tool calls — and never its final reply, which always stays on screen. Doing
+ * A finished turn folds its *work* away — the thinking and the tool calls —
+ * while the full user prompt and final reply always stay on screen. Doing
  * that is only worth a click when the work is substantial: four or more blocks,
  * or roughly six wrapped lines of text. Short exchanges stay readable without a
  * click. `web/turns.js` applies the same rule in the browser, so both UIs fold
@@ -1656,7 +1656,7 @@ export class ChatScreen extends Screen implements LiveAgent {
   /**
    * A finished turn is only worth folding when the work it hides is substantial.
    * Whether it is folded right now is a separate question (`expandedTurns`), and
-   * its reply is never part of what it hides.
+   * its user input and reply are never part of what it hides.
    */
   private turnHides(start: number, end: number): boolean {
     if (!this.finishedTurns.has(start)) return false;
@@ -1664,11 +1664,11 @@ export class ChatScreen extends Screen implements LiveAgent {
     let blocks = 0;
     let chars = 0;
     for (let i = start; i < end; i++) {
-      // The reply stays on screen, so it is neither hidden content nor a reason
-      // to fold: a long answer alone must never collapse its own turn.
+      // User input and the reply stay on screen, so neither counts toward the
+      // folding threshold, however long either one is.
       if (i === answer) continue;
       const m = this.messages[i];
-      if (m.role === "user" || m.role === "assistant") {
+      if (m.role === "assistant") {
         blocks++;
         chars += m.content.length;
       }
@@ -1721,22 +1721,6 @@ export class ChatScreen extends Screen implements LiveAgent {
     return map;
   }
 
-  /**
-   * The first line of the first message in `role`. Only one line: the header is
-   * a signpost, and the full text is one click away.
-   */
-  private turnPreview(start: number, end: number, role: "user" | "assistant"): string {
-    for (const m of this.messages.slice(start, end)) {
-      if (m.role !== role) continue;
-      const line = sanitizeText(m.content)
-        .split("\n")
-        .map((part) => part.trim())
-        .find((part) => part.length > 0);
-      if (line) return line;
-    }
-    return "";
-  }
-
   /** The header standing in for a folded turn, or the way back into one. */
   private pushTurnHeader(
     start: number,
@@ -1762,13 +1746,12 @@ export class ChatScreen extends Screen implements LiveAgent {
       );
       return;
     }
-    const you = `You: ${this.turnPreview(start, end, "user") || "(no text)"}`;
-    add({ spans: [{ text: ellipsize(`▸ ${you}`, width), style: { fg: C.amber, bold: true } }] }, -1, start);
-    // The prompt and the reply sit either side of the work this fold hides, so
-    // the control line goes between them and the answer stays on screen below.
-    const hidden = this.turnAnswer(start, end) < 0 ? count : count - 1;
+    const answer = this.turnAnswer(start, end);
+    const hidden = this.messages.slice(start, end).filter((message, offset) =>
+      message.role !== "user" && message.role !== "system" && start + offset !== answer,
+    ).length;
     const meta = `${hidden} of ${count} message${count === 1 ? "" : "s"} folded`;
-    add({ spans: [{ text: ellipsize(`  ${meta} — click to expand`, width), style: { fg: C.dim } }] }, -1, start);
+    add({ spans: [{ text: ellipsize(`▸ ${meta} — click to expand`, width), style: { fg: C.dim } }] }, -1, start);
   }
 
   /** Fold or unfold one turn. */
@@ -1974,24 +1957,22 @@ export class ChatScreen extends Screen implements LiveAgent {
         archived = context !== null && recordIndex < context.end;
         recordIndex++;
       }
-      // A foldable turn always shows its control lines first; its work then
-      // renders when the reader has opened it, and its reply always does.
-      if (m.role !== "system" && turn === mi && !(archived && !this.expandedContext)) {
-        this.pushTurnHeader(mi, this.turnEnd(mi), width, add);
-      }
       const folded = turn >= 0 && !this.expandedTurns.has(turn);
       const reply = folded && answers[mi] === mi;
       if (m.role === "system") {
         pushText(sanitizeText(m.content), { fg: C.dim });
-      } else if ((archived && !this.expandedContext) || (folded && !reply)) {
-        // Hidden: by the collapsed "Earlier conversation" fold, or by the turn's
-        // own fold, which hides the prompt body and the work but never the
-        // reply. Either way the message stays in the transcript, on disk and in
-        // the request; the header above says how to get it back on screen.
       } else if (m.role === "user") {
         add({ spans: [{ text: "You:", style: { fg: C.accent, bold: true } }] });
         pushMarkdown(sanitizeText(m.content), { fg: C.user });
         add({ spans: [] });
+        // The fold control follows the complete prompt, which stays visible
+        // even when the turn or the earlier conversation is collapsed.
+        if (turn === mi && !(archived && !this.expandedContext)) {
+          this.pushTurnHeader(mi, this.turnEnd(mi), width, add);
+        }
+      } else if ((archived && !this.expandedContext) || (folded && !reply)) {
+        // Only AI output is hidden. Every message remains in the transcript,
+        // on disk and in the request; the controls reveal it again.
       } else if (m.role === "assistant") {
         add({ spans: [{ text: "Neutrino:", style: { fg: C.accent, bold: true } }] });
         pushMarkdown(sanitizeText(m.content), { fg: C.assistant });
@@ -2050,7 +2031,7 @@ export class ChatScreen extends Screen implements LiveAgent {
         }
         add({ spans: [] });
       }
-      if (context && archived && recordIndex === context.end) {
+      if (context && archived && recordIndex === context.end && this.expandedContext) {
         this.contextLines.add(lines.length);
         add({ spans: [{ text: "▾ Collapse earlier conversation", style: { fg: C.amber } }] });
         add({ spans: [] });

@@ -20,7 +20,7 @@ const { App } = await import("../dist/app.js");
 
 saveConfig({});
 const original = [
-  { role: "user", content: "FIRST ORIGINAL PROMPT" },
+  { role: "user", content: "FIRST ORIGINAL PROMPT\n\nUSER INPUT SECOND PARAGRAPH\n\n```js\nconst keep = 'USER CODE END';\n```" },
   { role: "assistant", content: "FIRST ORIGINAL ANSWER" },
   { role: "tool", name: "read_file", arguments: { path: "fixture.txt" }, result: "TOOL START " + "x".repeat(9000) + " TOOL END" },
   ...Array.from({ length: 5 }, (_, i) => ({ role: i % 2 ? "user" : "assistant", content: `recent ${i}` })),
@@ -109,7 +109,7 @@ try {
     assert.deepEqual(saved.messages, original, `${kind}: every original message/tool result survives`);
     assert.equal(saved.context.end, 4);
     assert.equal(saved.messages[2].result.length, original[2].result.length, "large results are not truncated in history");
-    assert.equal(saved.title, original[0].content, "compression must not replace the conversation title");
+    assert.equal(saved.title, original[0].content.slice(0, 80), "compression must not replace the conversation title");
     assert.ok(transcripts[0].includes("FIRST ORIGINAL PROMPT"));
     assert.ok(!transcripts[0].includes("TOOL END"), "only summary input is clipped");
     assert.ok(runner.buildApiMessages().some(m => m.content.includes("summary 1")));
@@ -121,11 +121,14 @@ try {
     if (kind === "tui") {
       let text = render(runner);
       assert.match(text, /▸ Earlier conversation \(4 messages\)/);
-      assert.ok(!text.includes(original[0].content), "earlier messages start folded");
+      assert.ok(text.includes("FIRST ORIGINAL PROMPT") && text.includes("USER INPUT SECOND PARAGRAPH"), "earlier user input stays visible");
+      assert.ok(text.includes("USER CODE END"), "user code stays visible in collapsed history");
+      assert.ok(!text.includes(original[1].content), "earlier AI output starts folded");
       runner.onMouse({ type: "click", button: 0, x: 3, y: [...runner.contextRows][0] });
       text = render(runner);
       assert.match(text, /▾ Earlier conversation/);
-      assert.ok(text.includes(original[0].content), "click reveals the original user message");
+      assert.ok(text.includes("USER INPUT SECOND PARAGRAPH"), "expansion keeps the original user message visible");
+      assert.equal(text.match(/FIRST ORIGINAL PROMPT/g)?.length, 1, "expansion never duplicates user input");
       assert.ok(text.includes(original[1].content), "click reveals the original answer");
       const toolRow = [...runner.toolRows.entries()][0][0];
       runner.onMouse({ type: "click", button: 0, x: 3, y: toolRow });
@@ -133,7 +136,9 @@ try {
       assert.ok(fullText.includes("TOOL END"), "nested tool details can still reveal the complete result");
       render(runner);
       runner.onMouse({ type: "click", button: 0, x: 3, y: [...runner.contextRows][0] });
-      assert.ok(!render(runner).includes(original[0].content), "a second click folds the old conversation");
+      text = render(runner);
+      assert.ok(text.includes("USER INPUT SECOND PARAGRAPH") && text.includes("USER CODE END"), "folding again keeps the full user input");
+      assert.ok(!text.includes(original[1].content), "a second click folds the old AI output");
     }
 
     // A later compaction summarizes the previous context plus new messages;
@@ -154,9 +159,11 @@ try {
     assert.deepEqual(resumed.context, repeated.context);
     assert.ok(resumed.buildApiMessages().some(m => m.content.includes("summary 2")));
     if (kind === "tui") {
-      assert.ok(!render(resumed).includes(original[0].content), "reopened history starts folded again");
+      const reopened = render(resumed);
+      assert.ok(reopened.includes("USER INPUT SECOND PARAGRAPH") && reopened.includes("USER CODE END"), "reopened history keeps all user input visible");
+      assert.ok(!reopened.includes(original[1].content), "reopened AI history starts folded again");
       resumed.onMouse({ type: "click", button: 0, x: 3, y: [...resumed.contextRows][0] });
-      assert.ok(render(resumed).includes(original[0].content), "reopened history expands to original text");
+      assert.ok(render(resumed).includes(original[1].content), "reopened history expands to the original AI text");
       resumed.onKey({ name: "l", ctrl: true, meta: false, shift: false, char: "", sequence: "" });
       resumed.startTurn = () => {};
       resumed.liveSend("a fresh conversation");

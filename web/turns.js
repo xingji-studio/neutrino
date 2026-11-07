@@ -2,9 +2,9 @@
 //
 // A conversation is a sequence of turns: each one starts at a user message and
 // runs until the next one. Once the agent has finished a turn, the browser folds
-// away the work it took — the prompt body, the thinking and the tool calls — and
-// keeps the final reply on screen, so a finished exchange always ends on its
-// answer. The complete round is still one click away.
+// away the work it took — the thinking and the tool calls — and keeps the full
+// user prompt and final reply on screen. The complete round is still one click
+// away.
 //
 // The thresholds mirror TURN_FOLD_MIN_BLOCKS / TURN_FOLD_MIN_CHARS in
 // src/screens/chat.ts, so the terminal and the browser fold the same turns.
@@ -33,8 +33,8 @@ export function turnAnswerIndex(messages) {
 
 /**
  * True when folding the work behind this turn saves more room than it costs.
- * The reply is never folded away, so it is not counted: a long answer on its own
- * must never collapse the turn that carries it.
+ * User input and the reply are never folded away, so neither counts toward the
+ * folding threshold, however long either one is.
  */
 export function turnFolds(messages) {
   const reply = turnAnswerIndex(messages);
@@ -42,7 +42,7 @@ export function turnFolds(messages) {
   let chars = 0;
   messages.forEach((message, index) => {
     if (index === reply) return;
-    if (message.role !== "user" && message.role !== "assistant") return;
+    if (message.role !== "assistant") return;
     blocks++;
     chars += String(message.content ?? "").length;
   });
@@ -50,8 +50,7 @@ export function turnFolds(messages) {
 }
 
 /**
- * The first line of the first message in `role`. One line only: the header is a
- * signpost, and the full text is one click away.
+ * The first nonempty line of the first message in `role` that contains text.
  */
 export function turnPreview(messages, role) {
   for (const message of messages) {

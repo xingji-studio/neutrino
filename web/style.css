@@ -1370,7 +1370,7 @@ svg {
   transform: rotate(90deg);
 }
 
-.turn-you {
+.turn-label {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
