@@ -14,6 +14,20 @@ process.env.USERPROFILE = testHome;
 const { loadVersion } = await import("../dist/config.js");
 const { checkForUpdate } = await import("../dist/update.js");
 const { startWebServer } = await import("../dist/web/server.js");
+const { PRO_MODELS_URL } = await import("../dist/pro/config.js");
+const { seedProPresets } = await import("./pro-presets.mjs");
+seedProPresets();
+
+// Both workspaces must be testable without fetching the official Pro presets.
+const originalFetch = globalThis.fetch;
+let presetDownloads = 0;
+globalThis.fetch = (input, init) => {
+  if (String(input) === PRO_MODELS_URL) {
+    presetDownloads++;
+    return Promise.reject(new Error("The update-check fixture is offline"));
+  }
+  return originalFetch(input, init);
+};
 
 const current = loadVersion();
 const newer = `${Number(current.split(".")[0]) + 1}.0.0`;
@@ -81,9 +95,12 @@ try {
   // dialog renders, and the Pro workspace, tell the same story.
   const found = { current_version: current, latest_version: newer, has_update: true };
   assert.deepEqual((await request("/api/settings")).data.update, found);
-  assert.deepEqual((await request("/pro/api/update/check", { body: {} })).data, checked.data,
-    "the Pro workspace checks through its own API prefix");
-  assert.deepEqual((await request("/pro/api/settings")).data.update, found);
+  const proChecked = await request("/pro/api/update/check", { body: {} });
+  assert.equal(proChecked.status, 200, JSON.stringify(proChecked.data));
+  assert.deepEqual(proChecked.data, checked.data, "the Pro workspace checks through its own API prefix");
+  const proSettings = await request("/pro/api/settings");
+  assert.equal(proSettings.status, 200, JSON.stringify(proSettings.data));
+  assert.deepEqual(proSettings.data.update, found);
 
   // A second check must not be served from the start-up answer: the registry now
   // reports the running version, so there is nothing to install any more.
@@ -114,8 +131,10 @@ try {
   assert.equal((await request("/api/update/check")).status, 405);
   assert.equal((await request("/api/update/check", { body: {}, headers: { Origin: "http://evil.example" } })).status, 403);
 
+  assert.equal(presetDownloads, 0, "update checks and settings use local Pro presets without network downloads");
   console.log("ok update check: both workspaces ask the registry on demand and report the result");
 } finally {
+  globalThis.fetch = originalFetch;
   await server?.close();
   fs.rmSync(root, { recursive: true, force: true });
   fs.rmSync(testHome, { recursive: true, force: true });
