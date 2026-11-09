@@ -1,0 +1,10 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+body{margin:0;padding:8px;background:#202127;color:#eee;font:13px system-ui}textarea{box-sizing:border-box;width:100%;height:115px;background:#17181d;color:inherit;border:1px solid #586a91;border-radius:8px;padding:10px;resize:none}footer{display:flex;justify-content:space-between;align-items:center}button{background:#b8cbff;border:0;border-radius:6px;padding:6px 15px}#status{color:#c3cada}
+</style></head><body><textarea id="draft" aria-label="Writing draft / 写作草稿" placeholder="Write here / 在这里写作…"></textarea><footer><span id="status">Writing editor / 写作编辑器</span><button id="send">Send / 发送</button></footer><script>
+const input=document.getElementById('draft'),status=document.getElementById('status');let revision=0,writing=Promise.resolve();
+async function sync(){const draft=await neutrino.composer.read();revision=draft.revision;if(document.activeElement!==input)input.value=draft.text}
+input.oninput=()=>{const text=input.value;writing=writing.then(async()=>{const result=await neutrino.composer.write({text,expectedRevision:revision});revision=result.revision;status.textContent=Array.from(text).length+' characters / 字'}).catch(async e=>{status.textContent=e.message;await sync()})};
+document.getElementById('send').onclick=async()=>{await writing;try{await neutrino.composer.submit();input.value='';await sync()}catch(e){status.textContent=e.message}};
+input.onkeydown=e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();document.getElementById('send').click()}};
+neutrino.on('context.changed',()=>sync().catch(e=>status.textContent=e.message));sync().catch(e=>status.textContent=e.message);
+</script></body></html>

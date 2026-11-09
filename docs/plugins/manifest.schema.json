@@ -1,0 +1,286 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Neutrino Plugin Manifest v1",
+  "type": "object",
+  "required": [
+    "id",
+    "name",
+    "version",
+    "apiVersion"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z][a-z0-9-]*)+$",
+      "maxLength": 80
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[a-zA-Z0-9.-]+)?$"
+    },
+    "apiVersion": {
+      "const": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "license": {
+      "type": "string"
+    },
+    "runtime": {
+      "enum": [
+        "sandbox",
+        "native"
+      ],
+      "default": "sandbox"
+    },
+    "entries": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "web": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tui": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "webAssets": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 100
+    },
+    "profiles": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "standard",
+          "pro"
+        ]
+      }
+    },
+    "categories": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "function",
+          "appearance",
+          "skill",
+          "prompt"
+        ]
+      }
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "tools.register",
+          "commands.register",
+          "prompts.contribute",
+          "hooks.register",
+          "ui.contribute",
+          "conversation.read",
+          "composer.read",
+          "composer.write",
+          "composer.submit",
+          "filesystem.read",
+          "filesystem.write",
+          "network",
+          "process",
+          "storage"
+        ]
+      }
+    },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "optionalDependencies": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "description": "Bounded JSON Schema subset documented in manifest.md"
+    },
+    "contributes": {
+      "type": "object",
+      "properties": {
+        "ui": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "slot",
+              "title"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{0,39}$"
+              },
+              "slot": {
+                "enum": [
+                  "app.menu",
+                  "workspace.tabs",
+                  "sidebar.footer",
+                  "chat.header.actions",
+                  "chat.composer.toolbar",
+                  "chat.composer",
+                  "chat.message.actions",
+                  "chat.message.renderer",
+                  "chat.card.plan",
+                  "chat.card.tool",
+                  "settings.sections"
+                ]
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "order": {
+                "type": "number"
+              },
+              "view": {
+                "type": "string"
+              },
+              "command": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "insert": {
+                "type": "string"
+              },
+              "height": {
+                "type": "integer",
+                "minimum": 40,
+                "maximum": 1200
+              },
+              "platforms": {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "web",
+                    "tui"
+                  ]
+                }
+              },
+              "match": {
+                "type": "object",
+                "properties": {
+                  "role": {
+                    "type": "string"
+                  },
+                  "tool": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "prompts": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "required": [
+              "id"
+            ],
+            "oneOf": [
+              {
+                "required": [
+                  "file"
+                ],
+                "not": {
+                  "required": [
+                    "text"
+                  ]
+                }
+              },
+              {
+                "required": [
+                  "text"
+                ],
+                "not": {
+                  "required": [
+                    "file"
+                  ]
+                }
+              }
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{0,39}$"
+              },
+              "text": {
+                "type": "string"
+              },
+              "file": {
+                "type": "string"
+              },
+              "slot": {
+                "enum": [
+                  "persona",
+                  "rules",
+                  "context"
+                ]
+              },
+              "order": {
+                "type": "number"
+              },
+              "roles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "replace": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "skills": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string"
+          }
+        },
+        "theme": {
+          "type": "object",
+          "maxProperties": 50,
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 100
+          }
+        }
+      }
+    }
+  }
+}

@@ -18,6 +18,7 @@ import { normalizeMode, type ApprovalMode, type Mode, type AgentMode, type Resol
 import type { RiskAssessment } from "../llm/risk.js";
 import type { PlanState } from "../llm/plan.js";
 import type { ProFallback } from "../pro/config.js";
+import type { FastSnapshot } from "../fast/types.js";
 
 export type ModelChangeResult = { ok: true } | { ok: false; error: string };
 
@@ -94,6 +95,7 @@ export interface LiveMeta {
   agentMode?: AgentMode;
   /** Strategy frozen for the running turn; agentMode selects the next turn. */
   activeAgentMode?: AgentMode;
+  fast?: FastSnapshot;
   pro?: {
     preset: string;
     checking: boolean;
@@ -308,6 +310,17 @@ class LiveHub {
     entry.agent.liveSend(text);
     this.notify(key);
     return true;
+  }
+
+  /** Mode and message are committed synchronously; a running turn keeps its frozen strategy. */
+  sendConfigured(key: string, text: string, mode?: AgentMode): ModelChangeResult {
+    if (!this.entries.has(key)) return { ok: false, error: "unknown live session" };
+    if (mode !== undefined) {
+      const changed = this.setAgentMode(key, mode);
+      if (!changed.ok) return changed;
+    }
+    this.send(key, text);
+    return { ok: true };
   }
 
   approve(key: string, approved: boolean): boolean {

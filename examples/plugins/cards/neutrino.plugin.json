@@ -1,0 +1,42 @@
+{
+  "id": "community.inspector-cards",
+  "name": "Inspector Cards / 检查卡片",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "categories": [
+    "appearance"
+  ],
+  "description": "Alternative tool, plan and message renderers. Select each provider in Plugins.",
+  "permissions": [
+    "ui.contribute",
+    "conversation.read"
+  ],
+  "contributes": {
+    "ui": [
+      {
+        "id": "tool",
+        "slot": "chat.card.tool",
+        "title": "Inspector tool card / 工具卡片",
+        "view": "card.html",
+        "height": 200,
+        "text": "{{name}}\n{{result}}"
+      },
+      {
+        "id": "plan",
+        "slot": "chat.card.plan",
+        "title": "Inspector plan / 计划卡片",
+        "view": "card.html",
+        "height": 220,
+        "text": "Plan\n{{plan}}"
+      },
+      {
+        "id": "message",
+        "slot": "chat.message.renderer",
+        "title": "Inspector message / 消息卡片",
+        "view": "card.html",
+        "height": 160,
+        "text": "{{content}}"
+      }
+    ]
+  }
+}

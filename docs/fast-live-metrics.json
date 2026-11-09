@@ -1,0 +1,398 @@
+{
+  "benchmark_id": "0bd39a06-7d8b-4c75-b718-1dc9b323da89",
+  "source": "Persisted Fast run.json metrics captured during the live campaign; no model calls added.",
+  "samples": {
+    "multi_agent_collaboration:0": {
+      "scenario": "multi_agent_collaboration",
+      "repetition": 0,
+      "run_id": "ab6f7e8b-307e-4d7b-b3d0-8febef082a89",
+      "phase": "completed",
+      "metrics": {
+        "started_at": "2026-11-08T13:49:05.559Z",
+        "elapsed_ms": 285039.1036169999,
+        "planning": {
+          "prompt": 1185,
+          "completion": 10214,
+          "requests": 1
+        },
+        "workers": {
+          "east_report": {
+            "prompt": 46271,
+            "completion": 3896,
+            "requests": 6
+          },
+          "west_report": {
+            "prompt": 28188,
+            "completion": 2821,
+            "requests": 4
+          },
+          "integrate_verify_write": {
+            "prompt": 83943,
+            "completion": 4711,
+            "requests": 5
+          }
+        },
+        "verification": {
+          "prompt": 189290,
+          "completion": 14993,
+          "requests": 41
+        },
+        "integration": {
+          "prompt": 45294,
+          "completion": 2045,
+          "requests": 3
+        },
+        "total": {
+          "prompt": 394171,
+          "completion": 38680,
+          "requests": 60
+        },
+        "retries": 0,
+        "replans": 0,
+        "tool_wait_ms": 1292.9311379981227,
+        "scheduling_ms": 6.503260998521,
+        "context_cache_hits": 86,
+        "provider_cached_tokens": null,
+        "tokens_per_second": 1518.567082576892
+      }
+    },
+    "multi_source_retrieval:0": {
+      "scenario": "multi_source_retrieval",
+      "repetition": 0,
+      "run_id": "64e82f7c-6c1e-4414-acb8-fa5ef1ea6380",
+      "phase": "completed",
+      "metrics": {
+        "started_at": "2026-11-08T13:42:10.745Z",
+        "elapsed_ms": 120845.4511859999,
+        "planning": {
+          "prompt": 1176,
+          "completion": 2815,
+          "requests": 1
+        },
+        "workers": {
+          "read_sources": {
+            "prompt": 11722,
+            "completion": 1893,
+            "requests": 2
+          },
+          "compute_write": {
+            "prompt": 54473,
+            "completion": 2959,
+            "requests": 6
+          },
+          "final_verify": {
+            "prompt": 43244,
+            "completion": 2679,
+            "requests": 4
+          }
+        },
+        "verification": {
+          "prompt": 95805,
+          "completion": 8073,
+          "requests": 19
+        },
+        "integration": {
+          "prompt": 44540,
+          "completion": 1582,
+          "requests": 3
+        },
+        "total": {
+          "prompt": 250960,
+          "completion": 20001,
+          "requests": 35
+        },
+        "retries": 0,
+        "replans": 0,
+        "tool_wait_ms": 646.8781469995156,
+        "scheduling_ms": 3.7505429997108877,
+        "context_cache_hits": 66,
+        "provider_cached_tokens": null,
+        "tokens_per_second": 2242.2110004202723
+      }
+    },
+    "complex_logic:0": {
+      "scenario": "complex_logic",
+      "repetition": 0,
+      "run_id": "314f0ede-b78e-45b0-acc8-18e953663595",
+      "phase": "completed",
+      "metrics": {
+        "started_at": "2026-11-08T13:46:24.121Z",
+        "elapsed_ms": 70173.33300399967,
+        "planning": {
+          "prompt": 1177,
+          "completion": 2700,
+          "requests": 1
+        },
+        "workers": {
+          "solve_and_verify_constraints": {
+            "prompt": 37444,
+            "completion": 3196,
+            "requests": 5
+          }
+        },
+        "verification": {
+          "prompt": 50562,
+          "completion": 3717,
+          "requests": 9
+        },
+        "integration": {
+          "prompt": 15348,
+          "completion": 965,
+          "requests": 2
+        },
+        "total": {
+          "prompt": 104531,
+          "completion": 10578,
+          "requests": 17
+        },
+        "retries": 0,
+        "replans": 0,
+        "tool_wait_ms": 761.2425879999064,
+        "scheduling_ms": 4.653611999470741,
+        "context_cache_hits": 22,
+        "provider_cached_tokens": null,
+        "tokens_per_second": 1640.3524682722302
+      }
+    },
+    "multi_dimension_comparison:0": {
+      "scenario": "multi_dimension_comparison",
+      "repetition": 0,
+      "run_id": "b262f001-a83a-4756-9ef5-16823cb24839",
+      "phase": "completed",
+      "metrics": {
+        "started_at": "2026-11-08T13:44:11.647Z",
+        "elapsed_ms": 131914.08253900008,
+        "planning": {
+          "prompt": 1181,
+          "completion": 4785,
+          "requests": 1
+        },
+        "workers": {
+          "compute_answer": {
+            "prompt": 26896,
+            "completion": 2418,
+            "requests": 4
+          },
+          "independent_verify": {
+            "prompt": 41422,
+            "completion": 3207,
+            "requests": 4
+          }
+        },
+        "verification": {
+          "prompt": 135118,
+          "completion": 9330,
+          "requests": 26
+        },
+        "integration": {
+          "prompt": 21151,
+          "completion": 1272,
+          "requests": 2
+        },
+        "total": {
+          "prompt": 225768,
+          "completion": 21012,
+          "requests": 37
+        },
+        "retries": 0,
+        "replans": 0,
+        "tool_wait_ms": 744.0596210006624,
+        "scheduling_ms": 2.1060970006510615,
+        "context_cache_hits": 44,
+        "provider_cached_tokens": null,
+        "tokens_per_second": 1870.7631152802817
+      }
+    },
+    "multi_module_code:0": {
+      "scenario": "multi_module_code",
+      "repetition": 0,
+      "run_id": "1fa9b226-2110-4599-920a-16edec5a07a6",
+      "phase": "completed",
+      "metrics": {
+        "started_at": "2026-11-08T13:47:34.359Z",
+        "elapsed_ms": 91062.65442099981,
+        "planning": {
+          "prompt": 1206,
+          "completion": 4560,
+          "requests": 1
+        },
+        "workers": {
+          "implement_tax_shipping_answer": {
+            "prompt": 42796,
+            "completion": 2581,
+            "requests": 6
+          }
+        },
+        "verification": {
+          "prompt": 69030,
+          "completion": 5645,
+          "requests": 16
+        },
+        "integration": {
+          "prompt": 16061,
+          "completion": 1152,
+          "requests": 2
+        },
+        "total": {
+          "prompt": 129093,
+          "completion": 13938,
+          "requests": 25
+        },
+        "retries": 0,
+        "replans": 0,
+        "tool_wait_ms": 913.6662849984132,
+        "scheduling_ms": 4.280530999880284,
+        "context_cache_hits": 22,
+        "provider_cached_tokens": null,
+        "tokens_per_second": 1570.6877963247232
+      }
+    },
+    "long_tool_sequence:0": {
+      "scenario": "long_tool_sequence",
+      "repetition": 0,
+      "run_id": "5549d41e-91ec-4466-b8d2-91f4d8f589f2",
+      "phase": "completed",
+      "metrics": {
+        "started_at": "2026-11-08T13:53:51.721Z",
+        "elapsed_ms": 215130.48684600042,
+        "planning": {
+          "prompt": 1191,
+          "completion": 9326,
+          "requests": 1
+        },
+        "workers": {
+          "write_doubled": {
+            "prompt": 27119,
+            "completion": 2642,
+            "requests": 4
+          },
+          "write_evens": {
+            "prompt": 52608,
+            "completion": 4087,
+            "requests": 5
+          },
+          "write_answer": {
+            "prompt": 62958,
+            "completion": 4005,
+            "requests": 5
+          }
+        },
+        "verification": {
+          "prompt": 199217,
+          "completion": 15926,
+          "requests": 38
+        },
+        "integration": {
+          "prompt": 35468,
+          "completion": 1474,
+          "requests": 2
+        },
+        "total": {
+          "prompt": 378561,
+          "completion": 37460,
+          "requests": 55
+        },
+        "retries": 0,
+        "replans": 0,
+        "tool_wait_ms": 1263.4798209993169,
+        "scheduling_ms": 5.987883000168949,
+        "context_cache_hits": 66,
+        "provider_cached_tokens": null,
+        "tokens_per_second": 1933.8077373375982
+      }
+    },
+    "iterative_correction:0": {
+      "scenario": "iterative_correction",
+      "repetition": 0,
+      "run_id": "29565cbe-bcd2-4eb2-8fe6-6dc544a09a4b",
+      "phase": "completed",
+      "metrics": {
+        "started_at": "2026-11-08T13:57:27.357Z",
+        "elapsed_ms": 127264.4470879999,
+        "planning": {
+          "prompt": 1192,
+          "completion": 9221,
+          "requests": 1
+        },
+        "workers": {
+          "repair_math": {
+            "prompt": 55168,
+            "completion": 3440,
+            "requests": 7
+          }
+        },
+        "verification": {
+          "prompt": 58760,
+          "completion": 4587,
+          "requests": 13
+        },
+        "integration": {
+          "prompt": 18062,
+          "completion": 1298,
+          "requests": 2
+        },
+        "total": {
+          "prompt": 133182,
+          "completion": 18546,
+          "requests": 23
+        },
+        "retries": 0,
+        "replans": 0,
+        "tool_wait_ms": 901.4888659995049,
+        "scheduling_ms": 4.32307399995625,
+        "context_cache_hits": 22,
+        "provider_cached_tokens": null,
+        "tokens_per_second": 1192.2261359850502
+      }
+    },
+    "strong_sequential_dependencies:0": {
+      "scenario": "strong_sequential_dependencies",
+      "repetition": 0,
+      "run_id": "fe739b46-ae16-4ca4-8cbf-154393eb737c",
+      "phase": "failed",
+      "metrics": {
+        "started_at": "2026-11-08T14:00:48.618Z",
+        "elapsed_ms": 119295.88183199987,
+        "planning": {
+          "prompt": 1256,
+          "completion": 8470,
+          "requests": 3
+        },
+        "workers": {
+          "stage1_read_add_write": {
+            "prompt": 35639,
+            "completion": 2365,
+            "requests": 5
+          },
+          "stage2_read_square_write": {
+            "prompt": 38411,
+            "completion": 2537,
+            "requests": 4
+          }
+        },
+        "verification": {
+          "prompt": 67902,
+          "completion": 5096,
+          "requests": 23
+        },
+        "integration": {
+          "prompt": 0,
+          "completion": 0,
+          "requests": 0
+        },
+        "total": {
+          "prompt": 143208,
+          "completion": 18468,
+          "requests": 35
+        },
+        "retries": 0,
+        "replans": 2,
+        "tool_wait_ms": 604.647037002258,
+        "scheduling_ms": 5.279527000151575,
+        "context_cache_hits": 40,
+        "provider_cached_tokens": null,
+        "tokens_per_second": 1355.25214715863
+      }
+    }
+  }
+}

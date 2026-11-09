@@ -1,0 +1,13 @@
+{
+  "id": "community.review-skills", "name": "Review Skills / 审查技能",
+  "version": "1.0.0", "apiVersion": 1, "categories": ["skill", "prompt"],
+  "description": "Lazy code-review skill, an additive rule and an optional replacement persona.",
+  "permissions": ["prompts.contribute"],
+  "contributes": {
+    "skills": ["skills/review/SKILL.md"],
+    "prompts": [
+      { "id": "evidence", "file": "prompts/evidence.md", "slot": "rules", "roles": ["main", "subagent", "main_model", "backend_output_model"] },
+      { "id": "reviewer", "file": "prompts/reviewer.md", "slot": "persona", "replace": true, "roles": ["main", "main_model"] }
+    ]
+  }
+}

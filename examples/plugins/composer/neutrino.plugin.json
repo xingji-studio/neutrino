@@ -1,0 +1,10 @@
+{
+  "id": "community.writing-composer", "name": "Writing Composer / 写作输入框",
+  "version": "1.0.0", "apiVersion": 1, "categories": ["function", "appearance"],
+  "description": "Replace the web editor while the host retains the draft, send and stop controls.",
+  "permissions": ["ui.contribute", "composer.read", "composer.write", "composer.submit"],
+  "contributes": { "ui": [
+    { "id": "editor", "slot": "chat.composer", "title": "Writing editor / 写作编辑器", "view": "editor.html", "height": 185, "platforms": ["web"] },
+    { "id": "outline", "slot": "chat.composer.toolbar", "title": "Outline / 提纲", "insert": "请先列出提纲，再完成任务：\n" }
+  ] }
+}

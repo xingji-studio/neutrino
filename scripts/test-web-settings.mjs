@@ -427,7 +427,7 @@ try {
   holdBrowserModel = null;
   assert.equal(appTest.state.snapshot.intensity, "Low");
   assert.equal(browserRequests.filter(request => request.url.endsWith("/message")).length, 1);
-  assert.deepEqual(JSON.parse(browserRequests.find(request => request.url.endsWith("/message")).init.body), { text: "send with the selected model" });
+  assert.deepEqual(JSON.parse(browserRequests.find(request => request.url.endsWith("/message")).init.body), { text: "send with the selected model", agent_mode: "standard" });
   appTest.syncSelection();
   assert.equal(appTest.state.selection, null);
   assert.ok(node("model-picker").classes.has("hidden"));

@@ -229,6 +229,14 @@ export class LLMClient {
     const requestOptions = { ...options, maxOutputTokens: options.maxOutputTokens ?? (runtime ? DEFAULT_OUTPUT_TOKENS : undefined), signal: controller.signal, cancelled };
     try {
       if (controller.signal.aborted) return;
+      if (tools && runtime?.plugins) {
+        tools = runtime.availableTools(tools);
+        const suffix = await runtime.plugins.requestSuffix({ provider:this.provider,model:this.model.name,role:currentTask()?.role ?? "main",toolCount:tools.length });
+        if (suffix) {
+          messages = messages.map((message,index) => index === 0 && message.role === "system" ? { ...message,content:(message.content ?? "") + suffix } : message);
+          runtime.note("plugin_request_suffix",{ suffix });
+        }
+      }
       if (this.provider === "Anthropic") {
         yield* this.streamAnthropic(messages, tools, requestOptions);
         return;

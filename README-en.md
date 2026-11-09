@@ -59,6 +59,8 @@ The browser UI is mounted at <http://127.0.0.1:8765> at the same time; see
 residency. `neutrino background start` detaches the console so browser tasks
 survive the terminal.
 
+The composer mode menu also offers **Fast Mode** (`fast_dag`), with streaming planning, a dynamic DAG, bounded concurrent workers, and independent verification. All existing modes remain available. See the [architecture and configuration](docs/fast-mode.md) and [measured performance](docs/fast-performance.md); a general 50% speedup has not been established.
+
 ### Keys
 
 | Keys | Action |
@@ -732,3 +734,7 @@ $esc = [char]27
 ## License
 
 Apache-2.0. See [LICENSE](./LICENSE).
+
+## Plugins
+
+Extend tools, menus, tabs, the chat composer, cards, themes, skills and prompts without changing core source. Open **Plugins** in the browser or press `Ctrl+X` in the terminal. Run `neutrino plugin help` for CLI management. See the [complete plugin documentation](docs/plugins/README.md) and [six working examples](examples/plugins).

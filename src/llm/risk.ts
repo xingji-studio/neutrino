@@ -14,6 +14,7 @@
  */
 import os from "node:os";
 import path from "node:path";
+import { currentTask } from "./runtime.js";
 
 export type RiskLevel = "high" | "extreme";
 
@@ -368,6 +369,12 @@ export function assessToolCall(
 ): RiskAssessment | null {
   const workingDir = path.resolve(cwd || process.cwd());
   const summary = summarizeArgs(name, args);
+
+  const plugin = currentTask()?.runtime.plugins?.toolPolicy(name);
+  if (plugin && (plugin.native || plugin.effects.some(e => e !== "filesystem.read"))) {
+    return { level:"high", tool:name, summary, reasons:[plugin.native ? "runs a fully trusted native plugin" : `plugin declares: ${plugin.effects.join(", ")}`] };
+  }
+  if (name === "plugin_fetch") return { level:"high",tool:name,summary:String(args.url ?? name),reasons:["sends an HTTP request from a plugin"] };
 
   if (name === "web_search") {
     return {

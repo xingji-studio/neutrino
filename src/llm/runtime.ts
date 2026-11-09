@@ -3,6 +3,10 @@ import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { PlanState } from "./plan.js";
+import type { AgentMode } from "../config.js";
+import type { PluginHost } from "../plugins/host.js";
+import type { PluginPin } from "../plugins/types.js";
+import type { OwnedUI } from "../plugins/host.js";
 
 export type AgentStatus = "completed" | "partial" | "blocked" | "failed" | "cancelled";
 export interface AgentError { code: string; message: string }
@@ -80,6 +84,11 @@ export interface ToolEvidence {
   status: "completed" | "failed" | "denied" | "cancelled";
 }
 export interface TaskSnapshot {
+  execution_mode?: AgentMode | "pro";
+  plugins?: PluginPin[];
+  pluginErrors?: string[];
+  pluginUI?: OwnedUI[];
+  pluginPrompt?: { role:string; sections:unknown };
   rootRunId: string;
   state: "running" | "cancelling" | AgentStatus;
   counts: { agentRuns: number; modelRequests: number; toolCalls: number; tokens: number };
@@ -115,7 +124,7 @@ export function linkSignals(...values: Array<AbortSignal | undefined>): { signal
   });
   return { signal: controller.signal, dispose: () => listeners.forEach(remove => remove()) };
 }
-const READ_TOOLS = new Set(["read_file", "list_files", "web_search", "delegate", "call_pro_agent", "finish_step", "finish_task"]);
+const READ_TOOLS = new Set(["read_file", "list_files", "web_search", "plugin_fetch", "delegate", "call_pro_agent", "finish_step", "finish_task"]);
 
 /** Resolve existing ancestors too, so symlinks cannot widen a file write policy. */
 function realPath(input: string): string {
@@ -137,6 +146,9 @@ function within(file: string, base: string): boolean {
 
 /** One user turn owns one ledger and cancellation tree, with optional root limits. */
 export class TaskRuntime {
+  private readonly executionMode?: AgentMode | "pro";
+  plugins?: PluginHost;
+  private pluginPrompt?: { role:string; sections:unknown };
   readonly rootRunId = randomUUID();
   readonly signal: AbortSignal;
   readonly originalRequest: string;
@@ -170,9 +182,11 @@ export class TaskRuntime {
   constructor(options: {
     request: string; cwd?: string; priorUserRequests?: readonly string[]; limits?: Partial<TaskLimits>;
     budgetScope?: TaskBudgetScope;
+    executionMode?: AgentMode | "pro";
     signal?: AbortSignal; readOnly?: boolean; writePaths?: readonly string[]; journalDir?: string;
   }) {
     this.signal = this.controller.signal;
+    this.executionMode = options.executionMode;
     // Direct runtime callers retain strict limits. Conversation drivers opt into
     // delegation-only limits so normal main-agent work can reach completion.
     this.budgetScope = options.budgetScope ?? "task";
@@ -276,6 +290,11 @@ export class TaskRuntime {
   }
   snapshot(): TaskSnapshot {
     return { rootRunId: this.rootRunId, state: this.state, counts: { ...this.usage }, limits: { ...this.limits },
+      ...(this.executionMode ? { execution_mode: this.executionMode } : {}),
+      ...(this.plugins?.pins.length ? { plugins: structuredClone(this.plugins.pins) } : {}),
+      ...(this.plugins?.diagnostics.length ? { pluginErrors: [...this.plugins.diagnostics] } : {}),
+      ...(this.plugins?.ui.length ? { pluginUI:structuredClone(this.plugins.ui) } : {}),
+      ...(this.pluginPrompt ? { pluginPrompt:structuredClone(this.pluginPrompt) } : {}),
       budgetScope: this.budgetScope, delegatedCounts: { ...this.delegatedUsage },
       ...(this.budgetStop ? { budgetStop: { ...this.budgetStop } } : {}),
       ...(this.journal ? { journal: this.journal } : {}), ...(this.persistenceError ? { persistenceError: this.persistenceError } : {}) };
@@ -290,7 +309,12 @@ export class TaskRuntime {
   assertTool(name: string, args: Record<string, unknown>, scope = currentTask() ?? this.root): void {
     this.check();
     if (scope.signal.aborted) throw new TaskControlError("cancelled", "This task was cancelled");
-    if (scope.policy.readOnly && !READ_TOOLS.has(name)) throw new TaskControlError("read_only", "This task is read-only; commands and edits are unavailable, including through delegated agents");
+    const plugin = this.plugins?.toolPolicy(name);
+    const pluginRole=this.plugins?.profile === "pro" && scope.role === "main" ? "main_model" : scope.role;
+    if (plugin?.roles && !plugin.roles.includes(pluginRole)) throw new TaskControlError("tool_scope", "Plugin tool is unavailable to this agent role");
+    if (plugin?.native && (scope.policy.readOnly || scope.policy.writePathGroups.length)) throw new TaskControlError("plugin_native_scope", "Native plugins cannot run inside a restricted child scope");
+    const readTool = READ_TOOLS.has(name) || (plugin && !plugin.native && plugin.effects.every(e => ["filesystem.read","network"].includes(e)));
+    if (scope.policy.readOnly && !readTool) throw new TaskControlError("read_only", "This task is read-only; commands and edits are unavailable, including through delegated agents");
     const groups = scope.policy.writePathGroups;
     if (groups.length && (name === "run_command" || name === "execute_ts")) {
       throw new TaskControlError("write_scope", "Arbitrary command execution is unavailable under a restricted write-path policy");
@@ -301,8 +325,14 @@ export class TaskRuntime {
     }
   }
   availableTools<T extends { function: { name: string } }>(tools: T[], scope = currentTask() ?? this.root): T[] {
-    return tools.filter(tool => (!scope.policy.readOnly || READ_TOOLS.has(tool.function.name)) &&
-      (!scope.policy.writePathGroups.length || !["run_command", "execute_ts"].includes(tool.function.name)));
+    return tools.filter(tool => {
+      const plugin = this.plugins?.toolPolicy(tool.function.name);
+      const pluginRole=this.plugins?.profile === "pro" && scope.role === "main" ? "main_model" : scope.role;
+      return (!plugin?.roles || plugin.roles.includes(pluginRole)) &&
+        (!plugin?.native || (!scope.policy.readOnly && !scope.policy.writePathGroups.length)) &&
+        (!scope.policy.readOnly || READ_TOOLS.has(tool.function.name) || (plugin && plugin.effects.every(e => ["filesystem.read","network"].includes(e)))) &&
+        (!scope.policy.writePathGroups.length || !["run_command", "execute_ts"].includes(tool.function.name));
+    });
   }
   async tool(name: string, args: Record<string, unknown>, execute: () => Promise<string>): Promise<string> {
     this.assertTool(name, args);
@@ -331,6 +361,7 @@ export class TaskRuntime {
     const entry = { id, runId, name, arguments: structuredClone(args), result, status };
     this.evidence.push(entry);
     this.event("tool_finished", entry);
+    if (this.plugins) void this.track(this.plugins.emit("tool.finished", { name, status, evidenceId:id })).catch(() => {});
     return entry;
   }
   recordResult(result: AgentResult): void { this.results.push(result); this.event("agent_finished", result); }
@@ -392,6 +423,7 @@ export class TaskRuntime {
     this.event("budget_stopped", stop);
     return new TaskControlError(code, `${message} (${scope}: used ${used}, limit ${limit}, reserved ${reserved}, next ${requested})`);
   }
+  note(type: string, data: unknown): void { if(type === "plugin_prompt") this.pluginPrompt=data as { role:string;sections:unknown }; this.event(type,data); }
   private event(type: string, data: unknown): void {
     if (!this.journal || this.persistenceError || this.journalDiscarded) return;
     // Explicit history deletion must not be undone by a late cancellation callback.

@@ -1505,6 +1505,13 @@ svg {
 .agent-mode-check { flex: none; width: 16px; height: 16px; color: var(--accent); visibility: hidden; }
 .agent-mode-menu [aria-checked="true"] .agent-mode-check { visibility: visible; }
 .agent-mode-menu > button:disabled { opacity: .55; cursor: wait; }
+.agent-mode-menu > .fast-mode-card { border: 1px solid transparent; margin-block: 4px; }
+.agent-mode-menu > .fast-mode-card[aria-checked="true"] { border-color: var(--accent); background: var(--surface-3); }
+.fast-mode-icon { flex: 0 0 22px; width: 22px; height: 22px; color: var(--accent); }
+.fast-progress { padding: 10px 12px; margin-block: 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.fast-progress p { margin: 4px 0; }
+.fast-progress ul { padding-left: 18px; margin: 6px 0; max-height: 180px; overflow-y: auto; }
+.fast-progress .error { color: var(--danger, #df6767); }
 .agent-mode-feedback { position: absolute; bottom: 100%; left: 0; width: min(370px, calc(100vw - 48px)); margin: 0 0 5px; font-size: 11px; color: var(--text-secondary); }
 .agent-mode-feedback:empty, .agent-mode-picker[open] .agent-mode-feedback { display: none; }
 .agent-mode-feedback.error { color: var(--error, #ef8181); }
@@ -1634,11 +1641,14 @@ svg {
 }
 
 #send .pause-icon,
-#send.is-pause .send-icon {
+#send .resume-icon,
+#send.is-pause .send-icon,
+#send.is-resume .send-icon {
   display: none;
 }
 
-#send.is-pause .pause-icon {
+#send.is-pause .pause-icon,
+#send.is-resume .resume-icon {
   display: block;
 }
 

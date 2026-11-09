@@ -57,6 +57,8 @@ neutrino
 
 在开始界面输入消息并按 `Enter` 开始新对话。浏览器界面会同时挂载在 <http://127.0.0.1:8765>；关于 `--port`、`--lan` 和 `--no-web`，请参阅下方的 [Web 界面](#web-界面)。
 
+输入框模式菜单新增 **极速模式**（`fast_dag`），使用流式规划、动态 DAG、并发 Worker 与独立验证，保留全部原有模式。配置及边界见[架构说明](docs/fast-mode.md)，实际耗时与 Token 见[性能报告](docs/fast-performance.md)；目前尚不能宣称一般任务达到 50% 提速。
+
 ### 快捷键
 
 | 按键 | 操作 |
@@ -452,3 +454,7 @@ $esc = [char]27
 ## 许可证
 
 Apache-2.0。参见 [LICENSE](./LICENSE)。
+
+## 插件扩展
+
+支持工具、命令、菜单、选项卡、聊天输入框、消息卡片、主题、Skill 和提示词插件。浏览器侧栏点击 **插件 / Plugins**，终端按 `Ctrl+X`，或运行 `neutrino plugin help`。详见[完整插件文档](docs/plugins/README.md)与[六组示例](examples/plugins)。

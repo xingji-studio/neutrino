@@ -1,3 +1,4 @@
+import { handlePlugins } from "./plugins.js";
 /**
  * A tiny, dependency-free HTTP server that exposes Neutrino to a browser.
  *
@@ -22,6 +23,7 @@ import {
   type ApprovalMode, type AgentMode, type Mode, type ModelSelection, type ResolvedModelSelection, type SessionData, type SessionMeta,
 } from "../config.js";
 import { getWebSettings, updateWebSettings } from "./settings.js";
+import { fastSettings } from "../fast/types.js";
 import { isSeenIdentity, loadSeen, updateSeen, SEEN_LIMIT } from "./clientState.js";
 import { WebAuth } from "./auth.js";
 import { normalizeCwd, sameCwd } from "../cwd.js";
@@ -241,6 +243,7 @@ interface OverviewGroup {
 }
 
 interface Overview {
+  fast_mode_enabled: boolean;
   groups: OverviewGroup[];
   live: LiveEntrySummary[];
   generated_at: string;
@@ -540,6 +543,7 @@ function buildOverview(mode: Mode = "standard"): Overview {
 
   return {
     groups: ordered,
+    fast_mode_enabled: fastSettings(loadConfig("standard")).enabled,
     live: lives,
     generated_at: new Date().toISOString(),
   };
@@ -889,6 +893,10 @@ async function handleApi(
     sendJson(res, 401, { error: "Password login required." });
     return true;
   }
+
+  if (await handlePlugins(req,res,url,pathname,mode,{
+    sameOrigin:isSameOrigin(req),read:()=>readJsonBody(req),json:(status,value)=>sendJson(res,status,value),
+  })) return true;
 
   // The first browser to see the background-residency prompt consumes it for
   // this console run, whether it accepted or dismissed it.
@@ -1526,7 +1534,12 @@ async function handleApi(
         sendJson(res, 400, { error: "empty message" });
         return true;
       }
-      hub.send(key, text);
+      const agentMode = (body as { agent_mode?: unknown })?.agent_mode;
+      if (agentMode !== undefined && (!isAgentMode(agentMode) || mode === "pro")) {
+        sendJson(res, 400, { error: "invalid agent mode" }); return true;
+      }
+      const sent = hub.sendConfigured(key, text, agentMode as AgentMode | undefined);
+      if (!sent.ok) { sendJson(res, 409, { error: sent.error }); return true; }
       sendJson(res, 200, { ok: true });
       return true;
     }

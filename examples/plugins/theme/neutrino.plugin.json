@@ -1,0 +1,12 @@
+{
+  "id": "community.indigo-theme", "name": "Indigo / 靛蓝主题",
+  "version": "1.0.0", "apiVersion": 1, "categories": ["appearance"],
+  "description": "A declaration-only theme for both the browser and terminal.",
+  "permissions": ["ui.contribute"],
+  "contributes": { "theme": {
+    "--bg": "#171725", "--bg-sidebar": "#1c1c30", "--surface-1": "#24243b",
+    "--accent": "#b8b2ff", "--accent-strong": "#958bff", "--radius-lg": "12px",
+    "--neutrino-composer-radius": "12px", "--neutrino-message-radius": "12px",
+    "--neutrino-tui-accent": "#b8b2ff", "--neutrino-tui-tool-header": "#b8b2ff"
+  } }
+}

@@ -25,6 +25,7 @@
     <title>Neutrino</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f9fafb' stroke-width='1.7'%3E%3Cellipse cx='12' cy='12' rx='9.4' ry='3.8' transform='rotate(-30 12 12)'/%3E%3Ccircle cx='12' cy='12' r='3.1'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="plugins.css" />
   </head>
   <body>
     <div id="app">
@@ -135,6 +136,7 @@
                   <button type="button" role="menuitemradio" aria-checked="true" data-agent-mode="standard"><span><strong data-i18n="Standard mode">Standard mode</strong><small data-i18n="Full-featured Agent for every scenario">Full-featured Agent for every scenario</small></span><svg class="agent-mode-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg></button>
                   <button type="button" role="menuitemradio" aria-checked="false" data-agent-mode="ptc"><span><strong data-i18n="PTC mode">PTC mode</strong><small data-i18n="All standard capabilities, with code-based planning to save tokens">All standard capabilities, with code-based planning to save tokens</small></span><svg class="agent-mode-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg></button>
                   <button type="button" role="menuitemradio" aria-checked="false" data-agent-mode="fast"><span><strong data-i18n="Fast mode">Fast mode</strong><small data-i18n="Less thinking and fewer calls for quick answers">Less thinking and fewer calls for quick answers</small></span><svg class="agent-mode-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg></button>
+                  <button class="fast-mode-card" type="button" role="menuitemradio" aria-checked="false" data-agent-mode="fast_dag"><svg class="fast-mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="m13 2-9 12h7l-1 8 10-13h-7l1-7Z" /></svg><span><strong data-i18n="Fast Mode">Fast Mode</strong><small data-i18n="Dynamic task scheduling and concurrent execution shorten complex tasks while preserving reasoning capability.">Dynamic task scheduling and concurrent execution shorten complex tasks while preserving reasoning capability.</small></span><svg class="agent-mode-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg></button>
                   <button type="button" role="menuitemradio" aria-checked="false" data-agent-mode="pro"><span><strong data-i18n="Professional mode">Professional mode</strong><small data-i18n="Assign tasks to the best-suited models so multiple models complement each other">Assign tasks to the best-suited models so multiple models complement each other</small></span><svg class="agent-mode-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg></button>
                 </div>
                 <p id="agent-mode-feedback" class="agent-mode-feedback" role="status" aria-live="polite"></p>
@@ -182,7 +184,7 @@
                 </div>
               </details>
               <button id="send" class="primary" type="button" title="Send message" aria-label="Send message" data-i18n-title="Send message" data-i18n-aria-label="Send message">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="send-icon" d="M12 19V5M5 12l7-7 7 7" /><rect class="pause-icon" x="5" y="5" width="14" height="14" rx="2" fill="currentColor" stroke="none" /></svg>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="send-icon" d="M12 19V5M5 12l7-7 7 7" /><rect class="pause-icon" x="5" y="5" width="14" height="14" rx="2" fill="currentColor" stroke="none" /><path class="resume-icon" d="M8 5.6v12.8L19 12z" fill="currentColor" stroke="none" /></svg>
               </button>
             </div>
             <div class="composer-hint">

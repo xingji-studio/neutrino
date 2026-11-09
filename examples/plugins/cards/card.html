@@ -1,0 +1,6 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+body{box-sizing:border-box;margin:0;padding:14px;background:#1c2635;color:#e3ecf8;border:1px solid #54749d;border-radius:10px;font:13px system-ui}h3{margin:0 0 8px;color:#a6ccff}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:250px;overflow:auto}
+</style></head><body><h3 id="title"></h3><pre id="result"></pre><script>
+function render(){const c=neutrino.context;document.getElementById('title').textContent=c.title;document.getElementById('result').textContent=JSON.stringify(c.message||c.plan||{},null,2)}
+neutrino.on('context.changed',render);render();
+</script></body></html>

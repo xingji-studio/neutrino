@@ -15,6 +15,7 @@ A small, dependency-free single page app that is served by the Neutrino CLI at
   created from the built-in folder picker;
 - switch the workspace between every known folder and **All directories**;
 - switch the provider, model and intensity for the next turn;
+- select Standard, PTC, the original Fast mode, the new **Fast Mode** (`fast_dag`), or Pro from the composer menu; the choice is saved per conversation and frozen when a message is submitted. See [Fast Mode](../docs/fast-mode.md) for configuration and measured limitations;
 - edit every terminal setting — defaults, interface language, plan-first turns,
   default approval mode, context compression, reviewer, Web password, and LAN
   access;
@@ -466,3 +467,7 @@ programmatically (409 when nothing is pending).
 
 `POST /api/live/:key/approval-mode` with `{"mode":"request"|"auto"}` changes
 the conversation mode and returns its current snapshot (400 for invalid modes).
+
+## Plugins / 插件
+
+Open **Plugins** in the sidebar to install local plugins, enable them per profile or project, edit configuration, and select replacement composers and cards. Views use sandboxed iframes and versioned draft APIs. See [插件文档](../docs/plugins/README.md).

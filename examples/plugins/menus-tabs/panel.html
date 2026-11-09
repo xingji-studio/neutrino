@@ -1,0 +1,6 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+body{font:14px system-ui;color:#e6e8ee;background:#202127;padding:18px}h2{margin-top:0}pre{white-space:pre-wrap;color:#a9c9fa}
+</style></head><body><h2>Workspace overview / 工作区概览</h2><pre id="info">Loading…</pre><script>
+async function update(){try{const c=await neutrino.conversation.read();document.getElementById('info').textContent=JSON.stringify({cwd:c.cwd,messages:c.messages?.length||0,model:c.model},null,2)}catch(e){document.getElementById('info').textContent=e.message}}
+neutrino.on('context.changed',update);update();
+</script></body></html>

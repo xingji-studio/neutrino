@@ -1,3 +1,6 @@
+import { PluginsScreen, PluginViewScreen } from "./screens/plugins.js";
+import { applyTuiTheme } from "./plugins/terminal.js";
+import type { OwnedUI } from "./plugins/host.js";
 import process from "node:process";
 import { Buffer } from "./terminal/buffer.js";
 import { InputReader, type InputEvent, type MouseEvent } from "./terminal/input.js";
@@ -432,6 +435,7 @@ export class App {
   }
 
   render(selectionOnly = false): void {
+    applyTuiTheme();
     if (this.selectionTimer) {
       clearTimeout(this.selectionTimer);
       this.selectionTimer = null;
@@ -790,6 +794,7 @@ export class App {
         return;
       }
       this.wakeCursor();
+      if (k.ctrl && k.name === "x") { this.openPlugins(); return; }
       if (k.ctrl && (k.name === "m" || k.name === "e")) {
         this.openModelConfig();
         return;
@@ -1024,6 +1029,7 @@ export class App {
     screen.loadedApprovalMode = data.approval_mode ?? null;
     screen.loadedPlan = data.plan ?? null;
     screen.loadedTask = data.task_run;
+    screen.loadedFast = data.fast_run;
     screen.loadedAgentMode = data.agent_mode ?? null;
     if (data.provider) this.state.selectedProvider = data.provider;
     if (data.model) this.state.selectedModelName = data.model;
@@ -1069,6 +1075,13 @@ export class App {
   openAgentSelect(): void {
     if (this.screens.some((s) => s instanceof AgentSelectScreen)) return;
     this.pushScreen(new AgentSelectScreen());
+  }
+
+  openPlugins(): void { this.pushScreen(new PluginsScreen()); }
+
+  openPluginContribution(item: OwnedUI): void {
+    if (item.command) this.startNewChat(`/plugin ${item.pluginId}/${item.command} {}`);
+    else this.pushScreen(new PluginViewScreen(item));
   }
 
   openSettings(): void {
