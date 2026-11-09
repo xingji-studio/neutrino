@@ -162,6 +162,7 @@ export function getSubAgentToolDefinitions(): ToolDefinition[] {
         },
       },
     },
+    ...(currentTask()?.runtime.plugins?.definitions() ?? []),
   ];
 }
 
@@ -204,7 +205,9 @@ export async function executeTool(
         result = listFiles(String(args.path ?? ""), base);
         break;
       default:
-        result = `[Error: unknown tool '${name}']`;
+        result = currentTask()?.runtime.plugins?.tools.has(name)
+          ? await currentTask()!.runtime.plugins!.execute(name,args)
+          : `[Error: unknown tool '${name}']`;
     }
   } catch (e) {
     result = `[Error: ${e instanceof Error ? e.message : String(e)}]`;

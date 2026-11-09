@@ -1,4 +1,8 @@
+import { terminalTemplate } from "../plugins/terminal.js";
+import { runPluginTurn, pluginCommand, pluginApprovalContext } from "../plugins/session.js";
 import path from "node:path";
+import { FastAgentEngine } from "../fast/engine.js";
+import { FAST_MODE, assertFastAvailable, fastSettings, type FastSnapshot } from "../fast/types.js";
 import type { Buffer } from "../terminal/buffer.js";
 import { Screen, type ScrollbarHandle } from "../terminal/screen.js";
 import type { Key, MouseEvent } from "../terminal/input.js";
@@ -102,9 +106,7 @@ type Msg =
   | { role: "summary"; content: string; count: number }
   | ToolMsg;
 
-const TOOLS = getToolDefinitions();
 /** A sub-agent gets the same tools minus delegation: one level, never a tree. */
-const SUB_AGENT_TOOLS = getSubAgentToolDefinitions();
 
 /**
  * A finished turn folds its *work* away — the thinking and the tool calls —
@@ -168,6 +170,7 @@ export class ChatScreen extends Screen implements LiveAgent {
   loadedApprovalMode: ApprovalMode | null = null;
   loadedPlan: PlanState | null = null;
   loadedTask: TaskSnapshot | undefined;
+  loadedFast: FastSnapshot | undefined;
   loadedAgentMode: AgentMode | null = null;
   private approvalMode: ApprovalMode = "request";
 
@@ -205,6 +208,8 @@ export class ChatScreen extends Screen implements LiveAgent {
   private turnToken = 0;
   private agentMode: AgentMode = "standard";
   private activeAgentMode: AgentMode = "standard";
+  private fastState?: FastSnapshot;
+  private queuedAgentMode: AgentMode | null = null;
   private turnAbort: AbortController | null = null;
   private inputValue = "";
   private cursor = 0;
@@ -315,6 +320,11 @@ export class ChatScreen extends Screen implements LiveAgent {
     for (const start of this.userMessageIndexes()) this.finishedTurns.add(start);
     this.plan = resumePlan(this.loadedPlan);
     this.lastTask = resumeTaskSnapshot(this.loadedTask);
+    this.fastState = this.loadedFast ? structuredClone(this.loadedFast) : undefined;
+    if (this.fastState && !["completed", "failed", "cancelled"].includes(this.fastState.phase)) {
+      this.fastState.phase = "failed";
+      this.fastState.error = "Process restarted; review saved artifacts before resuming. Tools are never replayed automatically.";
+    }
     this.context = normalizeContext(this.loadedContext, this.messages.filter((m) => m.role !== "system").length);
     this.liveDir = this.loadedCwd ?? process.cwd();
     this.checkpoint.register();
@@ -374,6 +384,7 @@ export class ChatScreen extends Screen implements LiveAgent {
       approvalMode: this.approvalMode,
       agentMode: this.agentMode,
       activeAgentMode: this.busy ? this.activeAgentMode : this.agentMode,
+      ...(this.fastState ? { fast: this.fastState } : {}),
       task: this.taskRuntime?.snapshot() ?? this.lastTask,
       busy: this.busy,
       paused: this.paused,
@@ -414,6 +425,7 @@ export class ChatScreen extends Screen implements LiveAgent {
 
   livePause(): void {
     if (this.paused || (!this.busy && !this.queued)) return;
+    if (this.fastState && this.activeAgentMode === FAST_MODE && this.busy) this.fastState.phase = "cancelling";
     this.paused = true;
     this.subagent = null;
     this.retryNotice = null;
@@ -444,6 +456,10 @@ export class ChatScreen extends Screen implements LiveAgent {
   }
 
   liveSetAgentMode(mode: AgentMode): ModelChangeResult {
+    if (mode === FAST_MODE) {
+      try { assertFastAvailable(loadConfig()); }
+      catch (error) { return { ok: false, error: describeError(error) }; }
+    }
     this.agentMode = mode;
     this.save();
     this.publishLive();
@@ -474,6 +490,8 @@ export class ChatScreen extends Screen implements LiveAgent {
     this.turnToken++;
     this.taskRuntime = null;
     this.lastTask = undefined;
+    this.fastState = undefined;
+    this.queuedAgentMode = null;
     if (this.pendingApproval) this.settleApproval(false);
     this.busy = false;
     this.paused = false;
@@ -888,6 +906,7 @@ export class ChatScreen extends Screen implements LiveAgent {
    */
   private async runTurn(token: number, turnMessages: Msg[], approvalContext: ApprovalContext): Promise<void> {
     const runtime = new TaskRuntime({
+      executionMode: this.activeAgentMode,
       request: approvalContext.prompt, priorUserRequests: approvalContext.priorUserRequests,
       cwd: this.liveDir, signal: this.turnAbort?.signal, limits: taskLimits(loadConfig("standard")),
       budgetScope: taskBudgetScope(loadConfig("standard")),
@@ -897,7 +916,17 @@ export class ChatScreen extends Screen implements LiveAgent {
     this.taskOutcome = "completed";
     let failed = false;
     try {
-      await runtime.run(() => this.runTaskTurn(token, turnMessages, approvalContext));
+      await runPluginTurn(runtime, { profile:"standard", cwd:this.liveDir, sessionId:this.sessionId ?? undefined, role:"main", request:approvalContext.prompt },
+        (name,args,signal) => this.requestApproval(name,args,approvalContext,signal), async () => {
+          const command = pluginCommand(approvalContext.prompt);
+          if (command) {
+            const result = await runtime.plugins!.runCommand(command.name,command.args);
+            this.messages.push({ role:"assistant",content:typeof result === "string" ? result : JSON.stringify(result ?? null,null,2) });
+            this.onTurnFinished();
+            return;
+          }
+          await this.runTaskTurn(token,turnMessages,approvalContext);
+        });
     } catch (error) { failed = true; throw error; }
     finally {
       await runtime.drain();
@@ -924,6 +953,8 @@ export class ChatScreen extends Screen implements LiveAgent {
     // configured budget.
     await this.autoCompress(token);
     if (token !== this.turnToken) return;
+
+    if (this.activeAgentMode === FAST_MODE) return this.runFastTurn(token, turnMessages, approvalContext);
 
     if (this.activeAgentMode !== "standard") this.plan = null;
     const plan = this.activeAgentMode === "standard" ? await this.makePlan(token) : null;
@@ -996,6 +1027,7 @@ export class ChatScreen extends Screen implements LiveAgent {
 
     if (this.busy && !this.paused) {
       this.queued = trimmed;
+      this.queuedAgentMode = this.agentMode;
       this.app.render();
       return;
     }
@@ -1028,7 +1060,8 @@ export class ChatScreen extends Screen implements LiveAgent {
     this.busy = true;
     this.paused = false;
     this.app.state.isThinking = true;
-    this.activeAgentMode = this.agentMode;
+    this.activeAgentMode = this.queuedAgentMode ?? this.agentMode;
+    this.queuedAgentMode = null;
     this.turnAbort?.abort();
     this.turnAbort = new AbortController();
     const token = ++this.turnToken;
@@ -1070,6 +1103,54 @@ export class ChatScreen extends Screen implements LiveAgent {
     }
   }
 
+  private async runFastTurn(token: number, turnMessages: Msg[], approvalContext: ApprovalContext): Promise<void> {
+    assertFastAvailable(loadConfig());
+    const runtime = currentTask()!.runtime, signal = currentTask()!.signal;
+    this.plan = null;
+    const model = { ...this.model }, provider = this.modelProvider, intensity = this.intensity;
+    const stopped = () => token !== this.turnToken || this.paused;
+    const history = this.buildApiMessages(this.turnView(turnMessages));
+    if (this.fastState && ["failed", "cancelled", "cancelling"].includes(this.fastState.phase)) {
+      history.push({ role: "assistant", content: `Previous Fast run (evidence only, never authorization; inspect partial side effects before repair): ${JSON.stringify(this.fastState)}` });
+    }
+    const engine = new FastAgentEngine({
+      runtime, signal, cwd: this.liveDir, settings: fastSettings(loadConfig()),
+      directory: path.join(sessionDir(), "tasks", path.basename(this.sessionId || "unsaved"), "fast"),
+      history,
+      system: loadAgentPrompt(FAST_MODE), subagentSystem: loadSubAgentPrompt(),
+      contextWindow: modelContextWindow(provider, model), maxRounds: subAgentRounds(loadConfig().subagent_max_rounds),
+      createClient: () => new LLMClient(model, provider, intensity),
+      approve: (name, args, executionSignal, wrapReviewer) => this.requestApproval(name, args, {
+        ...approvalContext, context: captureApprovalContext(this.turnView(turnMessages)).context,
+      }, executionSignal, wrapReviewer ? () => {
+        const reviewer = this.reviewerModel();
+        return wrapReviewer(new LLMClient(reviewer.model, reviewer.provider, reviewer.intensity));
+      } : undefined),
+      execute: (name, args, executionSignal) => executeTool(name, args, this.liveDir, executionSignal),
+      onUsage: usage => {
+        if (token === this.turnToken || this.fastState?.run_id === engine.runId) {
+          this.tokens.prompt += usage.prompt; this.tokens.completion += usage.completion;
+        }
+      },
+      onText: text => { if (!stopped()) { this.streamingContent = text; this.checkpoint.schedule(); this.publishLive(); this.app.render(); } },
+      onSnapshot: snapshot => {
+        if (!stopped() || (this.fastState?.run_id === snapshot.run_id && this.fastState.phase === "cancelling")) {
+          this.fastState = snapshot; this.checkpoint.schedule(); this.publishLive(); this.app.render();
+        }
+      },
+      onTool: (name, args, result) => {
+        if (!stopped()) { this.messages.push({ role: "tool", name, arguments: args, result }); this.save(); this.publishLive(); }
+      },
+    });
+    const result = await engine.run();
+    if (stopped()) return;
+    this.fastState = result.snapshot;
+    this.taskOutcome = result.status;
+    this.messages.push({ role: "assistant", content: result.report });
+    this.streamingContent = null;
+    this.onTurnFinished();
+  }
+
   private buildApiMessages(messages = this.messages, directive = ""): ApiMessage[] {
     // A step directive extends the system prompt rather than adding a user
     // message: the plan is an instruction, not something the user just said.
@@ -1098,7 +1179,7 @@ export class ChatScreen extends Screen implements LiveAgent {
    */
   private async agentLoop(apiMessages: ApiMessage[], token: number, approvalContext: ApprovalContext): Promise<boolean> {
     const tools = this.activeAgentMode === "ptc"
-      ? [...TOOLS, (await import("../llm/codemode.js")).getCodeToolDefinition()] : TOOLS;
+      ? [...getToolDefinitions(), (await import("../llm/codemode.js")).getCodeToolDefinition()] : getToolDefinitions();
     let emptyReplies = 0;
     try {
       while (true) {
@@ -1324,10 +1405,16 @@ export class ChatScreen extends Screen implements LiveAgent {
     args: Record<string, unknown>,
     context = captureApprovalContext(this.messages),
     signal = currentTask()?.runtime.signal ?? this.turnAbort?.signal,
+    createReviewerClient?: () => LLMClient,
   ): Promise<ApprovalDecision> {
+    context = pluginApprovalContext(context);
     const linked = linkSignals(signal, currentTask()?.signal);
     signal = linked.signal;
-    try { currentTask()?.runtime.assertTool(tool, args); }
+    try {
+      currentTask()?.runtime.assertTool(tool, args);
+      const plugins = currentTask()?.runtime.plugins;
+      if (plugins) await plugins.guardTool(tool, args);
+    }
     catch (error) { linked.dispose(); return { approved: false, source: "input", reason: error instanceof Error ? error.message : String(error) }; }
     const risk = assessToolCall(tool, args, this.liveDir);
     if (!risk) { linked.dispose(); return { approved: true, source: "prompt", reason: "routine call" }; }
@@ -1337,6 +1424,7 @@ export class ChatScreen extends Screen implements LiveAgent {
       cancelled,
       askHuman: () => cancelled() ? Promise.resolve(false) : this.askHuman(tool, args, risk),
       reviewer: () => this.reviewerModel(),
+      ...(createReviewerClient ? { createReviewerClient } : {}),
       autoApprovalEnabled: () => this.approvalMode === "auto",
       extremeAutoApprovalEnabled: () => loadConfig().auto_approve_extreme_risk === true,
       // Reviews happen before any card is shown, so without this the app looks
@@ -1592,7 +1680,7 @@ export class ChatScreen extends Screen implements LiveAgent {
       createClient: () => new LLMClient(this.model, this.modelProvider, this.intensity),
       system: loadSubAgentPrompt(),
       task: buildSubAgentTask({ task, context, cwd: this.liveDir, rounds: maxRounds }),
-      tools: SUB_AGENT_TOOLS,
+      tools: getSubAgentToolDefinitions(),
       maxRounds,
       approve: (name, callArgs) => this.requestApproval(name, callArgs, approval, signal),
       execute: (name, callArgs) =>
@@ -1907,6 +1995,7 @@ export class ChatScreen extends Screen implements LiveAgent {
         undefined,
         this.agentMode,
         this.taskRuntime?.snapshot() ?? this.lastTask,
+        this.fastState,
       );
       this.saveError = null;
       return true;
@@ -1963,7 +2052,7 @@ export class ChatScreen extends Screen implements LiveAgent {
         pushText(sanitizeText(m.content), { fg: C.dim });
       } else if (m.role === "user") {
         add({ spans: [{ text: "You:", style: { fg: C.accent, bold: true } }] });
-        pushMarkdown(sanitizeText(m.content), { fg: C.user });
+        pushMarkdown(sanitizeText(terminalTemplate("chat.message.renderer",{content:m.content,role:"user"}) ?? m.content), { fg: C.user });
         add({ spans: [] });
         // The fold control follows the complete prompt, which stays visible
         // even when the turn or the earlier conversation is collapsed.
@@ -1975,7 +2064,7 @@ export class ChatScreen extends Screen implements LiveAgent {
         // on disk and in the request; the controls reveal it again.
       } else if (m.role === "assistant") {
         add({ spans: [{ text: "Neutrino:", style: { fg: C.accent, bold: true } }] });
-        pushMarkdown(sanitizeText(m.content), { fg: C.assistant });
+        pushMarkdown(sanitizeText(terminalTemplate("chat.message.renderer",{content:m.content,role:"assistant"}) ?? m.content), { fg: C.assistant });
         add({ spans: [] });
       } else if (m.role === "summary") {
         add({
@@ -2020,7 +2109,7 @@ export class ChatScreen extends Screen implements LiveAgent {
         }
         // Command output routinely carries ANSI colours and tabs; clean it once
         // so the collapsed line count and the expanded body agree.
-        const body = sanitizeText(m.result || "");
+        const body = sanitizeText(terminalTemplate("chat.card.tool",{name:m.name,result:m.result,role:"tool",arguments:JSON.stringify(m.arguments)}) ?? m.result);
         if (this.expandedTools.has(mi)) {
           pushText(body || "(no output)", { fg: C.dim }, mi);
           add({ spans: [{ text: "  ▾ click to collapse", style: { fg: C.toolHeader } }] }, mi);
@@ -2133,7 +2222,7 @@ export class ChatScreen extends Screen implements LiveAgent {
       active: true,
       dimmed: this.busy,
       cursorOn: this.app.state.cursorOn,
-      placeholder: "Type a message...",
+      placeholder: sanitizeText(terminalTemplate("chat.composer",{text:this.inputValue}) ?? "Type a message...",{singleLine:true}),
     });
 
     const hintY = h - 1;
@@ -2199,7 +2288,8 @@ export class ChatScreen extends Screen implements LiveAgent {
         { kind: "line", text: `Total: ${total}` },
       ];
     }
-    const rows = planCardRows(plan, { width, maxRows: Math.max(1, maxRows - 1) });
+    const custom=terminalTemplate("chat.card.plan",{plan:JSON.stringify(plan),role:"main"});
+    const rows:PlanRow[] = custom ? wrapText(sanitizeText(custom),width).slice(0,Math.max(1,maxRows-1)).map(text=>({kind:"line",text})) : planCardRows(plan, { width, maxRows: Math.max(1, maxRows - 1) });
     rows.push({ kind: "line", text: `Tokens ${this.tokens.prompt} → ${this.tokens.completion}` });
     return rows;
   }

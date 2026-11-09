@@ -1,3 +1,5 @@
+import { createPluginUI } from "./plugins.js";
+let pluginUI = null;
 import { createSettingsUI } from "./settings.js";
 import { createProUI } from "./pro.js";
 import { renderMarkdown as renderMarkdownHtml } from "./markdown.js";
@@ -596,9 +598,9 @@ function storedWorkspace() {
   return { key: pathKey(path), path };
 }
 
-const AGENT_MODE_LABELS = { standard: "Standard mode", ptc: "PTC mode", fast: "Fast mode", pro: "Professional mode" };
+const AGENT_MODE_LABELS = { standard: "Standard mode", ptc: "PTC mode", fast: "Fast mode", fast_dag: "Fast Mode", pro: "Professional mode" };
 let newAgentMode = readStorage("neutrino.agent-mode");
-if (!["standard", "ptc", "fast"].includes(newAgentMode)) newAgentMode = "standard";
+if (!["standard", "ptc", "fast", "fast_dag"].includes(newAgentMode)) newAgentMode = "standard";
 let agentModePending = Promise.resolve();
 let agentModeChanging = false;
 let workspaceNavigation = false;
@@ -625,7 +627,8 @@ function renderAgentMode() {
   el.modePicker.classList.toggle("is-pending", Boolean(agentModeChanging || nextTurn));
   for (const button of el.modePicker.querySelectorAll?.("[data-agent-mode]") || []) {
     button.setAttribute("aria-checked", String(button.dataset.agentMode === mode));
-    button.disabled = agentModeChanging || workspaceNavigation;
+    button.disabled = agentModeChanging || workspaceNavigation || (button.dataset.agentMode === "fast_dag" && state.overview?.fast_mode_enabled === false);
+    if (button.dataset.agentMode === "fast_dag") button.title = state.overview?.fast_mode_enabled === false ? tr("Fast Mode is disabled; select another mode.") : "";
   }
   if (el.modeFeedback) {
     el.modeFeedback.textContent = agentModeError || (agentModeChanging ? tr("Changing mode…") : nextTurn ? tr("Applies to the next turn") : "");
@@ -727,7 +730,7 @@ function initializeAgentMode() {
     if (event.key === "Escape") { el.modePicker.open = false; el.modePicker.querySelector("summary")?.focus(); event.stopPropagation(); }
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
     event.preventDefault(); el.modePicker.open = true;
-    const buttons = [...el.modePicker.querySelectorAll("[data-agent-mode]")];
+    const buttons = [...el.modePicker.querySelectorAll("[data-agent-mode]")].filter(button => !button.disabled);
     let index = buttons.indexOf(document.activeElement);
     index = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
     buttons[index]?.focus();
@@ -983,6 +986,7 @@ async function loadOverview(options = {}) {
     const overview = await response.json();
     if (gateShown) return;
     state.overview = overview;
+    if (el.modePicker) renderAgentMode();
     setStatus(state.selection?.kind === "live" ? "live" : "online", state.selection?.kind === "live" ? "live" : "online");
     renderWorkspaceChrome();
     renderSidebar();
@@ -1628,14 +1632,32 @@ function canPauseFromComposer() {
     && snapshot.busy && !snapshot.paused && !el.input.value.trim());
 }
 
+// A paused turn resumes from the composer button, exactly like an empty draft
+// pauses a running one: the draft wins, so typing always means "send".
+function canResumeFromComposer() {
+  const selection = state.selection;
+  const snapshot = state.snapshot;
+  return Boolean(selection?.kind === "live" && snapshot?.key === selection.key
+    && snapshot.paused && !el.input.value.trim());
+}
+
+function composerAction() {
+  if (canPauseFromComposer()) return "pause";
+  if (canResumeFromComposer()) return "resume";
+  return "send";
+}
+
 function renderComposerAction() {
-  const pause = canPauseFromComposer();
-  const label = pause ? "Pause" : "Send message";
-  el.send.classList.toggle("is-pause", pause);
-  el.send.setAttribute("data-i18n-title", label);
-  el.send.setAttribute("data-i18n-aria-label", label);
-  el.send.title = tr(label);
-  el.send.setAttribute("aria-label", tr(label));
+  const action = composerAction();
+  el.send.classList.toggle("is-pause", action === "pause");
+  el.send.classList.toggle("is-resume", action === "resume");
+  const [source, text] = action === "pause" ? ["Pause", tr("Pause")]
+    : action === "resume" ? ["Resume", tr("Resume")]
+      : ["Send message", tr("Send message")];
+  el.send.setAttribute("data-i18n-title", source);
+  el.send.setAttribute("data-i18n-aria-label", source);
+  el.send.title = text;
+  el.send.setAttribute("aria-label", text);
 }
 
 function hideComposer() {
@@ -1885,7 +1907,7 @@ function renderControls(snapshot) {
             ? reviewStatus(reviewing)
             : subagent
               ? tr("sub-agent: {label}", { label: subagent })
-              : tr("working")
+              : snapshot.fast && snapshot.activeAgentMode === "fast_dag" ? fastPhaseLabel(snapshot.fast.phase) : tr("working")
       : tr("idle");
   el.controls.appendChild(badge);
 
@@ -1896,12 +1918,15 @@ function renderControls(snapshot) {
     el.controls.appendChild(warning);
   }
 
-  if (snapshot.busy || snapshot.paused) {
+  // Resuming belongs to the composer button (see renderComposerAction), which
+  // offers "Continue" on an empty draft, so the status bar never shows a second
+  // way in. Pausing stays here, for a turn that is actually running.
+  if (snapshot.busy && !snapshot.paused) {
     const button = document.createElement("button");
     button.className = "control";
-    button.textContent = snapshot.paused ? tr("Resume") : tr("Pause");
+    button.textContent = tr("Pause");
     button.addEventListener("click", () => {
-      postAction(snapshot.key, snapshot.paused ? "resume" : "pause");
+      postAction(snapshot.key, "pause");
     });
     el.controls.appendChild(button);
   }
@@ -2028,6 +2053,7 @@ function renderMessageList(messages, streaming, options) {
 function renderMessage(message, index) {
   const article = document.createElement("article");
   article.className = `message ${message.role}`;
+  article.dataset.pluginMessage = String(index);
 
   if (message.role === "tool") {
     const details = document.createElement("details");
@@ -2178,52 +2204,66 @@ function scrollToBottom() {
 
 async function postAction(key, action, body) {
   try {
-    await apiFetch(`/api/live/${encodeURIComponent(key)}/${action}`, {
+    const response = await apiFetch(`/api/live/${encodeURIComponent(key)}/${action}`, {
       method: "POST",
       headers: body ? { "Content-Type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,
     });
+    if (!response.ok) { const data = await response.json(); throw new Error(data.error || `HTTP ${response.status}`); }
+    return true;
   } catch (error) {
+    el.sub.textContent = error.message;
     console.error(error);
+    return false;
   }
 }
 
 function activateComposer() {
-  if (canPauseFromComposer()) return postAction(state.selection.key, "pause");
+  const action = composerAction();
+  if (action === "pause" || action === "resume") return postAction(state.selection.key, action);
   return sendMessage();
 }
 
 async function sendMessage() {
+  // Internal plugin requests pin their originating selection and can preserve the user draft.
+  const pluginRequest = arguments[0] ?? null;
   try { await agentModePending; } catch (error) { el.sub.textContent = error.message; return; }
+  if (pluginRequest && state.selection !== pluginRequest.selection) throw new Error("Conversation changed before the plugin message was sent");
   const selection = state.selection;
   if (!selection) return;
-  const text = el.input.value;
+  const text = pluginRequest?.text ?? el.input.value;
   if (!text.trim()) return;
   try {
     if (PRO_MODE) await proUI?.flush();
     else await preferences.flush?.();
   } catch (error) { el.sub.textContent = tr(error.message); return; }
-  if (state.selection !== selection) return;
+  if (state.selection !== selection) { if (pluginRequest) throw new Error("Conversation changed before the plugin message was sent"); return; }
+  const messagePayload = { text, ...(PRO_MODE ? {} : { agent_mode: currentAgentMode() }) };
 
   if (selection.kind === "live") {
-    el.input.value = "";
+    if (!pluginRequest?.preserveDraft) el.input.value = "";
     autosize();
-    await postAction(selection.key, "message", { text });
+    // A paused turn only queues the text, so a user send resumes right away: the
+    // message then starts the turn instead of waiting for a separate continue click.
+    const resumes = !pluginRequest && state.snapshot?.key === selection.key && Boolean(state.snapshot.paused);
+    const sent = await postAction(selection.key, "message", messagePayload);
+    if (sent === false) { if (!pluginRequest?.preserveDraft) el.input.value = text; autosize(); }
+    else if (resumes) await postAction(selection.key, "resume");
     return;
   }
 
   if (selection.kind === "new") {
     // A workspace landing page: typing starts a fresh conversation there, just
     // like typing on the terminal's start screen.
-    el.input.value = "";
+    if (!pluginRequest?.preserveDraft) el.input.value = "";
     autosize();
     try {
       const created = await createConversation(selection.cwd, preferences.defaultSelection?.());
       await selectLive(created.key);
       setConversationView(true);
-      await postAction(created.key, "message", { text });
+      if (await postAction(created.key, "message", messagePayload) === false) { if (!pluginRequest?.preserveDraft) el.input.value = text; autosize(); }
     } catch (error) {
-      el.input.value = text;
+      if (!pluginRequest?.preserveDraft) el.input.value = text;
       autosize();
       el.sub.textContent = tr("Could not start the conversation: {error}", { error: error.message });
     }
@@ -2231,13 +2271,13 @@ async function sendMessage() {
   }
 
   // Reading a saved transcript: resume it in the browser, then deliver the text.
-  el.input.value = "";
+  if (!pluginRequest?.preserveDraft) el.input.value = "";
   autosize();
   try {
     const key = await continueSession(selection.id);
-    await postAction(key, "message", { text });
+    if (await postAction(key, "message", messagePayload) === false) { if (!pluginRequest?.preserveDraft) el.input.value = text; autosize(); }
   } catch (error) {
-    el.input.value = text;
+    if (!pluginRequest?.preserveDraft) el.input.value = text;
     autosize();
     el.sub.textContent = tr("Could not continue this conversation: {error}", { error: error.message });
   }
@@ -2812,12 +2852,28 @@ function planStatusLabel(status) {
   return tr("Pending");
 }
 
+function fastPhaseLabel(phase) {
+  switch (phase) {
+    case "planning": return tr("Planning tasks");
+    case "executing": return tr("Running tasks concurrently");
+    case "verifying": return tr("Verifying local results");
+    case "integrating": return tr("Integrating results");
+    case "reviewing": return tr("Final global review");
+    case "completed": return tr("Fast Mode completed");
+    case "cancelled": return tr("Fast Mode cancelled");
+    case "cancelling": return tr("Stopping tasks…");
+    default: return tr("Fast Mode failed");
+  }
+}
+
 function renderPlanCard(source) {
   if (!el.planCard) return;
   const plan = source && source.plan && Array.isArray(source.plan.steps) && source.plan.steps.length ? source.plan : null;
   const tokens = source && source.tokens ? source.tokens : null;
   const hasUsage = tokens && (Number(tokens.prompt) > 0 || Number(tokens.completion) > 0);
-  if (!state.planOpen || (!plan && !hasUsage)) {
+  const fast = (source?.activeAgentMode === "fast_dag" || (!source?.activeAgentMode && source?.agent_mode === "fast_dag"))
+    ? source.fast || source.fast_run : null;
+  if (!state.planOpen || (!plan && !hasUsage && !fast)) {
     el.planCard.classList.add("hidden");
     el.planCard.replaceChildren();
     return;
@@ -2841,6 +2897,39 @@ function renderPlanCard(source) {
   });
   head.append(title, close);
   card.appendChild(head);
+
+  if (fast) {
+    const progress = document.createElement("div");
+    progress.className = "fast-progress";
+    progress.setAttribute("role", "status");
+    progress.setAttribute("aria-live", "polite");
+    const phase = document.createElement("strong");
+    phase.textContent = tr("Fast Mode") + " · " + fastPhaseLabel(fast.phase);
+    const tasks = (fast.tasks || []).filter(task => task.kind === "work");
+    const count = document.createElement("p");
+    count.textContent = tr("{running} running · {verified}/{total} verified", {
+      running: (fast.tasks || []).filter(task => task.status === "RUNNING" || (task.kind === "verification" && task.status === "VERIFYING")).length,
+      verified: tasks.filter(task => task.status === "COMPLETED").length, total: tasks.length,
+    });
+    progress.append(phase, count);
+    const list = document.createElement("ul");
+    for (const task of tasks) {
+      const row = document.createElement("li");
+      row.textContent = `${task.task_goal} · ${task.status}`;
+      list.appendChild(row);
+    }
+    progress.appendChild(list);
+    if (fast.error) {
+      const error = document.createElement("p");
+      error.className = "error"; error.textContent = fast.error;
+      const fallback = document.createElement("button");
+      fallback.type = "button"; fallback.className = "control";
+      fallback.textContent = tr("Select Standard mode to continue");
+      fallback.addEventListener("click", () => { agentModePending = chooseAgentMode("standard"); void agentModePending.catch(() => {}); });
+      progress.append(error, fallback);
+    }
+    card.appendChild(progress);
+  }
 
   if (plan) {
     if (plan.goal) {
@@ -3495,3 +3584,24 @@ loadSeen().then(() => loadOverview()).then(async () => {
   if (state.workspace && !state.selection) renderWorkspaceLanding(state.workspace.path);
 });
 setInterval(() => loadOverview({ silent: true }), REFRESH_MS);
+
+// The plugin shell consumes the same public conversation projection as the built-in UI.
+if (typeof createPluginUI === "function") pluginUI = createPluginUI({
+  profile: PRO_MODE ? "pro" : "standard",
+  api: apiFetch,
+  context: () => {
+    const data = state.snapshot ?? state.fileData ?? state.agentData ?? {};
+    const selection = state.selection;
+    return { identity:selection ? `${selection.kind}:${selection.key ?? selection.id ?? selection.cwd ?? ""}` : "",
+      cwd:data.cwd ?? selection?.cwd ?? state.workspace?.path ?? "",messages:data.messages ?? [],
+      plan:data.plan,model:data.model,streamingContent:data.streamingContent,pluginUI:data.task?.pluginUI,pluginPrompt:data.task?.pluginPrompt,pluginErrors:data.task?.pluginErrors };
+  },
+  getDraft: () => el.input.value,
+  setDraft: text => { el.input.value=text; autosize(); },
+  submit: async () => { if (!state.selection) throw new Error("Open a conversation first"); await sendMessage({ selection:state.selection,text:el.input.value }); },
+  command: async (name,args) => {
+    if (!state.selection) throw new Error("Open a conversation first");
+    await sendMessage({ selection:state.selection,text:`/plugin ${name} ${JSON.stringify(args)}`,preserveDraft:true });
+  },
+  notice: message => { el.sub.textContent=message; },
+});

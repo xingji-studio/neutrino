@@ -1,3 +1,5 @@
+import { terminalUI } from "../plugins/terminal.js";
+import type { OwnedUI } from "../plugins/host.js";
 import type { Buffer } from "../terminal/buffer.js";
 import { Screen } from "../terminal/screen.js";
 import type { Key, MouseEvent } from "../terminal/input.js";
@@ -19,10 +21,10 @@ import {
   webModeButton,
 } from "../ui.js";
 
-const TABS = ["Model", "History", "Settings"];
+const TABS = ["Model", "History", "Settings", "Plugins"];
 const LOGO = loadLogo();
 
-const FOCUS_COUNT = TABS.length + 2; // input box + 3 tabs + approval mode
+
 const INPUT_H = 3;
 const TAB_H = 3;
 
@@ -39,6 +41,11 @@ function isLowSurrogate(code: number): boolean {
 }
 
 export class StartScreen extends Screen {
+  private extensions: OwnedUI[] = [];
+  private get tabs(): string[] { return [...TABS,...this.extensions.slice(0,Math.max(0,Math.floor(((this.app?.width ?? 80)-2)/10)-TABS.length)).map(item=>item.title)]; }
+  private get focusCount(): number { return this.tabs.length + 2; }
+  onActivate(): void { this.extensions=terminalUI().filter(item=>item.slot === "app.menu" || item.slot === "workspace.tabs"); }
+
   private get approvalMode() {
     return normalizeApprovalMode(loadConfig().approval_mode);
   }
@@ -110,7 +117,7 @@ export class StartScreen extends Screen {
       if (this.focusIdx === 0) {
         const text = this.inputValue.trim();
         if (text) this.app.startNewChat(text);
-      } else if (this.focusIdx === FOCUS_COUNT - 1) {
+      } else if (this.focusIdx === this.focusCount - 1) {
         this.toggleApproval();
       } else {
         this.enterTab();
@@ -177,7 +184,7 @@ export class StartScreen extends Screen {
       // must not light up.
       if (!proHover && !webHover) {
         if (inRect(ev.x, ev.y, approvalToggle(this.app.width, this.app.height - 4, this.approvalMode))) {
-          hover = FOCUS_COUNT - 1;
+          hover = this.focusCount - 1;
         } else if (layout && inRect(ev.x, ev.y, { x: layout.inputX, y: layout.inputY, w: layout.inputW, h: INPUT_H })) {
           hover = 0;
         } else if (layout && ev.y >= layout.tabY && ev.y < layout.tabY + TAB_H) {
@@ -216,7 +223,7 @@ export class StartScreen extends Screen {
         return;
       }
       if (ev.y >= 1 && inRect(ev.x, ev.y, approvalToggle(this.app.width, this.app.height - 4, this.approvalMode))) {
-        this.focusIdx = FOCUS_COUNT - 1;
+        this.focusIdx = this.focusCount - 1;
         this.toggleApproval();
         return;
       }
@@ -278,12 +285,12 @@ export class StartScreen extends Screen {
     const inputY = this.contentTop(h, contentH) + logoLines.length + logoGap;
     const tabY = inputY + INPUT_H + gap;
     const tabGap = 2;
-    const tabInner = inputW - tabGap * (TABS.length - 1);
-    const baseW = Math.floor(tabInner / TABS.length);
-    const extra = tabInner - baseW * TABS.length;
+    const tabInner = inputW - tabGap * (this.tabs.length - 1);
+    const baseW = Math.floor(tabInner / this.tabs.length);
+    const extra = tabInner - baseW * this.tabs.length;
     const tabs: { x: number; w: number }[] = [];
     let tx = inputX;
-    for (let i = 0; i < TABS.length; i++) {
+    for (let i = 0; i < this.tabs.length; i++) {
       const tw = baseW + (i < extra ? 1 : 0);
       tabs.push({ x: tx, w: tw });
       tx += tw + tabGap;
@@ -303,7 +310,7 @@ export class StartScreen extends Screen {
   }
 
   private move(delta: number): void {
-    this.focusIdx = (this.focusIdx + delta + FOCUS_COUNT) % FOCUS_COUNT;
+    this.focusIdx = (this.focusIdx + delta + this.focusCount) % this.focusCount;
     this.hoverIdx = -1;
     this.app.render();
   }
@@ -328,7 +335,9 @@ export class StartScreen extends Screen {
   private enterTab(): void {
     if (this.focusIdx === 1) this.app.openModelConfig();
     else if (this.focusIdx === 2) this.app.openHistory();
-    else this.app.openSettings();
+    else if (this.focusIdx === 3) this.app.openSettings();
+    else if (this.focusIdx === 4) this.app.openPlugins();
+    else if (this.extensions[this.focusIdx-5]) this.app.openPluginContribution(this.extensions[this.focusIdx-5]);
   }
 
   render(buf: Buffer): void {
@@ -362,14 +371,14 @@ export class StartScreen extends Screen {
     y += INPUT_H + gap;
 
     const tabGap = 2;
-    const tabInner = inputW - tabGap * (TABS.length - 1);
-    const baseW = Math.floor(tabInner / TABS.length);
-    const extra = tabInner - baseW * TABS.length;
+    const tabInner = inputW - tabGap * (this.tabs.length - 1);
+    const baseW = Math.floor(tabInner / this.tabs.length);
+    const extra = tabInner - baseW * this.tabs.length;
     let tx = inputX;
-    for (let i = 0; i < TABS.length; i++) {
+    for (let i = 0; i < this.tabs.length; i++) {
       const tw = baseW + (i < extra ? 1 : 0);
       const selected = i === this.focusIdx - 1 || i === this.hoverIdx - 1;
-      drawTabButton(buf, tx, y, tw, TABS[i], selected);
+      drawTabButton(buf, tx, y, tw, this.tabs[i], selected);
       tx += tw + tabGap;
     }
 
@@ -394,7 +403,7 @@ export class StartScreen extends Screen {
       buf.centerText(versionY, `v${version}`, { fg: C.dim });
     }
     drawApprovalToggle(buf, approvalY, this.approvalMode,
-      this.focusIdx === FOCUS_COUNT - 1 || this.hoverIdx === FOCUS_COUNT - 1);
+      this.focusIdx === this.focusCount - 1 || this.hoverIdx === this.focusCount - 1);
 
     // Painted last so their opaque footprints are never clipped by the
     // decorative content drawn before them. Hit testing shares the geometry.

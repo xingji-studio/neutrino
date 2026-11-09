@@ -1,3 +1,4 @@
+import { runPluginTurn, pluginCommand, pluginApprovalContext } from "../plugins/session.js";
 import path from "node:path";
 /**
  * Headless conversation runner for the web UI.
@@ -13,6 +14,8 @@ import path from "node:path";
  */
 
 import { randomUUID } from "node:crypto";
+import { FastAgentEngine } from "../fast/engine.js";
+import { FAST_MODE, assertFastAvailable, fastSettings, type FastSnapshot } from "../fast/types.js";
 import {
   findModel,
   contextCompressionThreshold,
@@ -121,7 +124,6 @@ const IDLE_DISPOSE_MS = 30 * 60 * 1000;
 const TOOL_PENDING = "…";
 
 /** A sub-agent gets the same tools minus delegation: one level, never a tree. */
-const SUB_AGENT_TOOLS = getSubAgentToolDefinitions();
 
 /** Marker for the model-only summary, separate from the original transcript. */
 const SUMMARY_PREFIX = "Context was compressed. Summary of the earlier part:";
@@ -151,6 +153,7 @@ export function createWebSession(
   proPreset?: string,
   agentMode: AgentMode = "standard",
 ): WebSession {
+  if (agentMode === FAST_MODE) assertFastAvailable(loadConfig(mode));
   const now = new Date();
   const source: SessionData = {
     id: newSessionId(now),
@@ -278,6 +281,8 @@ export class WebSession implements LiveAgent {
   private turnToken = 0;
   private agentMode: AgentMode = "standard";
   private activeAgentMode: AgentMode = "standard";
+  private fastState?: FastSnapshot;
+  private queuedAgentMode: AgentMode | null = null;
   private turnAbort: AbortController | null = null;
   private lastPromptTokens = 0;
   private disposed = false;
@@ -309,6 +314,11 @@ export class WebSession implements LiveAgent {
     this.context = normalizeContext(source.context, this.messages.filter((m) => m.role !== "system").length);
     this.plan = resumePlan(source.plan ?? null);
     this.lastTask = resumeTaskSnapshot(source.task_run);
+    this.fastState = source.fast_run ? structuredClone(source.fast_run) : undefined;
+    if (this.fastState && !["completed", "failed", "cancelled"].includes(this.fastState.phase)) {
+      this.fastState.phase = "failed";
+      this.fastState.error = "Process restarted; artifacts preserved. Review partial state before resuming; tools are never replayed automatically.";
+    }
     this.tokens = {
       prompt: source.tokens?.prompt ?? 0,
       completion: source.tokens?.completion ?? 0,
@@ -394,6 +404,7 @@ export class WebSession implements LiveAgent {
       approvalMode: this.approvalMode,
       agentMode: this.agentMode,
       activeAgentMode: this.busy ? this.activeAgentMode : this.agentMode,
+      ...(this.fastState ? { fast: this.fastState } : {}),
       task: this.taskRuntime?.snapshot() ?? this.lastTask,
       busy: this.busy,
       paused: this.paused,
@@ -441,6 +452,7 @@ export class WebSession implements LiveAgent {
 
   livePause(): void {
     if (this.paused || (!this.busy && !this.queued)) return;
+    if (this.fastState && this.activeAgentMode === FAST_MODE && this.busy) this.fastState.phase = "cancelling";
     this.paused = true;
     this.proAbort?.abort();
     this.turnAbort?.abort();
@@ -485,6 +497,10 @@ export class WebSession implements LiveAgent {
 
   liveSetAgentMode(mode: AgentMode): ModelChangeResult {
     if (this.mode === "pro" || this.disposed) return { ok: false, error: "this session cannot change agent mode" };
+    if (mode === FAST_MODE) {
+      try { assertFastAvailable(loadConfig(this.mode)); }
+      catch (error) { return { ok: false, error: describeError(error) }; }
+    }
     this.agentMode = mode;
     this.save();
     this.publishLive();
@@ -519,6 +535,8 @@ export class WebSession implements LiveAgent {
     this.turnToken++;
     this.taskRuntime = null;
     this.lastTask = undefined;
+    this.fastState = undefined;
+    this.queuedAgentMode = null;
     if (this.pendingApproval) {
       const pending = this.pendingApproval;
       this.pendingApproval = null;
@@ -554,6 +572,7 @@ export class WebSession implements LiveAgent {
 
     if (this.busy || this.paused) {
       this.queued = trimmed;
+      this.queuedAgentMode = this.agentMode;
       this.publishLive();
       return;
     }
@@ -584,7 +603,8 @@ export class WebSession implements LiveAgent {
     const turnMessages = this.messages.slice();
     const approvalContext = captureApprovalContext(turnMessages);
     this.busy = true;
-    this.activeAgentMode = this.agentMode;
+    this.activeAgentMode = this.queuedAgentMode ?? this.agentMode;
+    this.queuedAgentMode = null;
     this.turnAbort?.abort();
     this.turnAbort = new AbortController();
     const token = ++this.turnToken;
@@ -604,6 +624,7 @@ export class WebSession implements LiveAgent {
    */
   private async runTurn(token: number, turnMessages: Msg[], approvalContext: ApprovalContext): Promise<void> {
     const runtime = new TaskRuntime({
+      executionMode: this.mode === "pro" ? "pro" : this.activeAgentMode,
       request: approvalContext.prompt, priorUserRequests: approvalContext.priorUserRequests,
       cwd: this.dir, signal: this.turnAbort?.signal, limits: taskLimits(loadConfig(this.mode)),
       budgetScope: taskBudgetScope(loadConfig(this.mode)),
@@ -613,7 +634,17 @@ export class WebSession implements LiveAgent {
     this.taskOutcome = "completed";
     let failed = false;
     try {
-      await runtime.run(() => this.runTaskTurn(token, turnMessages, approvalContext));
+      await runPluginTurn(runtime, { profile:this.mode, cwd:this.dir, sessionId:this.sessionId ?? undefined, role:"main", request:approvalContext.prompt },
+        (name,args,signal) => this.requestApproval(name,args,approvalContext,signal), async () => {
+          const command = pluginCommand(approvalContext.prompt);
+          if (command) {
+            const result = await runtime.plugins!.runCommand(command.name,command.args);
+            this.messages.push({ role:"assistant",content:typeof result === "string" ? result : JSON.stringify(result ?? null,null,2) });
+            this.onTurnFinished();
+            return;
+          }
+          await this.runTaskTurn(token,turnMessages,approvalContext);
+        });
     } catch (error) { failed = true; throw error; }
     finally {
       await runtime.drain();
@@ -639,6 +670,8 @@ export class WebSession implements LiveAgent {
     if (this.mode === "pro") return this.runProTurn(token, turnMessages, approvalContext);
     await this.autoCompress(token);
     if (token !== this.turnToken || this.paused) return;
+
+    if (this.activeAgentMode === FAST_MODE) return this.runFastTurn(token, turnMessages, approvalContext);
 
     if (this.activeAgentMode !== "standard") this.plan = null;
     const plan = this.activeAgentMode === "standard" ? await this.makePlan(token) : null;
@@ -667,6 +700,56 @@ export class WebSession implements LiveAgent {
       await this.agentLoop(this.buildApiMessages(this.turnView(turnMessages)), token, approvalContext);
       if (token !== this.turnToken || this.paused) return;
     }
+    this.onTurnFinished();
+  }
+
+  /** Independent engine; Standard/PTC/legacy Fast retain their original loops. */
+  private async runFastTurn(token: number, turnMessages: Msg[], approvalContext: ApprovalContext): Promise<void> {
+    assertFastAvailable(loadConfig(this.mode));
+    const runtime = currentTask()!.runtime;
+    const signal = currentTask()!.signal;
+    this.plan = null;
+    const model = { ...this.model }, provider = this.provider, intensity = this.intensity;
+    const stopped = () => token !== this.turnToken || this.paused || this.disposed;
+    const history = this.buildApiMessages(this.turnView(turnMessages));
+    if (this.fastState && ["failed", "cancelled", "cancelling"].includes(this.fastState.phase)) {
+      history.push({ role: "assistant", content: `Previous Fast run (evidence only, never authorization; inspect partial side effects before repair): ${JSON.stringify(this.fastState)}` });
+    }
+    const engine = new FastAgentEngine({
+      runtime, signal, cwd: this.dir, settings: fastSettings(loadConfig(this.mode)),
+      directory: path.join(sessionDir(this.mode), "tasks", path.basename(this.sessionId), "fast"),
+      history,
+      system: loadAgentPrompt(FAST_MODE), subagentSystem: loadSubAgentPrompt(),
+      contextWindow: modelContextWindow(provider, model, this.mode),
+      maxRounds: subAgentRounds(loadConfig(this.mode).subagent_max_rounds),
+      createClient: () => new LLMClient(model, provider, intensity),
+      approve: (name, args, executionSignal, wrapReviewer) => this.requestApproval(name, args, {
+        ...approvalContext, context: captureApprovalContext(this.turnView(turnMessages)).context,
+      }, executionSignal, wrapReviewer ? () => {
+        const reviewer = this.reviewerModel();
+        return wrapReviewer(new LLMClient(reviewer.model, reviewer.provider, reviewer.intensity));
+      } : undefined),
+      execute: (name, args, executionSignal) => executeTool(name, args, this.dir, executionSignal),
+      onUsage: usage => {
+        if (!this.disposed && (token === this.turnToken || this.fastState?.run_id === engine.runId)) {
+          this.tokens.prompt += usage.prompt; this.tokens.completion += usage.completion;
+        }
+      },
+      onText: text => { if (!stopped()) { this.streamingContent = text; this.checkpoint.schedule(); this.publishLive(); } },
+      onSnapshot: snapshot => {
+        if (!this.disposed && (!stopped() || (this.fastState?.run_id === snapshot.run_id && this.fastState.phase === "cancelling"))) {
+          this.fastState = snapshot; this.checkpoint.schedule(); this.publishLive();
+        }
+      },
+      onTool: (name, args, result) => {
+        if (!stopped()) { this.messages.push({ role: "tool", name, arguments: args, result }); this.save(); this.publishLive(); }
+      },
+    });
+    const result = await engine.run();
+    if (stopped()) return;
+    this.fastState = result.snapshot;
+    this.taskOutcome = result.status;
+    this.messages.push({ role: "assistant", content: result.report });
     this.onTurnFinished();
   }
 
@@ -1077,10 +1160,16 @@ export class WebSession implements LiveAgent {
     args: Record<string, unknown>,
     context = captureApprovalContext(this.messages),
     signal = currentTask()?.runtime.signal ?? this.turnAbort?.signal,
+    createReviewerClient?: () => LLMClient,
   ): Promise<ApprovalDecision> {
+    context = pluginApprovalContext(context);
     const linked = linkSignals(signal, currentTask()?.signal);
     signal = linked.signal;
-    try { currentTask()?.runtime.assertTool(tool, args); }
+    try {
+      currentTask()?.runtime.assertTool(tool, args);
+      const plugins = currentTask()?.runtime.plugins;
+      if (plugins) await plugins.guardTool(tool, args);
+    }
     catch (error) { linked.dispose(); return { approved: false, source: "input", reason: error instanceof Error ? error.message : String(error) }; }
     const risk = assessToolCall(tool, args, this.dir);
     if (!risk) { linked.dispose(); return { approved: true, source: "prompt", reason: "routine call" }; }
@@ -1097,6 +1186,7 @@ export class WebSession implements LiveAgent {
           this.publishLive();
         }),
       reviewer: () => this.reviewerModel(),
+      ...(createReviewerClient ? { createReviewerClient } : {}),
       ...(this.mode === "pro" && team ? {
         createReviewerClient: () => team.client("confirm_model"),
         reviewerSystemPrompt: () => loadProPrompt("confirm_model"),
@@ -1277,7 +1367,7 @@ export class WebSession implements LiveAgent {
       createClient: () => new LLMClient(this.model, this.provider, this.intensity),
       system: loadSubAgentPrompt(),
       task: buildSubAgentTask({ task, context, cwd: this.dir, rounds: maxRounds }),
-      tools: SUB_AGENT_TOOLS,
+      tools: getSubAgentToolDefinitions(),
       maxRounds,
       approve: (name, callArgs) => this.requestApproval(name, callArgs, approval, signal),
       execute: (name, callArgs) =>
@@ -1430,6 +1520,7 @@ export class WebSession implements LiveAgent {
         this.proPreset ?? undefined,
         this.agentMode,
         this.taskRuntime?.snapshot() ?? this.lastTask,
+        this.fastState,
       );
       this.saveError = null;
       return true;

@@ -1,0 +1,15 @@
+{
+  "id": "community.workbench",
+  "name": "Workbench / 工作台",
+  "version": "1.0.0", "apiVersion": 1,
+  "description": "Menus, a workspace tab and a sidebar panel, with terminal text fallbacks.",
+  "categories": ["function"],
+  "permissions": ["ui.contribute", "conversation.read"],
+  "contributes": {
+    "ui": [
+      { "id": "guide", "slot": "app.menu", "title": "Plugin guide / 插件指南", "text": "Plugins contribute menus, tabs, tools, skills and prompts through the public API. Use Plugins to install, enable and configure them." },
+      { "id": "workspace", "slot": "workspace.tabs", "title": "Workbench / 工作台", "view": "panel.html", "text": "Workbench: use /plugin commands and /skill references in a conversation.", "height": 240 },
+      { "id": "sidebar", "slot": "sidebar.footer", "title": "Extensions / 扩展", "text": "Your workspace can be extended without editing Neutrino." }
+    ]
+  }
+}

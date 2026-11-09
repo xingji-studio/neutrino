@@ -1,0 +1,975 @@
+{
+  "kind": "live_model_end_to_end",
+  "state": "incomplete",
+  "repetitions": 1,
+  "source": "existing selected model",
+  "model": {
+    "provider": "DeepSeek",
+    "name": "deepseek-flash",
+    "intensity": "Max",
+    "available_inference_slots": 4
+  },
+  "note": "Identical model, intensity, fixture requirements and verification for both modes. Correctness uses exact fixture oracles; broader answer quality requires human review. One sample does not establish population P95.",
+  "scenarios": [
+    {
+      "name": "multi_source_retrieval",
+      "samples": {
+        "standard": [
+          {
+            "elapsed_ms": 65917.97711999994,
+            "approval_wait_ms": 0,
+            "execution_ms": 65917.97711999994,
+            "approval_events": [],
+            "blocked_on_approval": false,
+            "tokens": 104399,
+            "input_tokens": 95614,
+            "output_tokens": 8785,
+            "missing_usage_requests": 0,
+            "tokens_per_second": 1583.7712951953538,
+            "success": true,
+            "fixture_correct": true,
+            "retries": 0,
+            "tool_wait_ms": 348.83348899974953,
+            "scheduling_ms": null,
+            "model_requests": 28,
+            "agent_runs": 0,
+            "tool_calls": 14,
+            "reused_from": "fast-live-before-scope-fix.json"
+          }
+        ],
+        "fast_dag": [
+          {
+            "elapsed_ms": 120891.71098500025,
+            "approval_wait_ms": 0,
+            "execution_ms": 120891.71098500025,
+            "approval_events": [],
+            "blocked_on_approval": false,
+            "tokens": 270961,
+            "input_tokens": 250960,
+            "output_tokens": 20001,
+            "missing_usage_requests": 0,
+            "tokens_per_second": 2241.353007516121,
+            "success": true,
+            "fixture_correct": true,
+            "retries": 0,
+            "tool_wait_ms": 653.0416940003633,
+            "scheduling_ms": 3.7505429997108877,
+            "model_requests": 35,
+            "agent_runs": 6,
+            "tool_calls": 28,
+            "fast_tasks": [
+              {
+                "task_id": "read_sources",
+                "status": "COMPLETED"
+              },
+              {
+                "task_id": "read_sources.verify",
+                "status": "COMPLETED"
+              },
+              {
+                "task_id": "compute_write",
+                "status": "COMPLETED"
+              },
+              {
+                "task_id": "compute_write.verify",
+                "status": "COMPLETED"
+              },
+              {
+                "task_id": "final_verify",
+                "status": "COMPLETED"
+              },
+              {
+                "task_id": "final_verify.verify",
+                "status": "COMPLETED"
+              }
+            ],
+            "review": [
+              {
+                "accepted": true,
+                "reason": "completed",
+                "evidence_ids": [
+                  "artifact:read_sources@1",
+                  "artifact:compute_write@1",
+                  "artifact:final_verify@1",
+                  "artifact:read_sources.verify@1",
+                  "artifact:compute_write.verify@1",
+                  "artifact:final_verify.verify@1"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "standard": {
+        "samples": 1,
+        "mean_ms": 65917.97711999994,
+        "median_ms": 65917.97711999994,
+        "p95_ms": null,
+        "mean_tokens": 104399,
+        "success_rate": 1,
+        "fixture_correct_rate": 1,
+        "tokens_per_second": 1583.7712951953538
+      },
+      "fast_dag": {
+        "samples": 1,
+        "mean_ms": 120891.71098500025,
+        "median_ms": 120891.71098500025,
+        "p95_ms": null,
+        "mean_tokens": 270961,
+        "success_rate": 1,
+        "fixture_correct_rate": 1,
+        "tokens_per_second": 2241.353007516121
+      },
+      "valid_successful_comparison": true,
+      "time_saved_fraction": -0.8339717974798246,
+      "token_change_fraction": 1.5954367378997882,
+      "throughput_change_fraction": 0.4151999182682853
+    },
+    {
+      "name": "multi_dimension_comparison",
+      "samples": {
+        "standard": [
+          {
+            "elapsed_ms": 61615.192434000084,
+            "approval_wait_ms": 0,
+            "execution_ms": 61615.192434000084,
+            "approval_events": [],
+            "blocked_on_approval": false,
+            "tokens": 91439,
+            "input_tokens": 82777,
+            "output_tokens": 8662,
+            "missing_usage_requests": 0,
+            "tokens_per_second": 1484.0333428796166,
+            "success": true,
+            "fixture_correct": true,
+            "retries": 0,
+            "tool_wait_ms": 330.8898400000762,
+            "scheduling_ms": null,
+            "model_requests": 25,
+            "agent_runs": 0,
+            "tool_calls": 13,
+            "reused_from": "fast-live-before-scope-fix.json"
+          }
+        ],
+        "fast_dag": [
+          {
+            "elapsed_ms": 131963.02765000006,
+            "approval_wait_ms": 0,
+            "execution_ms": 131963.02765000006,
+            "approval_events": [],
+            "blocked_on_approval": false,
+            "tokens": 246780,
+            "input_tokens": 225768,
+            "output_tokens": 21012,
+            "missing_usage_requests": 0,
+            "tokens_per_second": 1870.069248899958,
+            "success": true,
+            "fixture_correct": true,
+            "retries": 0,
+            "tool_wait_ms": 747.5336660002358,
+            "scheduling_ms": 2.1060970006510615,
+            "model_requests": 37,
+            "agent_runs": 4,
+            "tool_calls": 16,
+            "fast_tasks": [
+              {
+                "task_id": "compute_answer",
+                "status": "COMPLETED"
+              },
+              {
+                "task_id": "compute_answer.verify",
+                "status": "COMPLETED"
+              },
+              {
+                "task_id": "independent_verify",
+                "status": "COMPLETED"
+              },
+              {
+                "task_id": "independent_verify.verify",
+                "status": "COMPLETED"
+              }
+            ],
+            "review": [
+              {
+                "accepted": true,
+                "reason": "completed",
+                "evidence_ids": [
+                  "artifact:compute_answer@1",
+                  "artifact:independent_verify@1"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "standard": {
+        "samples": 1,
+        "mean_ms": 61615.192434000084,
+        "median_ms": 61615.192434000084,
+        "p95_ms": null,
+        "mean_tokens": 91439,
+        "success_rate": 1,
+        "fixture_correct_rate": 1,
+        "tokens_per_second": 1484.0333428796166
+      },
+      "fast_dag": {
+        "samples": 1,
+        "mean_ms": 131963.02765000006,
+        "median_ms": 131963.02765000006,
+        "p95_ms": null,
+        "mean_tokens": 246780,
+        "success_rate": 1,
+        "fixture_correct_rate": 1,
+        "tokens_per_second": 1870.069248899958
+      },
+      "valid_successful_comparison": true,
+      "time_saved_fraction": -1.1417287269102339,
+      "token_change_fraction": 1.6988484126029375,
+      "throughput_change_fraction": 0.26012616756391593
+    },
+    {
+      "name": "complex_logic",
+      "samples": {
+        "standard": [
+          {
+            "elapsed_ms": 184094.5084220001,
+            "approval_wait_ms": 86578.38589400006,
+            "execution_ms": 97516.12252800004,
+            "approval_events": [
+              {
+                "id": "de5f32e3-25ef-4c97-9d6f-233d2995dcbb-complex_logic-standard-0-0",
+                "approved": true,
+                "wait_ms": 86578.38589400006
+              }
+            ],
+            "blocked_on_approval": false,
+            "tokens": 136923,
+            "input_tokens": 122748,
+            "output_tokens": 14175,
+            "missing_usage_requests": 0,
+            "tokens_per_second": 743.7647172295395,
+            "success": true,
+            "fixture_correct": true,
+            "retries": 0,
+            "tool_wait_ms": 532.3296129996888,
+            "scheduling_ms": null,
+            "model_requests": 26,
+            "agent_runs": 0,
+            "tool_calls": 18,
+            "reused_from": "fast-live-before-scope-fix.json"
+          }
+        ],
+        "fast_dag": [
+          {
+            "elapsed_ms": 70219.41435000021,
+            "approval_wait_ms": 0,
+            "execution_ms": 70219.41435000021,
+            "approval_events": [],
+            "blocked_on_approval": false,
+            "tokens": 115109,
+            "input_tokens": 104531,
+            "output_tokens": 10578,
+            "missing_usage_requests": 0,
+            "tokens_per_second": 1639.2759903443948,
+            "success": true,
+            "fixture_correct": true,
+            "retries": 0,
+            "tool_wait_ms": 763.3388390005566,
+            "scheduling_ms": 4.653611999470741,
+            "model_requests": 17,
+            "agent_runs": 2,
+            "tool_calls": 10,
+            "fast_tasks": [
+              {
+                "task_id": "solve_and_verify_constraints",
+                "status": "COMPLETED"
+              },
+              {
+                "task_id": "solve_and_verify_constraints.verify",
+                "status": "COMPLETED"
+              }
+            ],
+            "review": [
+              {
+                "accepted": true,
+                "reason": "completed",
+                "evidence_ids": [
+                  "artifact:solve_and_verify_constraints@1"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "standard": {
+        "samples": 1,
+        "mean_ms": 184094.5084220001,
+        "median_ms": 184094.5084220001,
+        "p95_ms": null,
+        "mean_tokens": 136923,
+        "success_rate": 1,
+        "fixture_correct_rate": 1,
+        "tokens_per_second": 743.7647172295395
+      },
+      "fast_dag": {
+        "samples": 1,
+        "mean_ms": 70219.41435000021,
+        "median_ms": 70219.41435000021,
+        "p95_ms": null,
+        "mean_tokens": 115109,
+        "success_rate": 1,
+        "fixture_correct_rate": 1,
+        "tokens_per_second": 1639.2759903443948
+      },
+      "valid_successful_comparison": true,
+      "time_saved_fraction": 0.618568663715725,
+      "token_change_fraction": -0.15931581984034826,
+      "throughput_change_fraction": 1.204024945483511
+    },
+    {
+      "name": "multi_module_code",
+      "samples": {
+        "standard": [
+          {
+            "elapsed_ms": 41045.05778499972,
+            "approval_wait_ms": 0,
+            "execution_ms": 41045.05778499972,
+            "approval_events": [],
+            "blocked_on_approval": false,
+            "tokens": 83890,
+            "input_tokens": 78370,
+            "output_tokens": 5520,
+            "missing_usage_requests": 0,
+            "tokens_per_second": 2043.8514288231395,
+            "success": true,
+            "fixture_correct": true,
+            "retries": 0,
+            "tool_wait_ms": 398.7296210001223,
+            "scheduling_ms": null,
+            "model_requests": 24,
+            "agent_runs": 0,
+            "tool_calls": 12,
+            "reused_from": "fast-live-before-scope-fix.json"
+          }
+        ],
+        "fast_dag": [
+          {
+            "elapsed_ms": 91108.83831499983,
+            "approval_wait_ms": 0,
+            "execution_ms": 91108.83831499983,
+            "approval_events": [],
+            "blocked_on_approval": false,
+            "tokens": 143031,
+            "input_tokens": 129093,
+            "output_tokens": 13938,
+            "missing_usage_requests": 0,
+            "tokens_per_second": 1569.8916004777102,
+            "success": true,
+            "fixture_correct": true,
+            "retries": 0,
+            "tool_wait_ms": 916.4272840004414,
+            "scheduling_ms": 4.280530999880284,
+            "model_requests": 25,
+            "agent_runs": 2,
+            "tool_calls": 16,
+            "fast_tasks": [
+              {
+                "task_id": "implement_tax_shipping_answer",
+                "status": "COMPLETED"
+              },
+              {
+                "task_id": "implement_tax_shipping_answer.verify",
+                "status": "COMPLETED"
+              }
+            ],
+            "review": [
+              {
+                "accepted": true,
+                "reason": "completed",
+                "evidence_ids": [
+                  "artifact:implement_tax_shipping_answer@1",
+                  "artifact:implement_tax_shipping_answer.verify@1"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "standard": {
+        "samples": 1,
+        "mean_ms": 41045.05778499972,
+        "median_ms": 41045.05778499972,
+        "p95_ms": null,
+        "mean_tokens": 83890,
+        "success_rate": 1,
+        "fixture_correct_rate": 1,
+        "tokens_per_second": 2043.8514288231395
+      },
+      "fast_dag": {
+        "samples": 1,
+        "mean_ms": 91108.83831499983,
+        "median_ms": 91108.83831499983,
+        "p95_ms": null,
+        "mean_tokens": 143031,
+        "success_rate": 1,
+        "fixture_correct_rate": 1,
+        "tokens_per_second": 1569.8916004777102
+      },
+      "valid_successful_comparison": true,
+      "time_saved_fraction": -1.2197273735669185,
+      "token_change_fraction": 0.7049827154607224,
+      "throughput_change_fraction": -0.2318954409608618
+    },
+    {
+      "name": "multi_agent_collaboration",
+      "samples": {
+        "standard": [
+          {
+            "elapsed_ms": 109979.97992900014,
+            "approval_wait_ms": 0,
+            "execution_ms": 109979.97992900014,
+            "approval_events": [],
+            "blocked_on_approval": false,
+            "tokens": 144606,
+            "input_tokens": 129032,
+            "output_tokens": 15574,
+            "missing_usage_requests": 0,
+            "tokens_per_second": 1314.8393016015589,
+            "success": true,
+            "fixture_correct": true,
+            "retries": 0,
+            "tool_wait_ms": 538.7706740014255,
+            "scheduling_ms": null,
+            "model_requests": 41,
+            "agent_runs": 3,
+            "tool_calls": 17,
+            "reused_from": "fast-live-before-scope-fix.json"
+          }
+        ],
+        "fast_dag": [
+          {
+            "elapsed_ms": 285086.27595799975,
+            "approval_wait_ms": 45294.563960999716,
+            "execution_ms": 239791.71199700003,
+            "approval_events": [
+              {
+                "id": "0bd39a06-7d8b-4c75-b718-1dc9b323da89-multi_agent_collaboration-fast_dag-0-0",
+                "approved": true,
+                "wait_ms": 45294.563960999716
+              }
+            ],
+            "blocked_on_approval": false,
+            "tokens": 432851,
+            "input_tokens": 394171,
+            "output_tokens": 38680,
+            "missing_usage_requests": 0,
+            "tokens_per_second": 1518.3158099963032,
+            "success": true,
+            "fixture_correct": true,
+            "retries": 0,
+            "tool_wait_ms": 1298.8343249997124,
+            "scheduling_ms": 6.503260998521,
+            "model_requests": 60,
+            "agent_runs": 6,
+            "tool_calls": 29,
+            "fast_tasks": [
+              {
+                "task_id": "east_report",
+                "status": "COMPLETED"
+              },
+              {
+                "task_id": "east_report.verify",
+                "status": "COMPLETED"
+              },
+              {
+                "task_id": "west_report",
+                "status": "COMPLETED"
+              },
+              {
+                "task_id": "west_report.verify",
+                "status": "COMPLETED"
+              },
+              {
+                "task_id": "integrate_verify_write",
+                "status": "COMPLETED"
+              },
+              {
+                "task_id": "integrate_verify_write.verify",
+                "status": "COMPLETED"
+              }
+            ],
+            "review": [
+              {
+                "accepted": true,
+                "reason": "completed",
+                "evidence_ids": [
+                  "artifact:east_report@1",
+                  "artifact:west_report@1",
+                  "artifact:integrate_verify_write@1"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "standard": {
+        "samples": 1,
+        "mean_ms": 109979.97992900014,
+        "median_ms": 109979.97992900014,
+        "p95_ms": null,
+        "mean_tokens": 144606,
+        "success_rate": 1,
+        "fixture_correct_rate": 1,
+        "tokens_per_second": 1314.8393016015589
+      },
+      "fast_dag": {
+        "samples": 1,
+        "mean_ms": 285086.27595799975,
+        "median_ms": 285086.27595799975,
+        "p95_ms": null,
+        "mean_tokens": 432851,
+        "success_rate": 1,
+        "fixture_correct_rate": 1,
+        "tokens_per_second": 1518.3158099963032
+      },
+      "valid_successful_comparison": true,
+      "time_saved_fraction": -1.5921651935383432,
+      "token_change_fraction": 1.9933128639198925,
+      "throughput_change_fraction": 0.15475389893418678
+    },
+    {
+      "name": "long_tool_sequence",
+      "samples": {
+        "standard": [
+          {
+            "elapsed_ms": 58264.503503000364,
+            "approval_wait_ms": 0,
+            "execution_ms": 58264.503503000364,
+            "approval_events": [],
+            "blocked_on_approval": false,
+            "tokens": 117961,
+            "input_tokens": 109780,
+            "output_tokens": 8181,
+            "missing_usage_requests": 0,
+            "tokens_per_second": 2024.5774512422565,
+            "success": true,
+            "fixture_correct": true,
+            "retries": 0,
+            "tool_wait_ms": 479.9747170000337,
+            "scheduling_ms": null,
+            "model_requests": 35,
+            "agent_runs": 0,
+            "tool_calls": 12,
+            "reused_from": "fast-live-before-scope-fix.json"
+          }
+        ],
+        "fast_dag": [
+          {
+            "elapsed_ms": 215168.7474709996,
+            "approval_wait_ms": 0,
+            "execution_ms": 215168.7474709996,
+            "approval_events": [],
+            "blocked_on_approval": false,
+            "tokens": 416021,
+            "input_tokens": 378561,
+            "output_tokens": 37460,
+            "missing_usage_requests": 0,
+            "tokens_per_second": 1933.4638737722412,
+            "success": true,
+            "fixture_correct": true,
+            "retries": 0,
+            "tool_wait_ms": 1268.6290200003423,
+            "scheduling_ms": 5.987883000168949,
+            "model_requests": 55,
+            "agent_runs": 6,
+            "tool_calls": 24,
+            "fast_tasks": [
+              {
+                "task_id": "write_doubled",
+                "status": "COMPLETED"
+              },
+              {
+                "task_id": "write_doubled.verify",
+                "status": "COMPLETED"
+              },
+              {
+                "task_id": "write_evens",
+                "status": "COMPLETED"
+              },
+              {
+                "task_id": "write_evens.verify",
+                "status": "COMPLETED"
+              },
+              {
+                "task_id": "write_answer",
+                "status": "COMPLETED"
+              },
+              {
+                "task_id": "write_answer.verify",
+                "status": "COMPLETED"
+              }
+            ],
+            "review": [
+              {
+                "accepted": true,
+                "reason": "completed",
+                "evidence_ids": [
+                  "artifact:write_doubled@1",
+                  "artifact:write_evens@1",
+                  "artifact:write_answer@1"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "standard": {
+        "samples": 1,
+        "mean_ms": 58264.503503000364,
+        "median_ms": 58264.503503000364,
+        "p95_ms": null,
+        "mean_tokens": 117961,
+        "success_rate": 1,
+        "fixture_correct_rate": 1,
+        "tokens_per_second": 2024.5774512422565
+      },
+      "fast_dag": {
+        "samples": 1,
+        "mean_ms": 215168.7474709996,
+        "median_ms": 215168.7474709996,
+        "p95_ms": null,
+        "mean_tokens": 416021,
+        "success_rate": 1,
+        "fixture_correct_rate": 1,
+        "tokens_per_second": 1933.4638737722412
+      },
+      "valid_successful_comparison": true,
+      "time_saved_fraction": -2.692964575934632,
+      "token_change_fraction": 2.5267673214028363,
+      "throughput_change_fraction": -0.04500374999934387
+    },
+    {
+      "name": "iterative_correction",
+      "samples": {
+        "standard": [
+          {
+            "elapsed_ms": 69619.56672400003,
+            "approval_wait_ms": 0,
+            "execution_ms": 69619.56672400003,
+            "approval_events": [],
+            "blocked_on_approval": false,
+            "tokens": 111853,
+            "input_tokens": 102634,
+            "output_tokens": 9219,
+            "missing_usage_requests": 0,
+            "tokens_per_second": 1606.631659220608,
+            "success": true,
+            "fixture_correct": true,
+            "retries": 0,
+            "tool_wait_ms": 720.9612989998423,
+            "scheduling_ms": null,
+            "model_requests": 25,
+            "agent_runs": 0,
+            "tool_calls": 21,
+            "reused_from": "fast-live-before-scope-fix.json"
+          }
+        ],
+        "fast_dag": [
+          {
+            "elapsed_ms": 127309.13800200028,
+            "approval_wait_ms": 0,
+            "execution_ms": 127309.13800200028,
+            "approval_events": [],
+            "blocked_on_approval": false,
+            "tokens": 151728,
+            "input_tokens": 133182,
+            "output_tokens": 18546,
+            "missing_usage_requests": 0,
+            "tokens_per_second": 1191.8076139798861,
+            "success": true,
+            "fixture_correct": true,
+            "retries": 0,
+            "tool_wait_ms": 904.3293069992214,
+            "scheduling_ms": 4.32307399995625,
+            "model_requests": 23,
+            "agent_runs": 2,
+            "tool_calls": 14,
+            "fast_tasks": [
+              {
+                "task_id": "repair_math",
+                "status": "COMPLETED"
+              },
+              {
+                "task_id": "repair_math.verify",
+                "status": "COMPLETED"
+              }
+            ],
+            "review": [
+              {
+                "accepted": true,
+                "reason": "completed",
+                "evidence_ids": [
+                  "artifact:repair_math@1",
+                  "artifact:repair_math.verify@1"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "standard": {
+        "samples": 1,
+        "mean_ms": 69619.56672400003,
+        "median_ms": 69619.56672400003,
+        "p95_ms": null,
+        "mean_tokens": 111853,
+        "success_rate": 1,
+        "fixture_correct_rate": 1,
+        "tokens_per_second": 1606.631659220608
+      },
+      "fast_dag": {
+        "samples": 1,
+        "mean_ms": 127309.13800200028,
+        "median_ms": 127309.13800200028,
+        "p95_ms": null,
+        "mean_tokens": 151728,
+        "success_rate": 1,
+        "fixture_correct_rate": 1,
+        "tokens_per_second": 1191.8076139798861
+      },
+      "valid_successful_comparison": true,
+      "time_saved_fraction": -0.8286401940233974,
+      "token_change_fraction": 0.3564946849883328,
+      "throughput_change_fraction": -0.25819486554992754
+    },
+    {
+      "name": "strong_sequential_dependencies",
+      "samples": {
+        "standard": [
+          {
+            "elapsed_ms": 73865.2512709992,
+            "approval_wait_ms": 0,
+            "execution_ms": 73865.2512709992,
+            "approval_events": [],
+            "blocked_on_approval": false,
+            "tokens": 146917,
+            "input_tokens": 137013,
+            "output_tokens": 9904,
+            "missing_usage_requests": 0,
+            "tokens_per_second": 1988.9866679121717,
+            "success": true,
+            "fixture_correct": true,
+            "retries": 0,
+            "tool_wait_ms": 599.2428840007633,
+            "scheduling_ms": null,
+            "model_requests": 44,
+            "agent_runs": 0,
+            "tool_calls": 16
+          }
+        ],
+        "fast_dag": [
+          {
+            "elapsed_ms": 119342.67651799973,
+            "approval_wait_ms": 0,
+            "execution_ms": 119342.67651799973,
+            "approval_events": [],
+            "blocked_on_approval": false,
+            "tokens": 161676,
+            "input_tokens": 143208,
+            "output_tokens": 18468,
+            "missing_usage_requests": 5,
+            "tokens_per_second": 1354.7207479934086,
+            "success": false,
+            "fixture_correct": false,
+            "retries": 0,
+            "tool_wait_ms": 607.3076399993151,
+            "scheduling_ms": 5.279527000151575,
+            "model_requests": 35,
+            "agent_runs": 4,
+            "tool_calls": 13,
+            "fast_tasks": [
+              {
+                "task_id": "stage1_read_add_write",
+                "status": "COMPLETED"
+              },
+              {
+                "task_id": "stage1_read_add_write.verify",
+                "status": "COMPLETED"
+              },
+              {
+                "task_id": "stage2_read_square_write",
+                "status": "FAILED",
+                "error": "HTTP 402 - {\"error\":{\"message\":\"Insufficient Balance (request_id: 7e1896f6-b187-4db4-be0a-bc26f7a22879)\",\"type\":\"insufficient_balance_error\",\"param\":null,\"code\":\"invalid_request_error\"}}"
+              },
+              {
+                "task_id": "stage2_read_square_write.verify",
+                "status": "FAILED",
+                "error": "HTTP 402 - {\"error\":{\"message\":\"Insufficient Balance (request_id: 7e1896f6-b187-4db4-be0a-bc26f7a22879)\",\"type\":\"insufficient_balance_error\",\"param\":null,\"code\":\"invalid_request_error\"}}"
+              },
+              {
+                "task_id": "stage3_read_subtract_write",
+                "status": "BLOCKED",
+                "error": "Dependency missing, failed, or invalidated; replan required"
+              },
+              {
+                "task_id": "stage3_read_subtract_write.verify",
+                "status": "BLOCKED",
+                "error": "Dependency missing, failed, or invalidated; replan required"
+              },
+              {
+                "task_id": "final_verify_answer",
+                "status": "BLOCKED",
+                "error": "Dependency missing, failed, or invalidated; replan required"
+              },
+              {
+                "task_id": "final_verify_answer.verify",
+                "status": "BLOCKED",
+                "error": "Dependency missing, failed, or invalidated; replan required"
+              }
+            ],
+            "review": [],
+            "fast_error": "Unexpected token E in JSON at position 1"
+          }
+        ]
+      },
+      "standard": {
+        "samples": 1,
+        "mean_ms": 73865.2512709992,
+        "median_ms": 73865.2512709992,
+        "p95_ms": null,
+        "mean_tokens": 146917,
+        "success_rate": 1,
+        "fixture_correct_rate": 1,
+        "tokens_per_second": 1988.9866679121717
+      },
+      "fast_dag": {
+        "samples": 1,
+        "mean_ms": 119342.67651799973,
+        "median_ms": 119342.67651799973,
+        "p95_ms": null,
+        "mean_tokens": 161676,
+        "success_rate": 0,
+        "fixture_correct_rate": 0,
+        "tokens_per_second": 1354.7207479934086
+      },
+      "valid_successful_comparison": false,
+      "time_saved_fraction": null,
+      "token_change_fraction": 0.10045808177406301,
+      "throughput_change_fraction": -0.3188889750500683
+    },
+    {
+      "name": "parallel_analysis",
+      "samples": {
+        "standard": [
+          {
+            "elapsed_ms": 807.5505689997226,
+            "approval_wait_ms": 0,
+            "execution_ms": 807.5505689997226,
+            "approval_events": [],
+            "blocked_on_approval": false,
+            "tokens": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "missing_usage_requests": 2,
+            "tokens_per_second": 0,
+            "success": false,
+            "fixture_correct": false,
+            "retries": 0,
+            "tool_wait_ms": 0,
+            "scheduling_ms": null,
+            "model_requests": 2,
+            "agent_runs": 0,
+            "tool_calls": 0
+          }
+        ],
+        "fast_dag": []
+      }
+    }
+  ],
+  "untested": [
+    "Human-reviewed open-ended answer quality",
+    "Provider cache billing (not exposed by current client)",
+    "parallel_analysis"
+  ],
+  "benchmark_id": "0bd39a06-7d8b-4c75-b718-1dc9b323da89",
+  "engine_sha256": "2a6f49036a34fb70957e332e964438e3d0ad5f745d9e355b4c3ed2ed507dca85",
+  "standard_baseline": {
+    "source": "fast-live-before-scope-fix.json",
+    "validation": {
+      "fixture_names": [
+        "multi_source_retrieval",
+        "multi_dimension_comparison",
+        "complex_logic",
+        "multi_module_code",
+        "multi_agent_collaboration",
+        "long_tool_sequence",
+        "iterative_correction",
+        "strong_sequential_dependencies"
+      ],
+      "fixture_sha256": "839eddcb76c54f71a02ed6e92591e08cc5a171cbd56ca4987905a0c42ec76eeb",
+      "standard_runtime_sha256": "16ee0d6a4fe15052acd6cd918b9828bbc581da88a2f1adf4a97296f53b02aff9",
+      "modules": [
+        "compact.js",
+        "config.js",
+        "cwd.js",
+        "llm/approval.js",
+        "llm/client.js",
+        "llm/codeExecutor.js",
+        "llm/codemode.js",
+        "llm/context.js",
+        "llm/plan.js",
+        "llm/retry.js",
+        "llm/risk.js",
+        "llm/runtime.js",
+        "llm/search.js",
+        "llm/searchNetwork.js",
+        "llm/subagent.js",
+        "llm/tools.js",
+        "persistence.js",
+        "plugins/host.js",
+        "plugins/manager.js",
+        "plugins/package.js",
+        "plugins/session.js",
+        "plugins/types.js",
+        "plugins/validation.js",
+        "pro/agents.js",
+        "pro/config.js",
+        "pro/preflight.js",
+        "terminal/restore.js",
+        "web/hub.js",
+        "web/session.js",
+        "width.js"
+      ],
+      "assets": [
+        "prompt.txt",
+        "planner.txt",
+        "step.txt",
+        "subagent.txt"
+      ]
+    },
+    "note": "Reuse only completed successful Standard samples from identical fixtures, model/intensity, and unchanged runtime. Earlier timeout was not binding for these completed samples."
+  },
+  "conditions": {
+    "task_timeout_ms": 1800000,
+    "budget_scope": "task",
+    "model_slots": 4,
+    "agent_runs": 24,
+    "model_requests": 128,
+    "tool_calls": 256,
+    "tokens": 2000000
+  },
+  "connectivity": {
+    "elapsed_ms": 777.1435290002264,
+    "status": "completed",
+    "input_tokens": 41,
+    "output_tokens": 25
+  },
+  "error": "Model unavailable: first real request produced no usage. Remaining live cases were not run.",
+  "external_blocker": {
+    "code": "HTTP 402",
+    "reason": "Insufficient Balance",
+    "first_affected_scenario": "strong_sequential_dependencies",
+    "remaining_comparison": "parallel_analysis",
+    "source": "Observed provider failure recorded in the sequential Fast task errors; no further paid campaign launched."
+  }
+}

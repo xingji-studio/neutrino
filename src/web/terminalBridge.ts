@@ -64,7 +64,9 @@ export async function startTerminalBridge(): Promise<TerminalBridgeInfo & { clos
       else if (action === "resume") hub.resume(key);
       else if (action === "message") {
         if (typeof body.text !== "string" || !body.text.trim()) throw new Error("empty message");
-        hub.send(key, body.text);
+        if (body.agent_mode !== undefined && !isAgentMode(body.agent_mode)) throw new Error("invalid agent mode");
+        const sent = hub.sendConfigured(key, body.text, body.agent_mode);
+        if (!sent.ok) { sendJson(res, 409, { error: sent.error }); return; }
       } else if (action === "approve") {
         if (!hub.approve(key, body.approved === true)) { sendJson(res, 409, { error: "no approval is pending" }); return; }
       } else if (action === "approval-mode") {

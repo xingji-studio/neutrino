@@ -1,3 +1,4 @@
+import { pluginPrompt } from "../plugins/session.js";
 /**
  * Sub-agents.
  *
@@ -250,10 +251,11 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRun
     runId = currentTask()?.runId ?? runId;
     scopeSignal = currentTask()?.signal;
     const messages: SubAgentMessage[] = [
-      { role: "system", content: `${options.system}\n\n${runtime.instructions()}` },
+      { role: "system", content: `${pluginPrompt(options.system,currentTask()?.role ?? "subagent")}\n\n${runtime.instructions()}` },
       { role: "user", content: options.task },
     ];
-    const tools = runtime.availableTools([...options.tools.filter(tool => tool.function.name !== FINISH_TASK_TOOL), FINISH_TASK_DEFINITION]);
+    const tools = runtime.availableTools([...new Map([...options.tools.filter(tool => tool.function.name !== FINISH_TASK_TOOL),
+      ...(runtime.plugins?.definitions(currentTask()?.role) ?? []), FINISH_TASK_DEFINITION].map(tool => [tool.function.name,tool])).values()]);
     const names = new Set(tools.map(tool => tool.function.name));
     let lastPromptTokens = 0;
     let emptyReplies = 0;

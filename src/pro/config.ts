@@ -1,3 +1,4 @@
+import { pluginPrompt } from "../plugins/session.js";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -266,6 +267,6 @@ export function proMaxRecursionDepth(): number {
 /** Every agent prompt lives in the requested assets/pro directory. */
 export function loadProPrompt(role: ProRole): string {
   if (!PRO_ROLES.includes(role)) throw new Error("Unknown Pro role");
-  return fs.readFileSync(path.join(ASSET_DIR, "common.txt"), "utf8") + "\n\n" +
-    fs.readFileSync(path.join(ASSET_DIR, `${role}.txt`), "utf8");
+  return pluginPrompt(fs.readFileSync(path.join(ASSET_DIR, "common.txt"), "utf8") + "\n\n" +
+    fs.readFileSync(path.join(ASSET_DIR, `${role}.txt`), "utf8"),role);
 }

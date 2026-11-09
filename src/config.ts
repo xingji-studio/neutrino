@@ -1,3 +1,4 @@
+import { pluginPrompt } from "./plugins/session.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -8,11 +9,12 @@ import { normalizeContext, type ConversationContext } from "./compact.js";
 import type { PlanState } from "./llm/plan.js";
 import { SUBAGENT_MAX_ROUNDS } from "./llm/subagent.js";
 import { DEFAULT_TASK_LIMITS, type TaskSnapshot } from "./llm/runtime.js";
+import type { FastSnapshot } from "./fast/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(__dirname, "..");
 
-export const NEUTRINO_DIR = path.join(os.homedir(), ".neutrino");
+export const NEUTRINO_DIR = process.env.NEUTRINO_HOME || path.join(os.homedir(), ".neutrino");
 export const MODEL_FILE = path.join(NEUTRINO_DIR, "model.json");
 export const SESSION_DIR = path.join(NEUTRINO_DIR, "session");
 export const CONFIG_FILE = path.join(NEUTRINO_DIR, "config.json");
@@ -28,7 +30,7 @@ export const MODES = ["standard", "pro"] as const;
 export type Mode = (typeof MODES)[number];
 
 /** Conversation strategy inside the regular workspace; Pro owns its own workspace. */
-export const AGENT_MODES = ["standard", "ptc", "fast"] as const;
+export const AGENT_MODES = ["standard", "ptc", "fast", "fast_dag"] as const;
 export type AgentMode = (typeof AGENT_MODES)[number];
 export function isAgentMode(value: unknown): value is AgentMode {
   return typeof value === "string" && (AGENT_MODES as readonly string[]).includes(value);
@@ -218,6 +220,15 @@ export const DEFAULT_CONFIG: Record<string, unknown> = {
   task_max_tools: DEFAULT_TASK_LIMITS.toolCalls,
   task_max_tokens: DEFAULT_TASK_LIMITS.tokens,
   task_timeout_ms: DEFAULT_TASK_LIMITS.durationMs,
+  // Independent concurrent engine. Legacy "fast" remains a separate strategy.
+  fast_mode_enabled: true,
+  fast_model_slots: 4,
+  fast_tool_slots: 8,
+  fast_background_slots: 2,
+  fast_task_timeout_ms: DEFAULT_TASK_LIMITS.durationMs,
+  fast_max_tasks: 24,
+  fast_retries: 1,
+  fast_replans: 2,
   // Mount the browser UI alongside the terminal UI unless it is turned off
   // here or on the command line.
   web_console: true,
@@ -330,6 +341,7 @@ export interface TokenUsage {
 }
 
 export interface SessionData {
+  fast_run?: FastSnapshot;
   task_run?: TaskSnapshot;
   id: string;
   created_at: string;
@@ -495,6 +507,7 @@ export function saveSession(
   proPreset?: string,
   agentMode?: AgentMode,
   taskRun?: TaskSnapshot,
+  fastRun?: FastSnapshot,
 ): string {
   ensureDirs(mode);
   const now = new Date();
@@ -521,6 +534,7 @@ export function saveSession(
     title,
     messages,
     tokens,
+    ...((fastRun ?? existing?.fast_run) ? { fast_run: fastRun ?? existing?.fast_run } : {}),
     ...((taskRun ?? existing?.task_run) ? { task_run: taskRun ?? existing?.task_run } : {}),
     approval_mode: normalizeApprovalMode(approvalMode ?? existing?.approval_mode),
     agent_mode: mode === "pro" ? "standard" : normalizeAgentMode(agentMode ?? existing?.agent_mode),
@@ -648,18 +662,19 @@ export function loadPrompt(): string {
 
 /** Mode prompts are standalone so standard planning/delegation directives cannot conflict. */
 export function loadAgentPrompt(mode: AgentMode): string {
-  if (mode === "standard") return loadPrompt();
+  if (mode === "standard" || mode === "fast_dag") return pluginPrompt(loadPrompt(),"main");
   const file = mode === "fast" ? "fast.txt" : "ptc.txt";
-  return readAsset(path.join(PKG_ROOT, "assets", file)) ?? loadPrompt();
+  return pluginPrompt(readAsset(path.join(PKG_ROOT, "assets", file)) ?? loadPrompt(),"main");
 }
 
 /** The planning agent's system prompt. */
 export function loadPlannerPrompt(): string {
-  return (
+  const prompt = (
     readAsset(path.join(PKG_ROOT, "assets", "planner.txt"), path.join(PKG_ROOT, "planner.txt")) ??
     "Split the user's request into ordered, independent steps a coding agent can execute one at a " +
       "time. Answer with JSON only: {\"goal\": \"...\", \"steps\": [{\"title\": \"...\"}]}."
   );
+  return pluginPrompt(prompt,"planner");
 }
 
 /** Template for the per-step system text; `{{index}}`, `{{plan}}`, … are filled in. */

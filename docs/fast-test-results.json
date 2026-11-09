@@ -1,0 +1,144 @@
+{
+  "status": "passed",
+  "command": "npm test",
+  "baseline_commit": "7cbee2a",
+  "original_test_files": 72,
+  "executed_test_files": [
+    "scripts/test-paste.mjs",
+    "scripts/test-mouse.mjs",
+    "scripts/test-cursor.mjs",
+    "scripts/test-selection.mjs",
+    "scripts/test-drag-scroll.mjs",
+    "scripts/test-selection-performance.mjs",
+    "scripts/test-copy.mjs",
+    "scripts/test-scrollbar.mjs",
+    "scripts/test-render.mjs",
+    "scripts/test-drift.mjs",
+    "scripts/test-sanitize.mjs",
+    "scripts/test-markdown.mjs",
+    "scripts/test-wrap.mjs",
+    "scripts/test-fetch.mjs",
+    "scripts/test-web-search.mjs",
+    "scripts/test-search-network.mjs",
+    "scripts/test-compact.mjs",
+    "scripts/test-history-fold.mjs",
+    "scripts/test-web-history.mjs",
+    "scripts/test-web-mobile-history.mjs",
+    "scripts/test-session-migration.mjs",
+    "scripts/test-web-session-migration.mjs",
+    "scripts/test-web-default.mjs",
+    "scripts/test-turn-fold.mjs",
+    "scripts/test-long-turn.mjs",
+    "scripts/test-plan.mjs",
+    "scripts/test-agent-modes.mjs",
+    "scripts/test-subagent.mjs",
+    "scripts/test-task-runtime.mjs",
+    "scripts/test-task-budget.mjs",
+    "scripts/test-web-settings.mjs",
+    "scripts/test-update.mjs",
+    "scripts/test-update-ui.mjs",
+    "scripts/test-update-web.mjs",
+    "scripts/test-settings-update.mjs",
+    "scripts/test-update-check.mjs",
+    "scripts/test-update-watch.mjs",
+    "scripts/test-model-intensity.mjs",
+    "scripts/test-background.mjs",
+    "scripts/test-background-lifetime.mjs",
+    "scripts/test-web-markdown.mjs",
+    "scripts/test-web-i18n.mjs",
+    "scripts/test-web-workspaces.mjs",
+    "scripts/test-tools.mjs",
+    "scripts/test-approval.mjs",
+    "scripts/test-approval-review.mjs",
+    "scripts/test-approval-ui.mjs",
+    "scripts/test-web-approval-details.mjs",
+    "scripts/test-web-sidebar-status.mjs",
+    "scripts/test-web-seen.mjs",
+    "scripts/test-approval-mode.mjs",
+    "scripts/test-approval-context.mjs",
+    "scripts/test-settings-render.mjs",
+    "scripts/test-approval-flow.mjs",
+    "scripts/test-web.mjs",
+    "scripts/test-web-settings-http.mjs",
+    "scripts/test-web-lan.mjs",
+    "scripts/test-web-auth.mjs",
+    "scripts/test-web-auth-ui.mjs",
+    "scripts/test-web-pro.mjs",
+    "scripts/test-pro-preflight.mjs",
+    "scripts/test-pro-runtime.mjs",
+    "scripts/test-pro-team.mjs",
+    "scripts/test-pro-ui.mjs",
+    "scripts/test-interrupt.mjs",
+    "scripts/test-terminal-lifecycle.mjs",
+    "scripts/test-persistence.mjs",
+    "scripts/test-resilience.mjs",
+    "scripts/test-approval-timeout.mjs",
+    "scripts/test-approval-hardening.mjs",
+    "scripts/test-approval-extreme.mjs",
+    "scripts/test-approval-reason.mjs",
+    "scripts/test-plugins.mjs",
+    "scripts/test-plugin-web.mjs",
+    "scripts/test-fast-scheduler.mjs",
+    "scripts/test-fast-engine.mjs",
+    "scripts/test-fast-web.mjs"
+  ],
+  "fast_tests": [
+    "scripts/test-fast-scheduler.mjs",
+    "scripts/test-fast-engine.mjs",
+    "scripts/test-fast-web.mjs"
+  ],
+  "browser": {
+    "status": "passed",
+    "engine": "Chromium 134",
+    "viewports": [
+      [
+        1360,
+        900
+      ],
+      [
+        390,
+        844
+      ]
+    ],
+    "checks": [
+      "existing modes preserved",
+      "actual selection HTTP request",
+      "selected state",
+      "refresh persistence",
+      "keyboard navigation",
+      "responsive bounds",
+      "no page errors"
+    ]
+  },
+  "screenshots": [
+    "docs/screenshots/fast-mode-desktop.png",
+    "docs/screenshots/fast-mode-mobile.png"
+  ],
+  "verified_at": "2026-11-08T14:07:40.599579+00:00",
+  "executed_test_file_count": 77,
+  "fast_engine_sha256": "2261361cf8276f9b047e7fbd8fd00f7ab450c16ffe9334a608901767f2a365fc",
+  "final_regression": "Full npm test passed all 77 test files after permanent model-error propagation and stop-on-account-failure handling. Includes HTTP 402 fixtures verifying no redundant replanning and preservation of valid artifacts.",
+  "live_fixture_integrity": {
+    "benchmark_id": "0bd39a06-7d8b-4c75-b718-1dc9b323da89",
+    "mode": "fast_dag",
+    "source": "Independent byte comparison against original fixture test files, before temporary fixture cleanup",
+    "checks": [
+      {
+        "scenario": "multi_module_code",
+        "original_test_preserved": true,
+        "sha256": "c3481a6e28648dc1935a6f89b893d28a0aaf0423fafc4311489286962fa5e453"
+      },
+      {
+        "scenario": "iterative_correction",
+        "original_test_preserved": true,
+        "sha256": "ddfc7b5dd8eb0a6391ec36c8f6e2f6af76abe86beda561c7893e68325f27757c"
+      }
+    ]
+  },
+  "live_benchmark": {
+    "state": "incomplete",
+    "valid_successful_comparisons": 7,
+    "external_blocker": "HTTP 402 / Insufficient Balance",
+    "remaining": "Complete Fast sequential-dependency scenario and the supplementary four-way analysis comparison after the configured account becomes available. P95 and open-ended human quality review remain untested."
+  }
+}

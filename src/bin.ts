@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { runPluginCLI } from "./plugins/cli.js";
 import process from "node:process";
 import { App } from "./app.js";
 import { loadConfig } from "./config.js";
@@ -40,6 +41,8 @@ function printHelp(): void {
 
 Usage:
   neutrino                     Start the terminal UI (with the web UI).
+  neutrino plugin help         Manage plugins and inspect the plugin SDK.
+  neutrino --safe-mode          Start without external plugins.
   neutrino --lan               Start both, reachable from other devices.
   neutrino web [--port <port>] Start only the web UI (serves saved history).
   neutrino background start    Run the web UI in the background; conversations
@@ -239,9 +242,16 @@ function printBackgroundStatus(): void {
 }
 
 
+const launchArgs = process.argv.slice(2).filter(arg => arg !== "--safe-mode");
+if (process.argv.includes("--safe-mode")) process.env.NEUTRINO_SAFE_MODE = "1";
+if (launchArgs[0] === "plugin") {
+  try { await runPluginCLI(launchArgs.slice(1)); }
+  catch (error) { process.stderr.write(`neutrino plugin: ${error instanceof Error ? error.message : String(error)}\n`); process.exitCode = 1; }
+  process.exit(process.exitCode ?? 0);
+}
 let options: Options;
 try {
-  options = parseArgs(process.argv.slice(2));
+  options = parseArgs(launchArgs);
 } catch (err) {
   process.stderr.write(`neutrino: ${err instanceof Error ? err.message : String(err)}\n`);
   process.stderr.write("Run 'neutrino --help' for usage.\n");

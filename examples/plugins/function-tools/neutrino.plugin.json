@@ -1,0 +1,15 @@
+{
+  "id": "community.text-tools",
+  "name": "Text Tools / 文本工具",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "Pure word counting, a read-only file summary, and a user command.",
+  "categories": ["function"],
+  "runtime": "sandbox",
+  "entries": { "agent": "agent.js" },
+  "permissions": ["tools.register", "commands.register", "filesystem.read", "hooks.register", "storage"],
+  "configuration": {
+    "type": "object", "additionalProperties": false,
+    "properties": { "label": { "type": "string", "default": "Text statistics", "maxLength": 80 } }
+  }
+}
