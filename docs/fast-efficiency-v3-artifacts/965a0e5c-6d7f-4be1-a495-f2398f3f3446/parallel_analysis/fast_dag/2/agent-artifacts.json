@@ -1,0 +1,280 @@
+{
+  "engine_run_id": "eb7b9328-883f-44fc-b9c9-5d95910e8758",
+  "artifacts": [
+    {
+      "result": "Inspector NORTH report — source file: north.json (only dataset read; no shell, no edits).\n\nCount: 10 records (ids 1–10, contiguous, no gaps or duplicates).\nSum of units: 90.\nSum of units*weight: 167.\n\nEvidence excerpts from north.json [Evidence 11d4a65d-229c-4bee-bcda-37e85e444a38]:\n{\"id\":1,\"units\":4,\"weight\":1},{\"id\":2,\"units\":7,\"weight\":2},{\"id\":3,\"units\":10,\"weight\":3},{\"id\":4,\"units\":13,\"weight\":1},{\"id\":5,\"units\":16,\"weight\":2},{\"id\":6,\"units\":2,\"weight\":3},{\"id\":7,\"units\":5,\"weight\":1},{\"id\":8,\"units\":8,\"weight\":2},{\"id\":9,\"units\":11,\"weight\":3},{\"id\":10,\"units\":14,\"weight\":1}\n\nArithmetic trail (units): 4+7+10+13+16+2+5+8+11+14 = 90 (partials 11, 21, 34, 50, 52, 57, 65, 76, 90).\nArithmetic trail (units*weight): 4, 14, 30, 13, 32, 6, 5, 16, 33, 14 → 4+14+30+13+32+6+5+16+33+14 = 167 (partials 18, 48, 61, 93, 99, 104, 120, 153, 167).\n\nDirectory listing [Evidence 95defa49-e5d6-437f-a9c7-a4d485a03f2a] showed east/south/west/north.json present; the other three were not read. Values are offered for the coordinator's independent Node recomputation.",
+      "conclusions": [
+        "north.json contains 10 records with total units 90 and total units*weight 167.",
+        "Sums were derived by hand from the ten cited records because this inspector is restricted to read_file/list_files and cannot run a shell."
+      ],
+      "evidence": [
+        "95defa49-e5d6-437f-a9c7-a4d485a03f2a",
+        "11d4a65d-229c-4bee-bcda-37e85e444a38",
+        "11d4a65d-229c-4bee-bcda-37e85e444a38: read_file north.json returned the full 10-record array quoted above",
+        "95defa49-e5d6-437f-a9c7-a4d485a03f2a: list_files of the working directory showing north.json alongside east/south/west.json"
+      ],
+      "assumptions": [],
+      "unresolved": [],
+      "side_effects": false,
+      "task_id": "north",
+      "version": 1,
+      "input_versions": {
+        "request": "5747c037c997d8c86c996ae74ad81b39e4b78958a0d0f034de5e295aef3febb9",
+        "history": "f981c428c1f4a5617d69b762eaac2fb6b310570d9cbe128328c9763225cf7572"
+      },
+      "verification": "verified",
+      "created_at": "2026-11-10T14:29:31.808Z"
+    },
+    {
+      "result": "Inspected south.json only (read-only; no shell, no edits; no other dataset read).\n\nSource: /tmp/neutrino-fast-live-b4eG5i/parallel_analysis/fast_dag/2/south.json\nFile is a single JSON array of 10 objects, ids 1–10, each with integer `units` and `weight` (no gaps, no duplicates, no missing fields).\n\nResults:\n- count = 10\n- units (sum of units) = 94\n- weighted (sum of units*weight) = 171\n\nPer-record evidence excerpts (id: units, weight → units*weight):\n1:5,1→5 | 2:9,2→18 | 3:13,3→39 | 4:17,1→17 | 5:4,2→8 | 6:8,3→24 | 7:12,1→12 | 8:16,2→32 | 9:3,3→9 | 10:7,1→7\n\nArithmetic checks (two independent groupings of the same cited data):\n- Sequential unit sum: 5+9+13+17+4+8+12+16+3+7 = 94.\n- Sequential weighted sum: 5+18+39+17+8+24+12+32+9+7 = 171.\n- Grouped by weight: weight=1 → ids 1,4,7,10 → units 5+17+12+7=41, weighted 41*1=41; weight=2 → ids 2,5,8 → units 9+4+16=29, weighted 29*2=58; weight=3 → ids 3,6,9 → units 13+8+3=24, weighted 24*3=72. Totals: units 41+29+24=94, weighted 41+58+72=171. Both groupings agree.\n\nEvidence: read_file on south.json returned the raw array [Evidence 20906367-3c88-48b4-9824-c52824619230]; directory listing confirming the file's location [Evidence 257f2f13-3cf3-4296-bbc8-66f46025f0c0].\n\nSource completeness: 10 objects in the array, ids 1–10 consecutive; every object has all three keys id/units/weight, so the reported count covers the whole file.\n\nChecker hook: weighted = 171 (41*1 + 29*2 + 24*3).",
+      "conclusions": [
+        "south.json: count=10, units=94, weighted=171",
+        "weighted=171 verified by two groupings: per-record products summed (171) and by-weight aggregation 41*1+29*2+24*3=171"
+      ],
+      "evidence": [
+        "257f2f13-3cf3-4296-bbc8-66f46025f0c0",
+        "20906367-3c88-48b4-9824-c52824619230",
+        "20906367-3c88-48b4-9824-c52824619230: read_file south.json returned the 10-record JSON array cited above, the sole source of all reported values",
+        "257f2f13-3cf3-4296-bbc8-66f46025f0c0: list_files of the working directory confirmed south.json exists there and showed no additional south data files to read"
+      ],
+      "assumptions": [],
+      "unresolved": [],
+      "side_effects": false,
+      "task_id": "south",
+      "version": 1,
+      "input_versions": {
+        "request": "5747c037c997d8c86c996ae74ad81b39e4b78958a0d0f034de5e295aef3febb9",
+        "history": "f981c428c1f4a5617d69b762eaac2fb6b310570d9cbe128328c9763225cf7572"
+      },
+      "verification": "verified",
+      "created_at": "2026-11-10T14:29:33.203Z"
+    },
+    {
+      "result": "Inspector `east` — source file: east.json (only file read; no shell, no edits).\n\nResult:\n- count = 10\n- units (sum of `units`) = 98\n- weighted (sum of units*weight) = 209\n\nOriginal evidence (verbatim content of east.json, evidence 8dad432d-8438-41cd-b4da-7ed05f0d9c7e):\n[{\"id\":1,\"units\":6,\"weight\":1},{\"id\":2,\"units\":11,\"weight\":2},{\"id\":3,\"units\":16,\"weight\":3},{\"id\":4,\"units\":4,\"weight\":1},{\"id\":5,\"units\":9,\"weight\":2},{\"id\":6,\"units\":14,\"weight\":3},{\"id\":7,\"units\":2,\"weight\":1},{\"id\":8,\"units\":7,\"weight\":2},{\"id\":9,\"units\":12,\"weight\":3},{\"id\":10,\"units\":17,\"weight\":1}]\n\nPer-record units*weight, taken directly from those records: 6*1=6, 11*2=22, 16*3=48, 4*1=4, 9*2=18, 14*3=42, 2*1=2, 7*2=14, 12*3=36, 17*1=17.\n\nArithmetic shown for reconciliation:\n- units: 6+11+16+4+9+14+2+7+12+17 = 98\n- weighted: 6+22+48+4+18+42+2+14+36+17 = 209\n\nCompleteness / consistency observations: ids are exactly 1..10 with no gaps or duplicates, so count = 10 matches the number of records summed; every record has integer `units` and `weight`; the file is a single well-formed JSON array containing no other fields, so the sums cover all source data. Directory listing (evidence b093aac0-f64f-4de5-a201-d2c61c4aea5c) showed north.json, south.json, west.json alongside my file — none were opened.",
+      "conclusions": [
+        "east.json contains 10 records (ids 1-10, contiguous), sum of units = 98, sum of units*weight = 209.",
+        "Reported values are internally consistent: weighted 209 equals the sum of the ten per-record products derived from the same quoted records."
+      ],
+      "evidence": [
+        "b093aac0-f64f-4de5-a201-d2c61c4aea5c",
+        "8dad432d-8438-41cd-b4da-7ed05f0d9c7e",
+        "8dad432d-8438-41cd-b4da-7ed05f0d9c7e — read_file of east.json returning the 10-record JSON array quoted above",
+        "b093aac0-f64f-4de5-a201-d2c61c4aea5c — list_files of the fixture directory, confirming east.json exists and that the other regional files were left unread"
+      ],
+      "assumptions": [
+        "Arithmetic was performed by hand rather than by shell/Node because this inspector is restricted to read_file/list_files; the coordinator's independent Node recomputation is the authoritative cross-check."
+      ],
+      "unresolved": [],
+      "side_effects": false,
+      "task_id": "east",
+      "version": 1,
+      "input_versions": {
+        "request": "5747c037c997d8c86c996ae74ad81b39e4b78958a0d0f034de5e295aef3febb9",
+        "history": "f981c428c1f4a5617d69b762eaac2fb6b310570d9cbe128328c9763225cf7572"
+      },
+      "verification": "verified",
+      "created_at": "2026-11-10T14:29:33.779Z"
+    },
+    {
+      "result": "Source filename: west.json (read whole; 10 records, no truncation observed in the single read_file result, evidence 193ede59-b182-49bd-a42a-bf9dfa299b7b).\n\nResults for west.json only:\n- count = 10\n- units (sum of units) = 85\n- weighted (sum of units*weight) = 145\n\nSupporting evidence excerpts (verbatim from west.json): {\"id\":1,\"units\":7,\"weight\":1}, {\"id\":2,\"units\":13,\"weight\":2}, {\"id\":3,\"units\":2,\"weight\":3}, {\"id\":4,\"units\":8,\"weight\":1}, {\"id\":5,\"units\":14,\"weight\":2}, {\"id\":6,\"units\":3,\"weight\":3}, {\"id\":7,\"units\":9,\"weight\":1}, {\"id\":8,\"units\":15,\"weight\":2}, {\"id\":9,\"units\":4,\"weight\":3}, {\"id\":10,\"units\":10,\"weight\":1}\n\nPer-record units: 7, 13, 2, 8, 14, 3, 9, 15, 4, 10 → running totals 7, 20, 22, 30, 44, 47, 56, 71, 75, 85.\nPer-record units*weight: 7, 26, 6, 8, 28, 9, 9, 30, 12, 10 (weights 1,2,1,1,2,3,1,2,3,1) → running totals 7, 33, 39, 47, 75, 84, 93, 123, 135, 145.\nCross-check: sum of weights = 19; weighted/units = 145/85 ≈ 1.706, consistent with the weight mix above.\n\nScope discipline: the only directory listing (fe49d732-a467-4150-8746-23eff018499a) showed east.json, north.json, south.json and west.json; I opened none of the other three. No shell command was run, no file was created or modified, and write_paths for this task was empty.",
+      "conclusions": [
+        "west.json contains 10 records with summed units 85 and summed units*weight 145, each derived from the quoted records in evidence 193ede59-b182-49bd-a42a-bf9dfa299b7b."
+      ],
+      "evidence": [
+        "fe49d732-a467-4150-8746-23eff018499a",
+        "193ede59-b182-49bd-a42a-bf9dfa299b7b",
+        "fe49d732-a467-4150-8746-23eff018499a — list_files of the working directory, showing the four regional files; only west.json was subsequently opened",
+        "193ede59-b182-49bd-a42a-bf9dfa299b7b — read_file west.json, the sole dataset read, yielding the 10 quoted records used for all three aggregates"
+      ],
+      "assumptions": [
+        "Aggregates treat each JSON array element as one record and use its integer 'units' and 'weight' fields as-is; no filtering, deduplication or unit conversion was applied.",
+        "The coordinator will independently recompute these values with Node and compare them against this report."
+      ],
+      "unresolved": [],
+      "side_effects": false,
+      "task_id": "west",
+      "version": 1,
+      "input_versions": {
+        "request": "5747c037c997d8c86c996ae74ad81b39e4b78958a0d0f034de5e295aef3febb9",
+        "history": "f981c428c1f4a5617d69b762eaac2fb6b310570d9cbe128328c9763225cf7572"
+      },
+      "verification": "verified",
+      "created_at": "2026-11-10T14:29:35.160Z"
+    },
+    {
+      "result": "Independently verified the north inspector's artifact (artifact:north@1).\n\nOriginal-source check: my own read of north.json [Evidence 759d87e3-d6f4-4c68-afcd-4d54dcad7eb6] returned exactly 10 objects, ids 1–10 contiguous with no gaps or duplicates, units 4,7,10,13,16,2,5,8,11,14 and weights 1,2,3,1,2,3,1,2,3,1. This is byte-identical in content to the inspector's cited read [Evidence 11d4a65d-229c-4bee-bcda-37e85e444a38]. Directory listing [Evidence 7b1acdd0-b4fd-4231-bf7c-c69c86220576] shows east/north/south/west.json in the fixture, matching the inspector's listing [95defa49-e5d6-437f-a9c7-a4d485a03f2a].\n\nRecomputation from the source values (execution policy here is read-only with no shell, so the arithmetic is done by hand over the cited ten records, not by a program):\n- count = 10.\n- units: 4+7=11, +10=21, +13=34, +16=50, +2=52, +5=57, +8=65, +11=76, +14=90 → 90.\n- units*weight: 4,14,30,13,32,6,5,16,33,14 → 4+14=18, +30=48, +13=61, +32=93, +6=99, +5=104, +16=120, +33=153, +14=167 → 167.\n\nScope check: the inspector's records are list_files of the directory plus a single read_file of north.json; no other dataset was read, and no shell or edit call exists in its record. All three reported values (count 10, units 90, weighted 167) match my independent recomputation, so its arithmetic trail is internally consistent with the evidence.\n\nOutput contract (filename, count, units, weighted, evidence excerpts) is satisfied by the artifact report.",
+      "conclusions": [
+        "north.json genuinely contains 10 records with sum of units 90 and sum of units*weight 167; the inspector's report is accurate and its arithmetic trail reconciles with the source.",
+        "The inspector stayed within scope: one dataset read (north.json), no shell, no edits."
+      ],
+      "evidence": [
+        "759d87e3-d6f4-4c68-afcd-4d54dcad7eb6",
+        "7b1acdd0-b4fd-4231-bf7c-c69c86220576",
+        "759d87e3-d6f4-4c68-afcd-4d54dcad7eb6: independent read_file of north.json returning the same 10-record array",
+        "7b1acdd0-b4fd-4231-bf7c-c69c86220576: list_files of the working directory",
+        "11d4a65d-229c-4bee-bcda-37e85e444a38: inspector's cited read of north.json (quoted excerpt verified against original)",
+        "95defa49-e5d6-437f-a9c7-a4d485a03f2a: inspector's directory listing"
+      ],
+      "assumptions": [
+        "Numeric recomputation by hand was used because this verification node's execution policy is read-only with no commands; the coordinator's Node-based global recomputation is a separate DAG task and remains mandatory."
+      ],
+      "unresolved": [],
+      "side_effects": false,
+      "verification_passed": true,
+      "task_id": "north.verify",
+      "version": 1,
+      "input_versions": {
+        "request": "5747c037c997d8c86c996ae74ad81b39e4b78958a0d0f034de5e295aef3febb9",
+        "history": "f981c428c1f4a5617d69b762eaac2fb6b310570d9cbe128328c9763225cf7572",
+        "north": 1
+      },
+      "verification": "verified",
+      "created_at": "2026-11-10T14:29:40.349Z"
+    },
+    {
+      "result": "Verified `east` (artifact:east@1) against the original source.\n\n**Source file:** east.json (fixture listing c83c6d9b-6909-4da4-8a88-3ee58152a696 shows east.json, north.json, south.json, west.json).\n\n**Independent original-source read (73d19d89-a143-460a-a448-164ac9db1dd7)** returned exactly:\n`[{\"id\":1,\"units\":6,\"weight\":1},{\"id\":2,\"units\":11,\"weight\":2},{\"id\":3,\"units\":16,\"weight\":3},{\"id\":4,\"units\":4,\"weight\":1},{\"id\":5,\"units\":9,\"weight\":2},{\"id\":6,\"units\":14,\"weight\":3},{\"id\":7,\"units\":2,\"weight\":1},{\"id\":8,\"units\":7,\"weight\":2},{\"id\":9,\"units\":12,\"weight\":3},{\"id\":10,\"units\":17,\"weight\":1}]`\n\nThis is byte-identical to the excerpt the inspector quoted from its own read (8dad432d-8438-41cd-b4da-7ed05f0d9c7e), so the inspector cited genuine, unaltered source content.\n\n**Recomputation from that array:**\n- count = 10 records; ids are exactly 1–10, contiguous, no gaps or duplicates\n- units: 6+11+16+4+9+14+2+7+12+17 = 98\n- units*weight per record: 6, 22, 48, 4, 18, 42, 2, 14, 36, 17 → sum = 209\n\nAll three reported values (count 10, units 98, weighted 209) reproduce exactly.\n\n**Data completeness:** the file is a single well-formed JSON array of 10 objects, each with integer `id`, `units`, `weight` and no other fields; no records were skipped or double-counted.\n\n**Scope compliance:** the inspector's only recorded tool calls were one `list_files` of the directory (b093aac0-f64f-4de5-a201-d2c61c4aea5c) and one `read_file` of east.json (8dad432d…). No other dataset file was opened, and no shell or edit calls appear in its run. Listing a directory exposes filenames but reads no dataset content, so the \"read only its own source\" criterion holds.\n\n**Caveat (not a defect):** the inspector computed the sums by hand; this node's direct recomputation from the original file is the independent cross-check, and it agrees.\n\nNo discrepancy found; no repair needed.",
+      "conclusions": [
+        "east.json contains exactly 10 records (ids 1-10, contiguous), sum of units = 98, sum of units*weight = 209 — all three values reproduced from an independent read of the original file.",
+        "The inspector's quoted evidence is byte-identical to the current file content, so its evidence is authentic and complete.",
+        "The inspector stayed within scope: only list_files plus one read_file of east.json, no shell, no edits, no other dataset opened."
+      ],
+      "evidence": [
+        "c83c6d9b-6909-4da4-8a88-3ee58152a696",
+        "73d19d89-a143-460a-a448-164ac9db1dd7",
+        "8dad432d-8438-41cd-b4da-7ed05f0d9c7e",
+        "b093aac0-f64f-4de5-a201-d2c61c4aea5c"
+      ],
+      "assumptions": [
+        "Sums were computed by exact integer addition from the read array; this node's execution policy is read-only with no shell commands, so no Node script was run here — deterministic Node recomputation across all four datasets belongs to the coordinator task, not to this per-file verification."
+      ],
+      "unresolved": [],
+      "side_effects": false,
+      "verification_passed": true,
+      "task_id": "east.verify",
+      "version": 1,
+      "input_versions": {
+        "request": "5747c037c997d8c86c996ae74ad81b39e4b78958a0d0f034de5e295aef3febb9",
+        "history": "f981c428c1f4a5617d69b762eaac2fb6b310570d9cbe128328c9763225cf7572",
+        "east": 1
+      },
+      "verification": "verified",
+      "created_at": "2026-11-10T14:29:42.615Z"
+    },
+    {
+      "result": "Verification of artifact:south@1 against the original source, read independently.\n\nSource: /tmp/neutrino-fast-live-b4eG5i/parallel_analysis/fast_dag/2/south.json\nMy own read returned: [{\"id\":1,\"units\":5,\"weight\":1},{\"id\":2,\"units\":9,\"weight\":2},{\"id\":3,\"units\":13,\"weight\":3},{\"id\":4,\"units\":17,\"weight\":1},{\"id\":5,\"units\":4,\"weight\":2},{\"id\":6,\"units\":8,\"weight\":3},{\"id\":7,\"units\":12,\"weight\":1},{\"id\":8,\"units\":16,\"weight\":2},{\"id\":9,\"units\":3,\"weight\":3},{\"id\":10,\"units\":7,\"weight\":1}] [Evidence 85c7098c-b16e-4b35-aed2-494d4e7cf1a1]\n\nRecomputed results (match the inspector's values exactly):\n- count = 10 (10 objects, ids 1–10 consecutive and unique, every object has id/units/weight — no gaps, duplicates, or missing fields, so the count covers the whole file)\n- units = 94 (5+9+13+17+4+8+12+16+3+7 = 14,27,44,48,56,68,84,87,94)\n- weighted = 171 (5+18+39+17+8+24+12+32+9+7 = 23,62,79,87,111,123,155,164,171)\n- Cross-check by weight: w=1 ids 1,4,7,10 → 41*1=41; w=2 ids 2,5,8 → 29*2=58; w=3 ids 3,6,9 → 24*3=72; totals units 41+29+24=94, weighted 41+58+72=171 — agrees with the per-record sums.\n\nInspector fidelity: the values in artifact:south@1 (count 10, units 94, weighted 171) and its per-record excerpts (1:5,1→5 … 10:7,1→7) reproduce exactly against the raw record 20906367-3c88-48b4-9824-c52824619230, which is identical to my own read. Its grouped-by-weight cross-check also recomputes correctly. No arithmetic inconsistency found.\n\nScope compliance: the inspector's directory listing evidence 257f2f13-3cf3-4296-bbc8-66f46025f0c0 shows it saw only the four fixture filenames; its sole data read was south.json, and it reports no shell or edit side effects (side_effects=false), consistent with the recorded tool records.\n- Directory listing (mine): east.json, north.json, south.json, west.json [Evidence 5331de09-1a9d-4a3c-a606-4e1f3995d74e] — answer.json is not yet present in the fixture; that is the coordinator's downstream deliverable, outside this verification node's write scope (write_paths empty, read-only policy), so it is not counted as a failure here.\n\nMethod note: per the execution policy this node is read-only with no commands, so the arithmetic was recomputed by hand from the raw record rather than with Node; the global Node recomputation of all four datasets and the final answer.json remain the coordinator's responsibility.",
+      "conclusions": [
+        "south.json verified independently: count=10, units=94, weighted=171 — matches artifact:south@1",
+        "weighted confirmed by two independent groupings of the same raw record (per-record products 171; by-weight 41*1+29*2+24*3=171)",
+        "Source completeness confirmed: ids 1–10 consecutive and unique, all fields present, so count=10 covers the entire file"
+      ],
+      "evidence": [
+        "85c7098c-b16e-4b35-aed2-494d4e7cf1a1",
+        "5331de09-1a9d-4a3c-a606-4e1f3995d74e",
+        "20906367-3c88-48b4-9824-c52824619230",
+        "257f2f13-3cf3-4296-bbc8-66f46025f0c0"
+      ],
+      "assumptions": [
+        "answer.json absence in the fixture listing is expected at this stage (coordinator deliverable), not a defect of the south inspection"
+      ],
+      "unresolved": [],
+      "side_effects": false,
+      "verification_passed": true,
+      "task_id": "south.verify",
+      "version": 1,
+      "input_versions": {
+        "request": "5747c037c997d8c86c996ae74ad81b39e4b78958a0d0f034de5e295aef3febb9",
+        "history": "f981c428c1f4a5617d69b762eaac2fb6b310570d9cbe128328c9763225cf7572",
+        "south": 1
+      },
+      "verification": "verified",
+      "created_at": "2026-11-10T14:29:43.248Z"
+    },
+    {
+      "result": "Verified west.json independently against original source. My own read_file of west.json (evidence 33a66e16-f434-4c48-b953-4766eeab1ea3) matches the inspector's cited original record 193ede59-b182-49bd-a42a-bf9dfa299b7b record-for-record: 10 records, ids 1-10 contiguous, array properly closed, no truncation. Directory listing c2d7e695-6a2c-48bb-8d27-d16d8bb76f58 confirms the four regional files; the dependency's records show only list_files (fe49d732) plus read_file of west.json (193ede59), so the read-only single-file scope was respected.\n\nRecomputation from the source I read (manual arithmetic; this node is read-only so no shell/Node was used — Node cross-checking remains the coordinator's duty):\n- count = 10\n- sum units: 7+13+2+8+14+3+9+15+4+10 = 85\n- sum units*weight: 7+26+6+8+28+9+9+30+12+10 = 145\n- Independent grouped cross-check: weight1 group 7+8+9+10=34; weight2 group (13+14+15)=42x2=84; weight3 group (2+3+4)=9x3=27; weighted total 34+84+27=145, units total 34+42+9=85. Both agree with the inspector exactly.\n\nDefect found (non-numeric): the inspector's annotation prints \"(weights 1,2,1,1,2,3,1,2,3,1)\"; the third weight is actually 3 (record id 3 = {\"units\":2,\"weight\":3}, and the inspector's own product 2x3=6 for that record is correct). Only that auxiliary enumeration is mistyped; the reported count, units, weighted and all running totals are correct and consistent with the cited evidence, so the required output contract (filename, count 10, units 85, weighted 145, quoted excerpts) is satisfied.",
+      "conclusions": [
+        "west.json holds 10 records with summed units 85 and summed units*weight 145, confirmed by both direct summation and an independent weight-group cross-check on the source I read myself (evidence 33a66e16-f434-4c48-b953-4766eeab1ea3).",
+        "The inspector's aggregates are correct; its printed weight enumeration contains a typo at record 3 (shows 1, actual 3), which does not change any reported value."
+      ],
+      "evidence": [
+        "33a66e16-f434-4c48-b953-4766eeab1ea3",
+        "c2d7e695-6a2c-48bb-8d27-d16d8bb76f58",
+        "193ede59-b182-49bd-a42a-bf9dfa299b7b",
+        "fe49d732-a467-4150-8746-23eff018499a"
+      ],
+      "assumptions": [
+        "Aggregates treat each JSON array element as one record using its integer units and weight fields as-is, with no filtering or unit conversion.",
+        "The coordinator will perform the independent Node recomputation of all four datasets; this read-only verification node could not run shell commands."
+      ],
+      "unresolved": [],
+      "side_effects": false,
+      "verification_passed": true,
+      "task_id": "west.verify",
+      "version": 1,
+      "input_versions": {
+        "request": "5747c037c997d8c86c996ae74ad81b39e4b78958a0d0f034de5e295aef3febb9",
+        "history": "f981c428c1f4a5617d69b762eaac2fb6b310570d9cbe128328c9763225cf7572",
+        "west": 1
+      },
+      "verification": "verified",
+      "created_at": "2026-11-10T14:29:49.229Z"
+    },
+    {
+      "result": "Coordinator work done inside /tmp/neutrino-fast-live-b4eG5i/parallel_analysis/fast_dag/2; only Node and read-only inspection were used, no credentials or external services.\n\nWrote `answer.json`:\nregions.north {count 10, units 90, weighted 167}; regions.south {count 10, units 94, weighted 171}; regions.east {count 10, units 98, weighted 209}; regions.west {count 10, units 85, weighted 145}; grand_units 367; grand_weighted 692.\n\nNode recomputation over the four complete source files (Evidence 887cc707-9058-43c6-a83f-02fac2fc331e) reported for each region: records=10, uniqueIds=true, ids contiguous 1..n=true, every object has exactly id/units/weight with integer values, so each count covers the whole file. All four recomputed triples matched the inspector reports exactly (\"MATCH\" for north/south/east/west) — no corrections needed.\n\nFidelity of quoted evidence: parsing each source file and comparing to the arrays quoted in artifact:north@1 / south@1 / east@1 / west@1 gave `source==inspector-quoted records: true` for all four (Evidence 25b074d7-147f-474d-b7d5-847abb217098), so the confirmed numbers rest on authentic source content.\n\nIndependent re-verification of the written file (Evidence 753db2c4-63a7-4eb2-a513-5dad8ce3d4d1): top-level keys exactly {regions, grand_units, grand_weighted}, region keys exactly {north,south,east,west}, each entry exactly {count,units,weighted} as numbers; re-deriving each region from its source again reproduced every stored value; sum of regional units 367 = grand_units and sum of regional weighted 692 = grand_weighted → \"schema+values REVERIFIED: true\". Fixture listing afterwards (Evidence 6260c808-88d6-4008-884d-cff15ca5e25d and the re-read listing) contains answer.json plus the four untouched datasets.\n\nReconciliation note: west.verify recorded a typographical slip in the west inspector's auxiliary weight enumeration (third weight printed as 1, actual 3); the inspector's products and all reported values (85, 145) are correct, and my Node result for west (85/145) confirms it, so no value was changed.",
+      "conclusions": [
+        "Node recomputation of all four complete datasets agrees with all four inspector reports (10/90/167, 10/94/171, 10/98/209, 10/85/145); every inspector result is explicitly confirmed, none corrected.",
+        "answer.json holds regions keyed north/south/east/west with count, units, weighted plus grand_units 367 and grand_weighted 692, and both grand totals equal the sums of the regional values.",
+        "Each inspector's quoted records are byte-identical to the current source files, and each source has 10 unique contiguous records with complete integer fields."
+      ],
+      "evidence": [
+        "6260c808-88d6-4008-884d-cff15ca5e25d",
+        "887cc707-9058-43c6-a83f-02fac2fc331e",
+        "753db2c4-63a7-4eb2-a513-5dad8ce3d4d1",
+        "25b074d7-147f-474d-b7d5-847abb217098"
+      ],
+      "assumptions": [],
+      "unresolved": [],
+      "side_effects": true,
+      "task_id": "coordinator",
+      "version": 1,
+      "input_versions": {
+        "request": "5747c037c997d8c86c996ae74ad81b39e4b78958a0d0f034de5e295aef3febb9",
+        "history": "f981c428c1f4a5617d69b762eaac2fb6b310570d9cbe128328c9763225cf7572",
+        "north": 1,
+        "south": 1,
+        "east": 1,
+        "west": 1
+      },
+      "verification": "verified",
+      "created_at": "2026-11-10T14:30:12.117Z"
+    },
+    {
+      "result": "Independent verification of coordinator.verify passed with no corrections needed.\n\nChecked: fixture listing + answer.json content (f92158fe-b522-499d-b308-ac0e84938c5c); Node recomputation of all four source files compared value-by-value to answer.json, plus schema/key-set/type and grand-total arithmetic (730c9bc4-20e9-4da0-8383-5b3b2f66f09f); source completeness and per-record arithmetic (75bc11e8-83c9-4cea-a67c-377fcede8e4c); alternative group-by-weight aggregation as a guard against reduction error (dda29548-237e-44a8-8fc1-5448e4b44cb6); and the four inspector artifacts read directly for their stated numbers (e43f523c-754c-4d7c-9380-4b6a96ca3b76).\n\nResults: north 10/90/167, south 10/94/171, east 10/98/209, west 10/85/145; grand_units 367, grand_weighted 692. Each file is one JSON array of 10 records with exactly integer id/units/weight and ids 1..10, so counts cover the complete datasets. answer.json has exactly top-level keys regions/grand_units/grand_weighted, region keys north/south/east/west, and per-region keys count/units/weighted as integers; every stored value equals my independent recompute and both grands equal the sums of the regional values. All four inspector reports state exactly the recomputed triples, so every inspector result is explicitly confirmed (none corrected); conversely, none of my numbers depend on their reported values.\n\nNon-blocking observation: the west inspector's auxiliary weight enumeration prints 1,2,1,1,2,3,... where west.json has 1,2,3,1,2,3,...; its listed products and reported 85/145 are correct and its stated weight sum 19 matches actual weights, so it is a typo in supporting text only, as the coordinator already noted. No value in answer.json is affected.\n\nScope: all commands ran inside the working directory using Node only; no shell access to external services, no credentials, no files created besides what the coordinator already wrote.",
+      "conclusions": [
+        "Node recomputation of all four complete sources gives 10/90/167, 10/94/171, 10/98/209, 10/85/145 and matches answer.json exactly; grand_units 367 and grand_weighted 692 equal the regional sums.",
+        "All four inspector artifacts state exactly the Node-recomputed triples, so each inspector result is explicitly confirmed rather than corrected.",
+        "answer.json's full schema (regions north/south/east/west with count/units/weighted, grand_units, grand_weighted) and integer types are correct, and a second, differently structured aggregation reproduces every value.",
+        "Only discrepancy is a transcription slip in the west inspector's supporting weight list; its products and reported values are correct, so no correction to any delivered output is required."
+      ],
+      "evidence": [
+        "f92158fe-b522-499d-b308-ac0e84938c5c",
+        "730c9bc4-20e9-4da0-8383-5b3b2f66f09f",
+        "e43f523c-754c-4d7c-9380-4b6a96ca3b76",
+        "75bc11e8-83c9-4cea-a67c-377fcede8e4c",
+        "dda29548-237e-44a8-8fc1-5448e4b44cb6"
+      ],
+      "assumptions": [],
+      "unresolved": [],
+      "side_effects": true,
+      "verification_passed": true,
+      "task_id": "coordinator.verify",
+      "version": 1,
+      "input_versions": {
+        "request": "5747c037c997d8c86c996ae74ad81b39e4b78958a0d0f034de5e295aef3febb9",
+        "history": "f981c428c1f4a5617d69b762eaac2fb6b310570d9cbe128328c9763225cf7572",
+        "coordinator": 1
+      },
+      "verification": "verified",
+      "created_at": "2026-11-10T14:30:41.163Z"
+    }
+  ]
+}

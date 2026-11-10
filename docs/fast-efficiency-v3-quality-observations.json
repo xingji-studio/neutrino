@@ -1,0 +1,39 @@
+{
+  "benchmark_id": "965a0e5c-6d7f-4be1-a495-f2398f3f3446",
+  "original_acceptance_unchanged": true,
+  "observed_at_utc": "2026-11-10T14:36:28.843824+00:00",
+  "scenario": "parallel_analysis",
+  "mode": "fast_dag",
+  "round": 3,
+  "tool_evidence_sha256": "39b3bb2eb30f626d9266e8c866ea3763be0e4fb110fbfba20cf8a2b8a85a3486",
+  "agent_artifacts_sha256": "ded7ba87e357c0b9dd63e2eb630e300d67a5fde75f7edc1dfcf4a2de23d8a9d4",
+  "observations": [
+    {
+      "kind": "auxiliary_report_inconsistency_detected",
+      "artifact": "artifact:west@1",
+      "reported": "weights 1,2,1,1,2,3,1,2,3,1",
+      "correct": "weights 1,2,3,1,2,3,1,2,3,1",
+      "requested_values": {
+        "count": 10,
+        "units": 85,
+        "weighted": 145
+      },
+      "detected_by": "artifact:west.verify@1",
+      "source_evidence_ids": [
+        "193ede59-b182-49bd-a42a-bf9dfa299b7b",
+        "33a66e16-f434-4c48-b953-4766eeab1ea3"
+      ],
+      "resolution": "The independent verifier explicitly identifies the wrong third weight and confirms the original row weight=3/product=6. Correct source excerpts, all requested totals and final output agree; global review explains the auxiliary enumeration correction."
+    },
+    {
+      "kind": "global_check_expression_error_corrected",
+      "failed_check_evidence_id": "9fadb0c2-6d69-432c-b3f9-5d06589bb52c",
+      "actual_failed_result": "grand_weighted 145 vs stored 692; ALL_OK false",
+      "cause": "A conditional expression with incorrect operator precedence replaces the reduce accumulator instead of adding weighted values; the model correctly diagnoses its own checking expression.",
+      "corrected_check_evidence_id": "019a1ecf-37a0-4b7a-a2e7-1601cb8860d2",
+      "actual_corrected_result": "sum of regional weighted=692; every source/output value and both grand sums match",
+      "resolution": "Original answer.json was already correct. The model re-ran the corrected real-source assertion and preserved both failed and successful records before completing."
+    }
+  ],
+  "quality_limit": "These examples show independent checks and actual corrections were retained. Fixed numeric/protocol acceptance and three rounds do not establish general open-ended answer quality equivalence."
+}

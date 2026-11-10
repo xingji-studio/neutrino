@@ -1,0 +1,60 @@
+{
+  "engine_run_id": "2f8c29db-76e7-4532-90cb-4094a7c3199a",
+  "artifacts": [
+    {
+      "result": "Executed the strict pipeline in order inside the fixture /tmp/neutrino-fast-live-LY3jZs/strong_sequential_dependencies/fast_dag/0, using inline node (v18.19.1) only.\n\nSteps, each as a separate round so no downstream stage was computed before its input file existed on disk:\n1. Inspected the directory: only seed.txt (content `3`, 1 byte) existed. Evidence 3e7be4d8 / 338a613c: `seed=3`, node v18.19.1.\n2. stage1: guarded on existence/numeric seed.txt, wrote `5` to stage1.txt (seed+2). Evidence e9584ea4 (stdout `seed=3 stage1=5`, stage1.txt = 2 bytes).\n3. stage2: guarded on existence/numeric stage1.txt read from disk, wrote `25` to stage2.txt (5²). Evidence 8891937b.\n4. stage3: guarded on existence/numeric stage2.txt read from disk, wrote `21` to stage3.txt (25−4). Evidence 5b47fb6f.\n5. Verification: re-read seed.txt, stage1.txt, stage2.txt, stage3.txt from disk and checked the full chain — PASS stage1 == seed + 2, PASS stage2 == stage1 * stage1, PASS stage3 == stage2 - 4; only then wrote answer.json with numeric keys taken from the saved files. Evidence 3db47405.\n6. Fresh-process re-check of the artifact: PASS stage1 is numeric (5, type number) and matches stage1.txt; same PASS pair for stage2 (25) and stage3 (21); answer.json keys exactly [\"stage1\",\"stage2\",\"stage3\"]; EXIT=0. Evidence 07f44fe5.\n\nFiles created: stage1.txt, stage2.txt, stage3.txt, answer.json. seed.txt untouched. answer.json content:\n{\n  \"stage1\": 5,\n  \"stage2\": 25,\n  \"stage3\": 21\n}\n\nFinal tree contains exactly the 5 files; no helper scripts, no writes outside the fixture, no credentials or network access.",
+      "conclusions": [
+        "Pipeline values: seed 3 -> stage1 5 -> stage2 25 -> stage3 21, each computed from the previously saved file, verified by independent re-reads."
+      ],
+      "evidence": [
+        "3e7be4d8-7e7d-4eb0-b1a2-f999342bca72",
+        "338a613c-708a-4d55-bdd7-5732bdc9790f",
+        "e9584ea4-c98a-4b6f-afd9-c4446c119d1c",
+        "8891937b-0a77-44b4-a71c-79f7cf21ff61",
+        "5b47fb6f-9456-4a6d-8a94-48dbb5cb4dbe",
+        "3db47405-e56d-4fe4-8a09-47069f798e3a",
+        "07f44fe5-ea95-4499-a811-edfb4146c337"
+      ],
+      "assumptions": [],
+      "unresolved": [],
+      "side_effects": true,
+      "task_id": "main",
+      "version": 1,
+      "input_versions": {
+        "request": "a43166b1b6fde2c4775734221b0b90cbd6e6036dd83b75fa90764c55ca9b6c1c",
+        "history": "a2a124ab315da55c9373e432990e140a7d89def16699eb15d16e8eb7e30eb38d"
+      },
+      "verification": "verified",
+      "created_at": "2026-11-10T13:39:06.477Z"
+    },
+    {
+      "result": "Independent verification of artifact:main@1 completed with fresh node (v18.19.1) checks against the files on disk; no writes were made by this task.\n\nGround truth observed (evidence 505b31f5): fixture holds exactly answer.json (50 B), seed.txt (1 B), stage1.txt (2 B), stage2.txt (3 B), stage3.txt (3 B); contents `3`, `5`, `25`, `21`, and answer.json `{stage1:5, stage2:25, stage3:21}`.\n\nIndependent recomputation and contract check (evidence 7f53f73f, EXIT=0) — all PASS:\n- seed == 3; stage1 == seed + 2 (5); stage2 == stage1² (25); stage3 == stage2 − 4 (21)\n- answer.json keys exactly [\"stage1\",\"stage2\",\"stage3\"]\n- each answer value is `typeof number` and equals the value in its corresponding saved stage file\n\nJSON parse/type check (evidence f327415a): `{\"stage1\":5,\"stage2\":25,\"stage3\":21}` types `number,number,number`.\n\nOrdering requirement audited from the original dependency records (inline, plus 54079dd9): each stage was a separate sequential tool call whose script hard-fails on a missing/empty/non-numeric prerequisite file — e9584ea4 read seed.txt and wrote stage1.txt; 8891937b guarded on stage1.txt existing and wrote stage2.txt; 5b47fb6f guarded on stage2.txt and wrote stage3.txt; 3db47405 re-read all four files, ran the three PASS chain checks, and only then wrote answer.json. No record shows a downstream stage computed before its input file existed.\n\nConstraints: computations and tests used node only (no Python); no credential or external-service access appears in any record; all artifacts are inside the fixture and no helper scripts remain.\n\nOne check was refused rather than failed: an attempt to list the parent path /tmp/neutrino-fast-live-LY3jZs (evidence 474039e4, denied) is outside the declared workspace boundary, so no write/read outside the fixture is evidenced — this is the boundary enforcement working as intended and is not a task requirement. Its fixture-internal replacement (f327415a) confirmed the same-file inventory.\n\nNo acceptance criterion is unmet; nothing requires repair.",
+      "conclusions": [
+        "Pipeline is correct and complete: seed 3 -> stage1 5 -> stage2 25 -> stage3 21, verified by independent node recomputation against the saved files.",
+        "answer.json satisfies the contract: exactly the three required keys, numeric types, values equal to the saved stage files."
+      ],
+      "evidence": [
+        "505b31f5-dcb1-46bf-b758-0f83095d0f3c",
+        "54079dd9-6e1e-4317-a37c-b03778de859d",
+        "7f53f73f-6c12-45c3-8c93-4eeb12d05fd6",
+        "474039e4-faaa-49a5-bca3-2f563ff0ac49",
+        "f327415a-4f9f-4aac-84ed-753a657cd090"
+      ],
+      "assumptions": [
+        "Sequential ordering was judged from the recorded per-stage tool calls and their existence guards, since file mtimes all fall in the same minute and cannot prove ordering by themselves."
+      ],
+      "unresolved": [],
+      "side_effects": true,
+      "verification_passed": true,
+      "task_id": "main.verify",
+      "version": 1,
+      "input_versions": {
+        "request": "a43166b1b6fde2c4775734221b0b90cbd6e6036dd83b75fa90764c55ca9b6c1c",
+        "history": "a2a124ab315da55c9373e432990e140a7d89def16699eb15d16e8eb7e30eb38d",
+        "main": 1
+      },
+      "verification": "verified",
+      "created_at": "2026-11-10T13:39:26.627Z"
+    }
+  ]
+}

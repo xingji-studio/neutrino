@@ -1,0 +1,32 @@
+{
+  "created_at_utc": "2026-11-10T12:36:35.644207+00:00",
+  "backup_directory": "/tmp/neutrino-efficiency-before-ua3vz5h3",
+  "baseline_campaign": "docs/fast-stability-benchmark.json",
+  "baseline_scenarios": [
+    "multi_source_retrieval",
+    "multi_module_code",
+    "strong_sequential_dependencies",
+    "parallel_analysis"
+  ],
+  "model": "DeepSeek/deepseek-flash",
+  "intensity": "Max",
+  "output_budget": 16384,
+  "source_sha256": {
+    "src/fast/engine.ts": "ff07f7c548b368db857328ae43cf38e9e4ba3afa96f0c3d35a33f75263b85279",
+    "src/fast/planner.ts": "e6914ba97b3daf596ec5d1fd830dc0688e5131dfd2f74a7edab48df8560ffe6c",
+    "src/fast/worker.ts": "5121dd57623cef745bcfde340d6af3afec4e40031844947b27f0f9fdd2198dee",
+    "src/llm/runtime.ts": "20917fb343299b78d3fff994874fc8a6033adfccb969b34a73e3a80519d4a461",
+    "src/llm/tools.ts": "716017ab8b239c3d11a6b2a37f8660278702bf2b6e14e86bd042679d82b8778f",
+    "src/llm/subagent.ts": "7665016ab4e254db6377aea18b505990bf50cea5eccc7d3c9a1d8894bad5b83a",
+    "assets/fast-planner.txt": "0c41df73a1074864fd23931b05f1aced491b242d4d18a3fbe1a0d30b2f95fa11",
+    "scripts/benchmark-fast-live.mjs": "53b10ce640dacd590e14d5d80fc308b0482cdeb5b559dbb331959ccadc30b4ac",
+    "scripts/audit-fast-live.mjs": "a290dd95e81e2ff5b8b0bafb9ac5c9e9a2cd722618d394dd890d91df83d0fdab",
+    "scripts/report-fast-stability.mjs": "b742389059abd6b8a4ef1c50b31d958f3113991100190ad4354fb90a2d226b1f",
+    "scripts/fast-stability-analysis.mjs": "fd8b72709cd73bf23a7724d1a0300dec0f5d254fa13f8de74b31985e1123646b",
+    "scripts/test-fast-planner.mjs": "972e3b65a6b461ea1b23480b91ea914caffd299d7d4a9e639cf4028951ab5f9f",
+    "scripts/test-fast-verification.mjs": "bf1081006e1e01d3a4754359b65fdf1ce30e28006cd336c3eba855095341635b",
+    "scripts/test-fast-stability.mjs": "579c3ee2e5e14a3075981537e53ffb5e904caa02953852671492d1b2ab12c564",
+    "scripts/test-fast-benchmark-budget.mjs": "3e9fc4771b71a6b921a1126b5265f54e4c053fb9d6994d2d6955fc8da75a9c2e",
+    "package.json": "19db1a6ab2d2cf666b6a1b476aedbce415a5db4fca3386263f2f3e9c60f71803"
+  }
+}

@@ -115,7 +115,7 @@ if (fs.existsSync("docs/fast-live-retest.json")) {
 }
 text += "## 未完成的验收与限制\n\n- 尚不能据此宣称一般复杂任务的 50% 缩时目标已经实现。\n- 统计可靠的 P95、多轮随机化顺序、开放式答案人工评审、公网多站点检索和大型项目开发尚未测；本组为可重复的本地资料、逻辑和小型代码任务。\n- 供应商缓存计费 Token 没有由现有接口可靠提供，标记为未知；本地上下文缓存命中不代表供应商计费减免。\n- 初次中断记录保存在 `fast-live-interrupted.json`，其中失败/超时任务不是成功的速度对照。\n\n";
 text += "后续待验证的优化包括：让 Planner 将简单任务合并为更少的工作节点，避免另建与隐式验证重复的审查任务；在保留独立验证和最终审查的前提下，让不相交的编辑先并行、再由协调者运行必要测试。任意 shell 的真正并行需要可验证的文件系统隔离，当前未实现；不能仅放松访问范围来换取速度。\n\n";
-const currentHash = createHash("sha256").update(["engine", "scheduler", "worker", "pool", "artifacts", "types"]
+const currentHash = createHash("sha256").update(["engine", "scheduler", "worker", "pool", "artifacts", "types", "planner"]
   .map(name => fs.readFileSync(new URL(`../dist/fast/${name}.js`, import.meta.url), "utf8")).join("\n")).digest("hex");
 text += `测量构建指纹：\`${live.engine_sha256}\`。交付构建指纹：\`${currentHash}\`。`;
 if (currentHash !== live.engine_sha256) text += "实测后补充了模型错误透传，以及遇到余额/鉴权等永久错误时停止新请求和重规划的处理，避免将供应商错误误报为规划 JSON 解析错误。这些变更经过回归；上面的付费数据属于测量构建，未冒充交付构建的逐位相同测量。账户余额不足，新增错误分支没有再次付费复测。";

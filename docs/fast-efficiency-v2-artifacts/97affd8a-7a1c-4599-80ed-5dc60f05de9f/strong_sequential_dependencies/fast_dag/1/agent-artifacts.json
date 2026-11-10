@@ -1,0 +1,42 @@
+{
+  "engine_run_id": "13950187-73f9-4391-8e88-5493e15721ea",
+  "artifacts": [
+    {
+      "result": "Executed the strict sequential pipeline with node inside the fixture directory, one stage per step, each reading only the file already written and asserting it existed before computing.\n\nArtifacts created (all in the fixture root):\n- stage1.txt = seed.txt (3) + 2 = 5 — written by node after reading seed.txt; verified with `cat` (evidence cf3f03f2-bc6c-49a4-9b9a-4f3dea27192a).\n- stage2.txt = 5^2 = 25 — step asserted `fs.existsSync(\"stage1.txt\")` before computing; verified with `cat` (evidence de87c556-c8f0-486b-b038-1e8d12ba7eaa).\n- stage3.txt = 25 − 4 = 21 — step asserted stage2.txt existed first; verified with `cat` (evidence 96ee9628-7ebc-492c-8e01-2dfca047541a).\n- answer.json = {\"stage1\":5,\"stage2\":25,\"stage3\":21} — written only after the full verification, from values read back from the saved stage files (evidence cc6a9ebe-146e-459e-9a97-b2a68fb83174).\n- verify.js — the node verification/test script (evidence 4d169eac-a6bd-4e76-b1a1-3cab8e48c8cb).\n\nVerification performed:\n1. `node verify.js` → 13/13 PASS, exit=0: all four files exist; stage1 = seed+2 (3+2=5); stage2 = stage1^2 (5^2=25); stage3 = stage2−4 (25−4=21); stage3 = (seed+2)^2−4 (21); answer.json reloads with numeric stage1/stage2/stage3 equal to the corresponding .txt files and exactly the three required keys.\n2. `od -c` on the raw files shows clean single values with no stray content: seed.txt \"3\", stage1.txt \"5\", stage2.txt \"2 5\", stage3.txt \"2 1\".\n3. Independent inline node recomputation (not reusing verify.js) printed expected {stage1:5,stage2:25,stage3:21} vs answer.json {stage1:5,stage2:25,stage3:21} match=true, exit=0 (evidence 4b551160-569f-4865-84a4-2b4c62688a77).\n\nNo Python was used; all computation and checks ran under node v18.19.1. No credentials, external services or network access were used, and nothing was written outside the fixture directory. Helper script verify.js was left in place (no cleanup requested).",
+      "conclusions": [
+        "Chain values: seed 3 → stage1 5 → stage2 25 → stage3 21.",
+        "answer.json holds exactly the numeric keys stage1=5, stage2=25, stage3=21 read from the saved files.",
+        "Stage ordering dependency was enforced at runtime: each downstream step aborted if its input file was absent, and each step was executed only after the prior file was confirmed on disk."
+      ],
+      "evidence": [
+        "02655038-1723-4bc6-a449-bbe9eed336a6",
+        "cf3f03f2-bc6c-49a4-9b9a-4f3dea27192a",
+        "de87c556-c8f0-486b-b038-1e8d12ba7eaa",
+        "96ee9628-7ebc-492c-8e01-2dfca047541a",
+        "4d169eac-a6bd-4e76-b1a1-3cab8e48c8cb",
+        "cc6a9ebe-146e-459e-9a97-b2a68fb83174",
+        "4b551160-569f-4865-84a4-2b4c62688a77",
+        "02655038-1723-4bc6-a449-bbe9eed336a6: initial listing and seed.txt = 3, node v18.19.1",
+        "cf3f03f2-bc6c-49a4-9b9a-4f3dea27192a: node step 1 read seed, wrote stage1.txt = 5",
+        "de87c556-c8f0-486b-b038-1e8d12ba7eaa: node step 2 guarded on stage1.txt, wrote stage2.txt = 25",
+        "96ee9628-7ebc-492c-8e01-2dfca047541a: node step 3 guarded on stage2.txt, wrote stage3.txt = 21",
+        "4d169eac-a6bd-4e76-b1a1-3cab8e48c8cb: verify.js written",
+        "cc6a9ebe-146e-459e-9a97-b2a68fb83174: node verify.js 13/13 PASS exit=0, answer.json content, od -c of raw stage files",
+        "4b551160-569f-4865-84a4-2b4c62688a77: independent inline recompute match=true against answer.json and stage files"
+      ],
+      "assumptions": [
+        "seed.txt's value (3) is the intended fixture input; it is a single byte with no trailing newline, read with trim and Number()."
+      ],
+      "unresolved": [],
+      "side_effects": true,
+      "task_id": "main",
+      "version": 1,
+      "input_versions": {
+        "request": "cb9dc5f7aa39c2f7d1e99b40ec6ec2041cc9ea526f8daef71985744c228c7e0a",
+        "history": "163b0919eb2d84769f3a6002237a7a59f9f2b01971049f07bfb4cb9945a87d65"
+      },
+      "verification": "pending",
+      "created_at": "2026-11-10T13:40:12.002Z"
+    }
+  ]
+}

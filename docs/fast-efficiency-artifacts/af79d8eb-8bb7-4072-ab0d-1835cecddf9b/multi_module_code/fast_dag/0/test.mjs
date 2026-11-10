@@ -1,0 +1,1 @@
+import assert from 'node:assert/strict'; import {tax} from './tax.mjs'; import {shipping} from './shipping.mjs'; assert.equal(tax(100),20); assert.equal(shipping(2),7); assert.equal(tax(0),0); assert.equal(shipping(0),3); console.log('PASS');

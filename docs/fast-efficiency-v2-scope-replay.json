@@ -1,0 +1,40 @@
+{
+  "benchmark_id": "af79d8eb-8bb7-4072-ab0d-1835cecddf9b",
+  "kind": "offline_replay_of_five_actual_false_scope_denials",
+  "all_passed": true,
+  "external_model_calls": 0,
+  "actual_commands_executed": 0,
+  "root_filesystem_read_still_rejected": true,
+  "results": [
+    {
+      "tool_id": "475b5887-b2f1-4990-8ee6-186c2dd172af",
+      "old_decision": "Not executed: Path \"/answer.json\" is outside the explicitly confined workspace \"/tmp/neutrino-fast-live-Kjebr5/parallel_analysis/fast_dag/0\". Nothing ran. Use workspace-relative paths, including helper scripts, and correct only this call; do not replay completed operations.. Do not retry a denied call unchanged.",
+      "corrected_preflight": "allowed: filesystem expressions stay within workspace",
+      "executed": false
+    },
+    {
+      "tool_id": "553c799d-7068-4615-84b5-6b004a2335d2",
+      "old_decision": "Not executed: Path \"/\" is outside the explicitly confined workspace \"/tmp/neutrino-fast-live-Kjebr5/parallel_analysis/fast_dag/0\". Nothing ran. Use workspace-relative paths, including helper scripts, and correct only this call; do not replay completed operations.. Do not retry a denied call unchanged.",
+      "corrected_preflight": "allowed: filesystem expressions stay within workspace",
+      "executed": false
+    },
+    {
+      "tool_id": "6635a775-5a14-4b33-8566-d3d6b19de560",
+      "old_decision": "Not executed: Path \"/\" is outside the explicitly confined workspace \"/tmp/neutrino-fast-live-Kjebr5/parallel_analysis/fast_dag/0\". Nothing ran. Use workspace-relative paths, including helper scripts, and correct only this call; do not replay completed operations.. Do not retry a denied call unchanged.",
+      "corrected_preflight": "allowed: filesystem expressions stay within workspace",
+      "executed": false
+    },
+    {
+      "tool_id": "3476d40a-6236-4dc3-b775-ac98892918f9",
+      "old_decision": "Not executed: Path \"/\" is outside the explicitly confined workspace \"/tmp/neutrino-fast-live-Kjebr5/parallel_analysis/fast_dag/0\". Nothing ran. Use workspace-relative paths, including helper scripts, and correct only this call; do not replay completed operations.. Do not retry a denied call unchanged.",
+      "corrected_preflight": "allowed: filesystem expressions stay within workspace",
+      "executed": false
+    },
+    {
+      "tool_id": "716b5e4e-26f9-4ca2-a1d6-47e9be44364f",
+      "old_decision": "Not executed: Path \"/\" is outside the explicitly confined workspace \"/tmp/neutrino-fast-live-Kjebr5/parallel_analysis/fast_dag/0\". Nothing ran. Use workspace-relative paths, including helper scripts, and correct only this call; do not replay completed operations.. Do not retry a denied call unchanged.",
+      "corrected_preflight": "allowed: filesystem expressions stay within workspace",
+      "executed": false
+    }
+  ]
+}

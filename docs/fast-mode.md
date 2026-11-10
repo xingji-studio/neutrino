@@ -51,8 +51,11 @@ flowchart LR
 ```
 
 Planner 仅在目标、依赖、上下文、验收标准、输出契约和访问范围完整后发布任务。调度器支持前向依赖、优先级、环检测、动态依赖更新、失效传播和版本绑定。
+初始规划可使用 `single` 声明，由运行时将不可变原始请求完整展开为工作任务及独立验证器，省去模型重复改写；复杂任务继续使用 DAG，省略的传输默认字段由程序补齐，语义字段与权限仍完整校验。恢复协议按需载入。详见 `docs/fast-planning-optimization.md`。
+相似 DAG 任务可以共享传输字段，由程序复制为完整定义后继续原验证。小型原始证据直接内联；大型证据使用带状态、版本与摘要的索引，并通过 `read_task_evidence` 读取精确原文。合法祖先证据沿已声明依赖及匹配输入版本提供；失效或无关产物不可借此读取。完整请求、结论、假设、必要独立检查和最终审查都保留。恢复可继承已发布约束；缺失初始目标、后置约束仍拒绝，历史规划错误和未完成节点预算保留。详见 `docs/fast-efficiency-optimization.md`。
 状态为 `PENDING / READY / RUNNING / VERIFYING / VERIFIED / FAILED / BLOCKED / INVALIDATED / COMPLETED`。
 每个工作任务有独立 `.verify` 节点；后继任务等待已验证产物，而不是仅等待模型返回文本。
+规划任务可声明 `kind: work`（默认）或 `kind: verification`。本地检查集中在工作任务的验收标准中，由独立 `.verify` 执行；有新增覆盖的跨任务检查可直接以 `verification` 执行，不再生成嵌套验证器。显式验证必须依赖已验证产物，并提供明确的通过结论和空的未解决项。最终审查也必须引用这些检查产物。详见 `docs/fast-verification-optimization.md`。
 
 验证 Worker 使用独立的 Fast Worker 循环，继承原模型客户端、子智能体提示词、上下文容量、轮次、权限和审批规则。
 `finish_task` 负责提交机器可读结果；验证必须提供显式布尔结论。
@@ -62,6 +65,10 @@ Planner 仅在目标、依赖、上下文、验收标准、输出契约和访问
 最终主智能体使用原模型和不受子智能体轮次限制的执行循环。它可继续推理、调用工具、解决冲突和补齐全局检查。
 `finish_fast_review` 要求引用当前有效版本的产物，且全部任务通过验证、未解决问题为空，才能记录完成。
 伪造引用、旧版本引用和无显式验收的文本回答均不能将任务标记为完成。
+
+当原始用户请求明确要求仅在当前夹具/工作目录内操作时，TaskRuntime 在所有后代工具入口预检路径及可解析 Node 文件 API 参数，并解析符号链接。路径误填会记录未执行证据并允许本轮纠正；真实安全或人工拒绝仍阻止完成。此静态预检不是任意动态程序的操作系统沙箱。
+
+Fast 的破坏性工具提议可先在不执行、不请求人审的情况下改为满足原要求的无破坏性方案；必要操作通过 `request_user_approval: true` 调用原有审批，字段不是用户同意。原始完整授权与极高风险自动审批开关继续生效，未减少独立审批轮次。验证只检查原始验收与实际缺陷，不为未要求交付的辅助脚本另造“验证验证器”义务。
 
 ## 并发、权限与恢复
 
@@ -128,7 +135,7 @@ Planner 仅在目标、依赖、上下文、验收标准、输出契约和访问
 | `fast_background_slots` | `2` | 异步整合并发，最大 8 |
 | `fast_worker_slots` | 推理槽位 × 2 | 活动任务上限，最大 32 |
 | `fast_task_timeout_ms` | `1800000` | 单 Worker / 规划请求超时 |
-| `fast_max_tasks` | `24` | 工作任务总上限，另受共享配额约束 |
+| `fast_max_tasks` | `24` | 规划任务总上限（工作或显式验证），另受共享配额约束 |
 | `fast_retries` | `1` | 安全只读重试，0 可关闭 |
 | `fast_replans` | `2` | 有界重规划，0 可关闭 |
 
@@ -147,6 +154,7 @@ npm run benchmark:fast:live -- --home <包含现有 .neutrino 配置的用户目
 ```
 
 `test:fast` 覆盖流式启动、依赖解锁、环和缺失依赖、局部验证失败、动态失效、输入版本、显式修复、资源优先级/缩容/取消、读写范围、持久化、规划恢复、纠错、最终验收引用、HTTP 路由、模式冻结、旧数据、Feature Flag、Web 卡片发送和 TUI 执行。
+新增验证层级回归覆盖本地验收合并、显式独立检查、真实错误产物拦截和检查产物引用；使用本地工具和脚本化模型，模型往返对照不等同于真实提速。本轮完整测试记录见 `docs/fast-verification-test-results.json`。
 
 `scripts/test-fast-browser.mjs` 是可选的真实 Chromium 检查，不向项目增加浏览器依赖：
 
@@ -158,12 +166,16 @@ NEUTRINO_PLAYWRIGHT_MODULE=<已安装 playwright 的 index.mjs> node scripts/tes
 Linux 验收环境缺少中文字库时，测试可复用宿主机已有字体；产品样式没有因此改变。
 
 性能与 Token 结果见 `docs/fast-performance.md`；机器可读原始结果为 `docs/fast-live-benchmark.json`、`docs/fast-live-metrics.json` 和 `docs/fast-scheduling-benchmark.json`。
+仅合并验证层级阶段的真实配对见 `docs/fast-optimized-live-comparison.md`：两侧完成且质量通过，但该轮 Fast 耗时更高，并有一次服务端重试。进一步优化规划后的最新配对见 `docs/fast-planning-live-comparison.md`：本轮 Fast 耗时减少 19.7%、Token 减少 2.0%，质量检查通过，无重试或缺失 usage；两轮数据分别保留，均为单场景采样。
+上一阶段多场景三轮真实对照见 `docs/fast-stability-comparison.md`：四类任务、24 次新运行，完整验收 20/24，合格性能配对 8/12；未确认跨任务普遍稳定提速或 Token 减少。编码三轮均更快，但优势为 1.2%–35.8%，仅一轮减少 Token；完整证据、异常和统计口径均保留。
+最新优化及真实四场景三轮结果见 `docs/fast-efficiency-v3-comparison.md`：24 次新运行、Fast 12/12 完整验收通过，Standard 9/12，三次人审中止保留为失败；9 对合格性能配对全部更快、4 对减少 Token。复杂 DAG 规划中位 38.60→14.38 秒，但独立验证 Token 中位增加 4.7%，普遍省 Token 与 50% 缩时仍未证实。算法和三版分别保留的试验见 `docs/fast-efficiency-optimization.md`；84 个本地测试脚本及源码指纹见 `docs/fast-efficiency-v3-test-results.json`。
 变慢原因的代码级复现、证据边界及调整优先级见 `docs/fast-diagnostics.md`；可用 `node scripts/diagnose-fast-mode.mjs` 运行不调用供应商模型的离线诊断。
-最终全量 `npm test` 通过 77 个测试文件；原始基线的 72 个测试也已在隔离检出中通过。测试清单、交付引擎指纹与浏览器检查记录见 `docs/fast-test-results.json`。
+后续按请求与任务记录时间线的详细诊断见 `docs/fast-timeline-diagnosis.md`，运行 `npm run diagnose:fast:timeline` 可复现离线消融。设置 `NEUTRINO_DIAGNOSTICS_DIR` 可为新任务启用本地元数据 JSONL；默认关闭，原有指标口径不变，诊断时间线另分审批、验证、压缩等角色。日志不包含原始正文和凭据。
+初次交付的全量 `npm test` 通过 77 个测试文件；原始基线的 72 个测试也已在隔离检出中通过。初次交付清单、引擎指纹与浏览器检查记录见 `docs/fast-test-results.json`。本轮验证层级优化的全量 81 个脚本通过，最后补强后又通过全部 6 个 Fast 回归脚本；结果与执行顺序见 `docs/fast-verification-test-results.json`。进一步规划优化的全量 82 个脚本通过，包含新规划协议回归；最新清单及源码指纹见 `docs/fast-planning-test-results.json`。
 实时指标按规划、各 Worker、验证、最终主智能体整合分别统计输入/输出 Token，另有总量、吞吐、重试、重规划、工具等待和调度耗时。
 主智能体最终审查归入 `integration`。接口内的 `requests` 为逻辑请求轮次；TaskRuntime 还记录实际请求/工具/智能体计数。
 现有 `verification` 指标合并了局部验证和自动审批模型用量，不能直接当作纯正确性验证成本；离线诊断会将两者单独计数。
-本地上下文缓存命中不能当作供应商的计费缓存命中；供应商缓存 Token 为 `null`，表示接口没有提供可验证数据。
+本地上下文缓存命中不能当作供应商的计费缓存命中。旧快照的 `provider_cached_tokens` 仍为 `null` 以保留口径；详细诊断会在原始 usage 提供相应字段时另记缓存输入与推理 Token，并记录覆盖次数。缺失保持未知，不按零计算，也不直接换算费用。
 
 ## 当前实现边界与未完成验收
 
@@ -173,16 +185,18 @@ Linux 验收环境缺少中文字库时，测试可复用宿主机已有字体�
 - 工作区访问范围在同一次 Fast 运行内协调，不是跨进程文件锁或操作系统沙箱。外部程序或另一个会话对同一目录的修改仍需用户协调。
 - 重启恢复保留历史、产物与失败原因，不会恢复已消失的进程或自动重放写入。后续一轮根据实际磁盘状态重新规划。
 - 大型真实项目、开放式答案人工评审、公网多站点检索及统计可靠的 P95 尚未验收；受控样本的自动断言不能替代这些评测。
-- 真实模型对照完成七类；第八类 Fast 因供应商 HTTP 402「余额不足」中断，补充四路并行对照未完成。50% 缩时目标尚未达到，完整数据及关键路径分析见性能报告；需要账户恢复可调用后才能补齐实测。
+- 初始真实模型活动完成七类，第八类曾因供应商 HTTP 402「余额不足」中断；该历史活动状态保留于旧性能报告。后续已可调用同一模型；先后各轮真实结果单独保留，最新四场景三轮报告为 `docs/fast-efficiency-v3-comparison.md`。50% 缩时目标及普遍稳定提速尚未证实。
 
 ## 本次修改范围
 
 - 新增引擎：`src/fast/types.ts`、`pool.ts`、`artifacts.ts`、`scheduler.ts`、`worker.ts`、`engine.ts`。
 - 新增规划约定：`assets/fast-planner.txt`。
+- 后续可选观测：`src/llm/diagnostics.ts`；公共模型、任务和审批入口以及 Fast 资源、调度、产物保存的诊断挂点；默认关闭。
 - 路由、保存和观察：`src/config.ts`、`src/llm/runtime.ts`（仅增加模式审计元数据）、`src/web/session.ts`、`src/web/hub.ts`、`src/web/server.ts`、`src/web/terminalBridge.ts`。
 - 终端会话兼容：`src/screens/chat.ts`、`src/app.ts`。
 - 前端：`web/index.html`、`web/app.js`、`web/style.css`、`web/i18n.js`。
 - 测试/基准：`scripts/test-fast-*.mjs`、`scripts/benchmark-fast-*.mjs`、`scripts/report-fast-benchmark.mjs`、`scripts/test-web-settings.mjs`（发送协议断言增加模式）、`package.json`（新增命令）。
+- 详细诊断：`scripts/diagnose-fast-timeline.mjs`、`scripts/fast-timeline-analysis.mjs`、`scripts/report-fast-timeline.mjs`、`scripts/test-fast-diagnostics.mjs`、`scripts/test-fast-benchmark-budget.mjs`。自动审批并发、验证访问范围等实验性变化仅应用于受控夹具实例。
 - 交付文档和截图：`docs/fast-mode.md`、`docs/fast-performance.md`、`docs/fast-test-results.json`、`docs/fast-live-*.json`、`docs/fast-scheduling-benchmark.json`、`docs/screenshots/fast-mode-*.png`。
 - 使用入口文档：`README.md`、`README-zh.md`、`README-en.md` 和 `web/README.md` 中的 Fast 模式说明与实测链接。
 

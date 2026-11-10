@@ -1,0 +1,14 @@
+{
+  "benchmark_id": "af79d8eb-8bb7-4072-ab0d-1835cecddf9b",
+  "kind": "additional_report_quality_observation_not_a_changed_fixture_oracle",
+  "observations": [
+    {
+      "scenario": "parallel_analysis",
+      "mode": "fast_dag",
+      "round": 1,
+      "artifact": "artifact:north@1",
+      "issue": "The extra report sentence says 90*19=171. The correct product is 1710 (90*1.9=171). The three requested north metrics are 10/90/167 and are independently correct.",
+      "impact": "Requested metric/protocol checks remain recorded separately; do not claim general report quality equivalence or conceal the incorrect extra statement."
+    }
+  ]
+}

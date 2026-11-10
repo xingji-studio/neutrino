@@ -1,6 +1,6 @@
 import type { LLMClient } from "../llm/client.js";
 import { outputAllowance, prepareContext } from "../llm/context.js";
-import { currentTask, type TaskRuntime, type ToolEvidence } from "../llm/runtime.js";
+import { currentTask, TaskControlError, type TaskRuntime, type ToolEvidence } from "../llm/runtime.js";
 import type { ToolDefinition } from "../llm/tools.js";
 import type { ApprovalDecision } from "../llm/approval.js";
 import { FastTaskError } from "./scheduler.js";
@@ -20,7 +20,7 @@ function finishTool(verification: boolean): ToolDefinition {
       evidence: { type: "array", items: { type: "string" } }, assumptions: { type: "array", items: { type: "string" } },
       unresolved: { type: "array", items: { type: "string" }, description: "Only unmet acceptance criteria of THIS task. Use [] when none. Do not list 'none', harmless presentation differences, out-of-scope tasks or future integration." },
       ...(verification ? { verification_passed: { type: "boolean" } } : {}),
-    }, required: ["status", "report", "conclusions", "evidence", "assumptions", "unresolved", ...(verification ? ["verification_passed"] : [])] },
+    }, required: ["status", "report", "unresolved", ...(verification ? ["verification_passed"] : [])] },
   } };
 }
 
@@ -44,14 +44,15 @@ export async function runFastWorker(options: {
   return runtime.child("subagent", options.task, async scope => runtime.withSignal(options.signal, async () => {
     const signal = currentTask()!.signal;
     const records = () => runtime.evidenceFor(scope.runId);
-    const sideEffects = () => records().some(e => !["read_file", "list_files", "web_search", "delegate"].includes(e.name) && e.status !== "denied");
+    const controlRejected = (reason_code: string) => runtime.diagnostics?.emit("control_rejected", { reason_code }, currentTask());
+    const sideEffects = () => records().some(e => !["read_file", "list_files", "web_search", "delegate", "read_task_evidence"].includes(e.name) && e.status !== "denied");
     const messages: Parameters<LLMClient["streamTurn"]>[0] = [{ role: "system", content:
       `${options.system}\n\n${runtime.instructions()}\n\nUse finish_task to conclude. ` +
       "Your scope is this DAG task, not the entire global request. Preserve every global constraint. Status and unresolved refer only to THIS task's acceptance criteria, not to remaining DAG tasks. Use unresolved: [] when this task has no blockers; out-of-scope future work belongs in assumptions, not unresolved. " +
       (options.verification
-        ? "Perform the independent acceptance checks for this task. Reuse actual execution evidence to audit actions already recorded; do not add unrelated directory/history/byte-forensics checks. All necessary source and correctness checks remain mandatory. "
+        ? "Perform the independent acceptance checks for this task against original sources and requested outputs. A scratch helper or verifier script is not a deliverable unless the user requested it. Do not test the tests, inject faults into scratch copies, replay an already evidenced pipeline in a new directory, or add cleanliness/byte-forensics checks unless the original request explicitly requires that coverage or an actual contradictory result requires diagnosis. Required negative/edge tests for the delivered product remain mandatory. Reuse actual execution evidence to audit recorded actions. All necessary source and correctness checks remain mandatory. "
         : "Produce the task output and necessary self-checks. The separate verifier owns independent acceptance checks; do not repeat a full independent/global audit in this worker. Prefer read_file/list_files for inspection, and run_command for necessary computation or tests. ") +
-      "Keep the report factual and concise; cite tool evidence IDs rather than duplicating raw tool output already preserved in the ledger. This does not reduce reasoning or verification requirements. " +
+      "Keep the report factual and concise; include requested findings and cite actual evidence IDs. Do not reproduce raw records, command bodies or long checklists already preserved in the ledger unless the output contract requires them. conclusions/evidence/assumptions are optional when they add no new facts; all actual tool evidence is attached automatically. This does not reduce reasoning or verification requirements. " +
       (options.verification ? "Your result MUST include top-level verification_passed (boolean), unresolved (string[]), and a factual report. Merely writing PASS or verification_passed=true inside prose is insufficient. " : "") +
       "Correct tool/input mistakes in this conversation, preserving actual failed and successful evidence. Do not repeat a denied call unchanged. Never claim that missing checks passed." },
       { role: "user", content: options.task }];
@@ -104,6 +105,7 @@ export async function runFastWorker(options: {
           if (value && typeof value === "object" && !Array.isArray(value)) {
             const output = accept(value as Record<string, unknown>); if (output) return output;
           }
+          controlRejected("missing_control_fields");
           messages.push({ role: "user", content: "The final result is missing required machine-readable fields. Conclude with finish_task using status, report, conclusions, evidence, assumptions, unresolved" +
             (options.verification ? ", and top-level verification_passed: true/false. Keep all original evidence; do not rerun completed writes to fix output formatting." : ". Do not rerun completed writes to fix output formatting.") });
           continue;
@@ -115,13 +117,15 @@ export async function runFastWorker(options: {
             const parsed = JSON.parse(call.arguments);
             if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Arguments must be an object");
             args = parsed;
-          } catch { messages.push({ role: "tool", tool_call_id: call.id, content: "Invalid JSON object; correct the arguments." }); continue; }
+          } catch { controlRejected("invalid_tool_arguments"); messages.push({ role: "tool", tool_call_id: call.id, content: "Invalid JSON object; correct the arguments." }); continue; }
           if (call.name === FINISH) {
             if (calls.length !== 1) {
+              controlRejected("mixed_control_and_tools");
               messages.push({ role: "tool", tool_call_id: call.id, content: "finish_task must be sent alone after all requested operations settle. Complete the other calls, then return the final result." });
               continue;
             }
             const output = accept(args); if (output) return output;
+            controlRejected("contradictory_control_result");
             messages.push({ role: "tool", tool_call_id: call.id, content: "Invalid or contradictory final result. Include a nonempty report, unresolved array and, for verification, a top-level boolean verification_passed. Status and unresolved concern only THIS task's acceptance criteria. If those passed, use completed/true and unresolved: []; put out-of-scope work in assumptions. If a criterion remains unmet, state it and use false. Clarify using existing evidence without replaying writes or omitting necessary checks." });
             continue;
           }
@@ -130,13 +134,19 @@ export async function runFastWorker(options: {
             result = "Tool unavailable in this scope/round; use finish_task or correct the call.";
             runtime.recordTool(call.name, args, result, "denied"); denied = true;
           } else {
-            runtime.assertTool(call.name, args);
-            const decision = await options.approve(call.name, args);
+            let decision: ApprovalDecision;
+            try { runtime.assertTool(call.name, args); decision = await options.approve(call.name, args); }
+            catch (error) {
+              if (!(error instanceof TaskControlError) || error.code !== "workspace_scope") throw error;
+              decision = { approved: false, source: "input", reason: error.message };
+            }
             if (signal.aborted) throw new FastTaskError(String(signal.reason), sideEffects());
             if (decision.approved) result = await runtime.tool(call.name, args, () => options.execute(call.name, args));
             else {
               result = `Not executed: ${decision.reason}. Do not retry a denied call unchanged.`;
-              runtime.recordTool(call.name, args, result, "denied"); denied = true;
+              runtime.recordTool(call.name, args, result, "denied");
+              // An input scope error ran nothing and can be corrected locally. A safety/human refusal remains a blocker.
+              if (decision.source !== "input") denied = true;
             }
           }
           const evidence: ToolEvidence | undefined = records().at(-1);

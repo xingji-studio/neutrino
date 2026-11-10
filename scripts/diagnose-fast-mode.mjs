@@ -35,7 +35,7 @@ try {
   const { estimateTokens } = await import("../dist/llm/context.js");
   const { fastSettings } = await import("../dist/fast/types.js");
   const { loadAgentPrompt, loadSubAgentPrompt } = await import("../dist/config.js");
-  report.engine_sha256 = createHash("sha256").update(["engine", "scheduler", "worker", "pool", "artifacts", "types"]
+  report.engine_sha256 = createHash("sha256").update(["engine", "scheduler", "worker", "pool", "artifacts", "types", "planner"]
     .map(name => fs.readFileSync(new URL(`../dist/fast/${name}.js`, import.meta.url), "utf8")).join("\n")).digest("hex");
   const live = JSON.parse(fs.readFileSync(new URL("../docs/fast-live-benchmark.json", import.meta.url), "utf8"));
   const measured = JSON.parse(fs.readFileSync(new URL("../docs/fast-live-metrics.json", import.meta.url), "utf8"));

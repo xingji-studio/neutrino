@@ -2905,7 +2905,7 @@ function renderPlanCard(source) {
     progress.setAttribute("aria-live", "polite");
     const phase = document.createElement("strong");
     phase.textContent = tr("Fast Mode") + " · " + fastPhaseLabel(fast.phase);
-    const tasks = (fast.tasks || []).filter(task => task.kind === "work");
+    const tasks = (fast.tasks || []).filter(task => !task.verifies);
     const count = document.createElement("p");
     count.textContent = tr("{running} running · {verified}/{total} verified", {
       running: (fast.tasks || []).filter(task => task.status === "RUNNING" || (task.kind === "verification" && task.status === "VERIFYING")).length,

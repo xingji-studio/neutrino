@@ -1,0 +1,21 @@
+{
+  "runtime_files_verified": 22,
+  "source_files_verified": 19,
+  "quality_samples": 24,
+  "quality_by_mode": {
+    "standard": 9,
+    "fast_dag": 12
+  },
+  "reported_task_tokens": 3371760,
+  "unknown_usage_attempts": 0,
+  "total_guard_settled_tokens": 9681397,
+  "configured_keys_checked": 2,
+  "evidence_files_scanned": 598,
+  "credential_leaks": 0,
+  "completed_at_utc": "2026-11-10T14:38:27.410886+00:00",
+  "whitespace_check": {
+    "exit_code": 0,
+    "line_ending_policy": "Existing CRLF recognized with command-local core.whitespace=cr-at-eol; no runtime or prompt bytes changed."
+  },
+  "provider_run_finished": true
+}

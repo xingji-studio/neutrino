@@ -1,0 +1,31 @@
+{
+  "benchmark_id": "60ff56bd-5266-4631-a6f8-37998e312853",
+  "count": 3,
+  "source_log": "/tmp/neutrino-fast-stability-live.log",
+  "entries": [
+    {
+      "line_number": 19,
+      "message": "(node:1295038) MaxListenersExceededWarning: Possible EventTarget memory leak detected. 11 abort listeners added to [AbortSignal]. Use events.setMaxListeners() to increase limit",
+      "following_context": [
+        "(Use `node --trace-warnings ...` to show where the warning was created)",
+        "parallel_analysis [1/3] fast_dag: 107.2s tokens=356501 success=true fixture_correct=true"
+      ]
+    },
+    {
+      "line_number": 24,
+      "message": "(node:1295038) MaxListenersExceededWarning: Possible EventTarget memory leak detected. 11 abort listeners added to [AbortSignal]. Use events.setMaxListeners() to increase limit",
+      "following_context": [
+        "parallel_analysis [2/3] fast_dag: 124.6s tokens=336473 success=true fixture_correct=true",
+        "(node:1295038) MaxListenersExceededWarning: Possible EventTarget memory leak detected. 11 abort listeners added to [AbortSignal]. Use events.setMaxListeners() to increase limit"
+      ]
+    },
+    {
+      "line_number": 26,
+      "message": "(node:1295038) MaxListenersExceededWarning: Possible EventTarget memory leak detected. 11 abort listeners added to [AbortSignal]. Use events.setMaxListeners() to increase limit",
+      "following_context": [
+        "parallel_analysis [3/3] fast_dag: 149.0s tokens=415575 success=true fixture_correct=true",
+        "parallel_analysis [3/3] standard: 147.4s tokens=186426 success=false fixture_correct=true"
+      ]
+    }
+  ]
+}

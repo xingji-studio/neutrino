@@ -1,0 +1,79 @@
+{
+  "engine_run_id": "ae7d14f9-c2f6-4b9a-893d-299ec26160f4",
+  "artifacts": [
+    {
+      "result": "Read the three sources in /tmp/neutrino-fast-live-PgKqxR/multi_source_retrieval/fast_dag/2 — a.txt (\"Alpha population: 12\"), b.txt (\"Beta population: 18\"), c.txt (\"Gamma population: 30\") — cross-checked them (three distinct labels, one integer each, non-negative), summed them to 60 with node, and wrote answer.json containing {\"total\": 60} (numeric). A second, separate node check that re-parsed the integer tokens from all three files and compared them with the file on disk confirmed total=60 and typeof total === \"number\". No credentials or external services were accessed; only the fixture directory was touched.",
+      "conclusions": [
+        "Populations cross-checked: Alpha=12 (a.txt), Beta=18 (b.txt), Gamma=30 (c.txt); all distinct labels and valid integers.",
+        "Sum = 12 + 18 + 30 = 60, computed by node and re-derived independently by a second node check.",
+        "answer.json in the fixture contains exactly one key, total, as a JSON number with value 60."
+      ],
+      "evidence": [
+        "c3592618-df40-438c-bd23-0ed41c631d09",
+        "e0ba2c20-425a-419f-b8b8-35388566a1f3",
+        "b11912e5-da14-424d-a6d8-04d34210bc4f",
+        "4bf69e78-511f-42be-a4f7-e9587bacde91",
+        "61b6dc04-6bca-4cc0-8e02-eb87f2ab4109",
+        "adf39434-e1fa-480b-b984-b7ff2cf70a89",
+        "13b020ae-6047-423f-9665-e1b86ca8c50d",
+        "cf37c731-2596-446d-af3b-fbe8b9d73686",
+        "c3592618-df40-438c-bd23-0ed41c631d09 / e0ba2c20-425a-419f-b8b8-35388566a1f3: fixture listing shows only a.txt (21 B), b.txt (20 B), c.txt (21 B) in /tmp/neutrino-fast-live-PgKqxR/multi_source_retrieval/fast_dag/2.",
+        "b11912e5-da14-424d-a6d8-04d34210bc4f: a.txt content = 'Alpha population: 12'.",
+        "4bf69e78-511f-42be-a4f7-e9587bacde91: b.txt content = 'Beta population: 18'.",
+        "61b6dc04-6bca-4cc0-8e02-eb87f2ab4109: c.txt content = 'Gamma population: 30'.",
+        "13b020ae-6047-423f-9665-e1b86ca8c50d: `node compute.js` printed 'SOURCE /tmp/neutrino-fast-live-PgKqxR/multi_source_retrieval/fast_dag/2/a.txt -> label=Alpha population=12', same for b.txt/Beta/18 and c.txt/Gamma/30, then 'SUCCESS total=60 written to /tmp/neutrino-fast-live-PgKqxR/multi_source_retrieval/fast_dag/2/answer.json'.",
+        "cf37c731-2596-446d-af3b-fbe8b9d73686: `cat answer.json` printed '{ \"total\": 60 }'; the independent node check printed 'independent: [{\"f\":\"a.txt\",\"v\":12},{\"f\":\"b.txt\",\"v\":18},{\"f\":\"c.txt\",\"v\":30}] sum=60', 'answer.json: {\"total\":60} total type=number', 'VERIFY OK total=60 matches independent sum of a.txt,b.txt,c.txt'."
+      ],
+      "assumptions": [
+        "Source paths cited: /tmp/neutrino-fast-live-PgKqxR/multi_source_retrieval/fast_dag/2/a.txt, .../b.txt, .../c.txt (the only population sources in the fixture).",
+        "'Cross-check' was satisfied by verifying one parseable, non-negative integer population per file with three distinct labels plus an independent second summation.",
+        "compute.js is a helper left in the fixture so the calculation is reproducible; answer.json is the only required output."
+      ],
+      "unresolved": [],
+      "side_effects": true,
+      "task_id": "main",
+      "version": 1,
+      "input_versions": {
+        "request": "59ffc1b3fed5dc3fee4461c9c7e85121eac61a75b989c15be6f3a908f356b2c6",
+        "history": "3953f2a16d29c6f38bfe59173159d9ad6270ad8c82f4dea8b6fcddf21c7c55cf"
+      },
+      "verification": "verified",
+      "created_at": "2026-11-10T11:54:40.571Z"
+    },
+    {
+      "result": "Independent verification passed. In /tmp/neutrino-fast-live-PgKqxR/multi_source_retrieval/fast_dag/2 I read the three original sources directly: a.txt = \"Alpha population: 12\", b.txt = \"Beta population: 18\", c.txt = \"Gamma population: 30\" (evidence d5d810cb-7b35-4b64-ab09-39b271029fe5), and answer.json = { \"total\": 60 }. I then ran my own node check that re-parsed each file with a strict pattern, rejected non-integer/negative values, required three distinct labels, summed independently (12+18+30=60), and validated answer.json's structure: exactly one key \"total\", typeof number, finite, equal to my independent sum — output \"labels distinct: 3 sum: 60 ... VERIFY PASS total=60\" (evidence bcc35dda-d0ff-43e7-8717-88bdea03b3d8). Finally I re-ran the fixture's node compute.js, which reproduced \"SUCCESS total=60\" and left answer.json at { \"total\": 60 }, re-parsed as number 60 (evidence c2c750aa-b402-4631-932a-82e9666b8239), confirming reproducibility. Only node was used, no Python, no credentials or external services, and only the fixture directory was touched.",
+      "conclusions": [
+        "All three sources exist and were read in the fixture: a.txt (Alpha population: 12), b.txt (Beta population: 18), c.txt (Gamma population: 30).",
+        "Populations cross-checked independently: three distinct labels, one non-negative integer per file, bytes 21/20/21 consistent with contents.",
+        "Sum 12 + 18 + 30 = 60 recomputed independently with node, matching the recorded total.",
+        "answer.json contains exactly one key \"total\" with JSON number value 60 (typeof number, finite) — meets the output contract.",
+        "Re-running compute.js reproduced total=60 deterministically; no Python, credentials or external services were used."
+      ],
+      "evidence": [
+        "d5d810cb-7b35-4b64-ab09-39b271029fe5",
+        "bcc35dda-d0ff-43e7-8717-88bdea03b3d8",
+        "c2c750aa-b402-4631-932a-82e9666b8239",
+        "d5d810cb-7b35-4b64-ab09-39b271029fe5: ls -la + cat of the fixture showed a.txt 'Alpha population: 12', b.txt 'Beta population: 18', c.txt 'Gamma population: 30', answer.json '{ \"total\": 60 }'.",
+        "bcc35dda-d0ff-43e7-8717-88bdea03b3d8: own node check printed 'labels distinct: 3 sum: 60', 'answer.json keys: [\"total\"] total: 60 typeof: number', 'VERIFY PASS total=60'.",
+        "c2c750aa-b402-4631-932a-82e9666b8239: `node compute.js` printed the three SOURCE lines with 12/18/30 and 'SUCCESS total=60', and answer.json re-read as total 60 number.",
+        "Source paths cited: /tmp/neutrino-fast-live-PgKqxR/multi_source_retrieval/fast_dag/2/a.txt, /tmp/neutrino-fast-live-PgKqxR/multi_source_retrieval/fast_dag/2/b.txt, /tmp/neutrino-fast-live-PgKqxR/multi_source_retrieval/fast_dag/2/c.txt."
+      ],
+      "assumptions": [
+        "'Cross-check' means one parseable non-negative integer population per named source with distinct labels plus an independent second summation, which was performed.",
+        "compute.js is an auxiliary reproducible script; answer.json is the required deliverable."
+      ],
+      "unresolved": [],
+      "side_effects": true,
+      "verification_passed": true,
+      "task_id": "main.verify",
+      "version": 1,
+      "input_versions": {
+        "request": "59ffc1b3fed5dc3fee4461c9c7e85121eac61a75b989c15be6f3a908f356b2c6",
+        "history": "3953f2a16d29c6f38bfe59173159d9ad6270ad8c82f4dea8b6fcddf21c7c55cf",
+        "main": 1
+      },
+      "verification": "verified",
+      "created_at": "2026-11-10T11:54:55.856Z"
+    }
+  ]
+}

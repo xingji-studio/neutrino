@@ -1,0 +1,34 @@
+{
+  "benchmark_id": "965a0e5c-6d7f-4be1-a495-f2398f3f3446",
+  "finished_at_utc": "2026-11-10T14:34:24.525765+00:00",
+  "runtime_files_verified": 22,
+  "source_files_verified": 19,
+  "campaign_usage": {
+    "settled_tokens_including_unknown_reservations": 3371830,
+    "held_tokens": 0,
+    "stopped": false,
+    "requests_rejected_before_dispatch": 0
+  },
+  "model": {
+    "provider": "DeepSeek",
+    "name": "deepseek-flash",
+    "intensity": "Max",
+    "available_inference_slots": 4
+  },
+  "fresh_attempts": 24,
+  "reused_or_replaced": 0,
+  "previous_guard_settled_tokens": 6309567,
+  "total_work_guard_settled_tokens": 9681397,
+  "total_cap": 10500000,
+  "independent_audit": {
+    "command": "node scripts/audit-fast-live.mjs --input docs/fast-efficiency-v3-benchmark.json --reviews docs/fast-efficiency-v3-protocol-review.json --output docs/fast-efficiency-v3-quality.json",
+    "exit_code": 1,
+    "expected_reason": "All samples retained: three actual Standard human-approval interruptions fail full acceptance. The completed 21 samples pass all original functional/protocol/scope checks.",
+    "quality_passed": 21,
+    "fast_quality_passed": 12,
+    "standard_quality_passed": 9,
+    "pending_manual_checks": 0,
+    "hash_bound_reviewed_samples": 24,
+    "protocol_and_scope_judgments": 42
+  }
+}

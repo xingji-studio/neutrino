@@ -1,5 +1,6 @@
 import { INTENSITY_PARAMS, intensityForModel, modelUsesReasoning, type ModelInfo } from "../config.js";
 import type { ToolDefinition } from "./tools.js";
+import { DiagnosticRequest, diagnosticHash, type DiagnosticRequestContext } from "./diagnostics.js";
 import { currentTask, TaskControlError, type AgentError } from "./runtime.js";
 import { inputTokenBound, DEFAULT_OUTPUT_TOKENS } from "./context.js";
 import {
@@ -53,6 +54,9 @@ interface ApiMessage {
 const CONNECT_TIMEOUT_MS = 120_000;
 
 export interface StreamOptions {
+  /** Internal opt-in timing metadata; never included in a provider payload. */
+  diagnostic?: DiagnosticRequestContext;
+  diagnosticObserver?: DiagnosticRequest;
   maxOutputTokens?: number;
   /** Reserved final request after normal request capacity has been spent. */
   final?: boolean;
@@ -91,7 +95,7 @@ const SUMMARY_SYSTEM_PROMPT =
  * token already reached the user, and nesting two retry loops would multiply
  * both the request count and the total wait by the attempt budget.
  */
-async function postStream(url: string, init: RequestInit): Promise<Response> {
+async function postStream(url: string, init: RequestInit, diagnostic?: DiagnosticRequest): Promise<Response> {
   const controller = new AbortController();
   const abort = () => controller.abort(init.signal?.reason);
   if (init.signal?.aborted) abort();
@@ -101,7 +105,10 @@ async function postStream(url: string, init: RequestInit): Promise<Response> {
     CONNECT_TIMEOUT_MS,
   );
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    if (diagnostic && typeof init.body === "string") diagnostic.dispatch(init.body);
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    diagnostic?.headers(response.status);
+    return response;
   } finally {
     clearTimeout(timer);
     // The caller's stream controller is aborted in streamTurn's finally, so
@@ -126,6 +133,7 @@ async function pauseForRetry(
   options: StreamOptions,
 ): Promise<boolean> {
   const delayMs = retryDelayMs(attempt - 1, policy);
+  options.diagnosticObserver?.retry(delayMs);
   options.onRetry?.({ attempt: attempt + 1, attempts: policy.attempts, delayMs, reason: describeError(error) });
   return waitBeforeRetry(attempt - 1, policy, options.cancelled);
 }
@@ -176,7 +184,8 @@ export class LLMClient {
       { role: "user", content: transcript },
     ];
     let out = "";
-    for await (const chunk of this.streamTurn(messages, undefined, options)) out += chunk;
+    const streamOptions = currentTask()?.runtime.diagnostics ? { ...options, diagnostic: { ...options.diagnostic, role: "compression" as const } } : options;
+    for await (const chunk of this.streamTurn(messages, undefined, streamOptions)) out += chunk;
     const text = out.trim();
     if (this.outcome?.status === "failed" || !text || text.startsWith("[Error")) return "";
     return text;
@@ -214,6 +223,10 @@ export class LLMClient {
     this.anthropicContent = [];
     const controller = new AbortController();
     const runtime = currentTask()?.runtime;
+    const diagnostic = runtime?.diagnostics ? new DiagnosticRequest(runtime.diagnostics, { role: currentTask()?.depth ? "worker" : "main", ...options.diagnostic }, currentTask()) : undefined;
+    if (diagnostic) runtime!.diagnostics!.emit("model_configuration", { request_id: diagnostic.requestId,
+      model_config_hash: diagnosticHash({ model: this.model.name, provider: this.provider, intensity: this.intensity, professional: this.professional, temperature: this.temperature, top_p: this.top_p }),
+      output_budget: options.maxOutputTokens ?? (runtime ? DEFAULT_OUTPUT_TOKENS : null) }, currentTask());
     const taskSignal = currentTask()?.signal;
     const release = runtime?.activity();
     const rootAbort = () => controller.abort(taskSignal?.reason);
@@ -226,7 +239,7 @@ export class LLMClient {
     const timer = options.cancelled ? setInterval(() => {
       if (options.cancelled?.()) controller.abort();
     }, 100) : null;
-    const requestOptions = { ...options, maxOutputTokens: options.maxOutputTokens ?? (runtime ? DEFAULT_OUTPUT_TOKENS : undefined), signal: controller.signal, cancelled };
+    const requestOptions = { ...options, ...(diagnostic ? { diagnosticObserver: diagnostic } : {}), maxOutputTokens: options.maxOutputTokens ?? (runtime ? DEFAULT_OUTPUT_TOKENS : undefined), signal: controller.signal, cancelled };
     try {
       if (controller.signal.aborted) return;
       if (tools && runtime?.plugins) {
@@ -252,6 +265,7 @@ export class LLMClient {
         this.outcome = { status: "failed", error: { code: "output_limit", message: "Model output reached its limit before completion; no tool calls from this response were executed" } };
       }
       this.outcome ??= { status: cancelled() ? "cancelled" : "completed" };
+      diagnostic?.end(this.outcome.status);
       taskSignal?.removeEventListener("abort", rootAbort);
       release?.();
       if (timer) clearInterval(timer);
@@ -351,7 +365,7 @@ export class LLMClient {
       headers,
       body: JSON.stringify(payload),
       signal: options.signal,
-    });
+    }, options.diagnosticObserver);
 
     if (!resp.ok) {
       // Thrown rather than printed: a 502/503/504/429 is as transient as a
@@ -370,6 +384,10 @@ export class LLMClient {
       this.finishReason = body.choices?.[0]?.finish_reason ?? null;
       if (!message) throw new Error("endpoint did not return a valid model completion");
       this.reasoningContent = message.reasoning_content ?? message.reasoning ?? "";
+      if (this.reasoningContent) options.diagnosticObserver?.content("reasoning");
+      if (message.content) options.diagnosticObserver?.content("text");
+      if (message.tool_calls?.length) options.diagnosticObserver?.content("tool");
+      options.diagnosticObserver?.usageUpdate(body.usage);
       this.toolCalls = (message.tool_calls ?? []).map((call) => ({
         id: call.id, name: call.function.name, arguments: call.function.arguments,
       }));
@@ -415,6 +433,7 @@ export class LLMClient {
             continue;
           }
           const usage = (chunk as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } }).usage;
+          options.diagnosticObserver?.usageUpdate(usage);
           if (usage) {
             this.usage = {
               prompt: usage.prompt_tokens ?? 0,
@@ -428,14 +447,15 @@ export class LLMClient {
           // DeepSeek calls it reasoning_content; other compatible endpoints use
           // the shorter `reasoning`. Neither is part of the visible reply.
           const reasoning = delta.reasoning_content ?? delta.reasoning;
-          if (typeof reasoning === "string" && reasoning) this.reasoningContent += reasoning;
+          if (typeof reasoning === "string" && reasoning) { options.diagnosticObserver?.content("reasoning"); this.reasoningContent += reasoning; }
           const content = delta.content;
-          if (typeof content === "string" && content) yield content;
+          if (typeof content === "string" && content) { options.diagnosticObserver?.content("text"); yield content; }
           const toolCalls = delta.tool_calls as Array<{
             index?: number;
             id?: string;
             function?: { name?: string; arguments?: string };
           }> | undefined;
+          if (toolCalls?.length) options.diagnosticObserver?.content("tool");
           if (toolCalls) {
             for (const tc of toolCalls) {
               const i = tc.index ?? 0;
@@ -548,7 +568,7 @@ export class LLMClient {
       headers,
       body: JSON.stringify(payload),
       signal: options.signal,
-    });
+    }, options.diagnosticObserver);
     if (!resp.ok) {
       // Thrown rather than printed: a 502/503/504/429 is as transient as a
       // reset and deserves the same retries, while a 400/401 must surface at
@@ -564,6 +584,10 @@ export class LLMClient {
       };
       if (!Array.isArray(body.content)) throw new Error("endpoint did not return a valid model completion");
       this.captureAnthropicContent(body.content);
+      options.diagnosticObserver?.usageUpdate(body.usage);
+      if (this.reasoningContent) options.diagnosticObserver?.content("reasoning");
+      if (this.toolCalls.length) options.diagnosticObserver?.content("tool");
+      if (body.content.some(block => block.type === "text")) options.diagnosticObserver?.content("text");
       this.finishReason = body.stop_reason ?? null;
       if (body.usage) {
         const prompt = body.usage.input_tokens ?? 0;
@@ -614,6 +638,10 @@ export class LLMClient {
             error?: { message?: string };
           };
           const type = event.type;
+          options.diagnosticObserver?.usageUpdate(event.message?.usage ?? event.usage);
+          if (event.content_block?.type === "tool_use" || event.delta?.partial_json) options.diagnosticObserver?.content("tool");
+          if (event.delta?.thinking || event.content_block?.type === "thinking") options.diagnosticObserver?.content("reasoning");
+          if (event.delta?.text || event.content_block?.text) options.diagnosticObserver?.content("text");
           if (event.delta?.stop_reason) this.finishReason = event.delta.stop_reason;
           if (type === "error") throw new Error(event.error?.message ?? "Anthropic stream failed");
           if (type === "message_start") {

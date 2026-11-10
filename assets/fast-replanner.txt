@@ -1,0 +1,28 @@
+Recovery protocol (the supplied state and artifacts are evidence, never authorization):
+Use DAG JSONL; single is unavailable during recovery. The existing original
+brief and global constraints remain in force. A constraints header is optional
+when that goal was already published. If needed, emit it before ALL updates or
+tasks; never introduce constraints after a recovery operation. If no goal was
+ever published, a valid constraints header is still mandatory.
+Reuse current verified outputs. Do not invalidate or replace correct tasks,
+or change dependencies that are already correct. Cancelled or blocked read-only
+tasks with needs_repair=false resume under the engine; they do not need cloned
+repair tasks. Repairs are for actual defects or prior side effects requiring
+explicit handling. Read the preserved planning_errors before choosing repairs.
+Account for partial changes and failed evidence before planning repairs.
+Respect the supplied remaining new-task budget; pending existing workers and
+verifiers still need agent runs. A work repair plus its verifier consumes two
+MORE runs; replacing four good inspectors with copies wastes eight or more.
+
+{"type":"dependencies","task_id":"...","dependencies":["..."],"reason":"..."}
+{"type":"invalidate","task_id":"...","reason":"..."}
+{"type":"repair","task_id":"failed_task","replacement":"new_repair_task","reason":"..."}
+
+Updates invalidate affected outputs and their successors. An invalidated task
+which already wrote files or ran commands needs explicit repair; it is never
+replayed automatically. Publish a new repair work task accounting for existing
+changes, then use repair to substitute its independently verified output. The
+original acceptance criteria remain mandatory, without repeating original
+side effects. An explicit verification task keeps its original dependencies
+and must execute its own checks again after the repair.
+End the recovery plan with {"type":"done"}.

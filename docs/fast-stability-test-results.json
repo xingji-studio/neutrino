@@ -1,0 +1,46 @@
+{
+  "benchmark_id": "60ff56bd-5266-4631-a6f8-37998e312853",
+  "production_changes_this_campaign": false,
+  "real_model_runs": 24,
+  "real_model_run_replacements": 0,
+  "preflight": {
+    "commands": [
+      "npm run build",
+      "node scripts/test-fast-benchmark-budget.mjs",
+      "node scripts/test-fast-stability.mjs"
+    ],
+    "status": "passed",
+    "source": "docs/fast-stability-plan.json"
+  },
+  "final_local_measurement_regression": {
+    "command": "node scripts/test-fast-stability.mjs",
+    "exit_code": 0,
+    "stdout": "PASS stability measurement: 24 artifact audits, fixed oracles, read-only inspectors, hash-bound protocol reviews, paired spread/wins, failures and unknown usage; no model calls",
+    "network_or_model_calls": 0,
+    "environment_note": "Run with authorized external Node subprocesses. Restricted sandbox child stdout was empty; that environment-only attempt was not used to classify model quality."
+  },
+  "independent_real_artifact_audit": {
+    "exit_code": 1,
+    "expected_exit_for_failed_samples": true,
+    "samples": 24,
+    "passed_complete_quality": 20,
+    "pending_manual_checks": 0,
+    "original_code_assertions_and_16_formula_cases": "passed in all six code samples"
+  },
+  "final_summary_consistency": "passed: pairing, medians, trace token reconciliation, trace coverage, counterbalance, fixed engine fingerprint and cleanup",
+  "whitespace_check": "passed with cr-at-eol for existing CRLF files",
+  "configured_key_scan": {
+    "files": 212,
+    "matches": 0
+  },
+  "full_suite_this_campaign": "not rerun; previous 82-script full suite belongs to planning optimization",
+  "script_sha256": {
+    "scripts/benchmark-fast-live.mjs": "53b10ce640dacd590e14d5d80fc308b0482cdeb5b559dbb331959ccadc30b4ac",
+    "scripts/fast-live-cases.mjs": "3b4ff19c0e02640bbd1c0e76ed5ec3f650662437b00d8df698a72fabfa86db57",
+    "scripts/audit-fast-live.mjs": "a290dd95e81e2ff5b8b0bafb9ac5c9e9a2cd722618d394dd890d91df83d0fdab",
+    "scripts/fast-stability-analysis.mjs": "fd8b72709cd73bf23a7724d1a0300dec0f5d254fa13f8de74b31985e1123646b",
+    "scripts/report-fast-stability.mjs": "b742389059abd6b8a4ef1c50b31d958f3113991100190ad4354fb90a2d226b1f",
+    "scripts/test-fast-stability.mjs": "579c3ee2e5e14a3075981537e53ffb5e904caa02953852671492d1b2ab12c564",
+    "scripts/test-fast-benchmark-budget.mjs": "3e9fc4771b71a6b921a1126b5265f54e4c053fb9d6994d2d6955fc8da75a9c2e"
+  }
+}

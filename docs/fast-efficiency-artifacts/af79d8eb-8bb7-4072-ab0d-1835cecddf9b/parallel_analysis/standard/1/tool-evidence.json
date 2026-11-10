@@ -1,0 +1,14 @@
+{
+  "original_cwd": "/tmp/neutrino-fast-live-Kjebr5/parallel_analysis/standard/1",
+  "root_run_id": "221f963b-fe73-4a2b-8b79-60905c21b6d2",
+  "scopes": [
+    {
+      "run_id": "221f963b-fe73-4a2b-8b79-60905c21b6d2",
+      "role": "main",
+      "diagnostic_role": "main",
+      "read_only": false,
+      "workspace_only": true
+    }
+  ],
+  "tools": []
+}

@@ -1,0 +1,38 @@
+{
+  "captured_at_utc": "2026-11-10T13:17:37.559127+00:00",
+  "benchmark_id": "af79d8eb-8bb7-4072-ab0d-1835cecddf9b",
+  "state": "incomplete",
+  "runtime_fingerprints_verified_before_correction": 22,
+  "backup_directory": "/tmp/neutrino-efficiency-v1-snapshot-7t6s8pcv",
+  "source_sha256": {
+    "src/llm/workspace.ts": "66a830d59f19267b614423f0b18a8346ad2288c64e6ceb2694c5906438c3f6bb",
+    "src/fast/evidence.ts": "2da7944a0df9eb727fc1d993ed8af0715ed11f6c105ba82768f78706fb060294",
+    "src/fast/engine.ts": "bd9b5422d2026acbb90b325ff1436c41f36d31eac0d9594e99a5acc0f8de75c6",
+    "scripts/test-fast-efficiency.mjs": "ed53e6dfd941810113b482b9e1a97f39b50a277b43e11f6281cc88acf836b34e",
+    "scripts/audit-fast-live.mjs": "a290dd95e81e2ff5b8b0bafb9ac5c9e9a2cd722618d394dd890d91df83d0fdab",
+    "scripts/report-fast-efficiency.mjs": "d08648a380f6c6cec9246659cea1207e914e46f49890a65098b10d945cf62b3f"
+  },
+  "observed_runs": 21,
+  "successful_runs": 19,
+  "termination": "Provider HTTP 402 / Insufficient Balance stopped the harness automatically; no manual kill was sent.",
+  "known_implementation_faults": [
+    "Workspace preflight treated log separators and safe path-concatenation suffixes as standalone absolute paths, causing five false rejections in the first Fast parallel sample.",
+    "Exact evidence queries from the integration verifier omitted legitimate transitive input records, causing a failed evidence lookup and extra work.",
+    "Always using evidence indirection added requests for small source ledgers."
+  ],
+  "campaign_usage": {
+    "settled_tokens_including_unknown_reservations": 2678967,
+    "held_tokens": 0,
+    "stopped": false,
+    "requests_rejected_before_dispatch": 0
+  },
+  "remaining_total_campaign_token_cap": 5321033,
+  "v2_policy": "Keep this entire trial separate. Fix faults, rerun full local tests, and run a complete fresh four-scenario/three-round campaign only when the same provider/model is available; no mixing or replacement of v1 observations.",
+  "false_scope_denial_ids": [
+    "475b5887-b2f1-4990-8ee6-186c2dd172af",
+    "553c799d-7068-4615-84b5-6b004a2335d2",
+    "6635a775-5a14-4b33-8566-d3d6b19de560",
+    "3476d40a-6236-4dc3-b775-ac98892918f9",
+    "716b5e4e-26f9-4ca2-a1d6-47e9be44364f"
+  ]
+}

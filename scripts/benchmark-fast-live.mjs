@@ -7,19 +7,26 @@ import { performance } from "node:perf_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import { ProxyAgent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
 import ts from "typescript";
+import { analyzeTimeline } from "./fast-timeline-analysis.mjs";
+import { fastLiveCases } from "./fast-live-cases.mjs";
 const argument = name => { const at = process.argv.indexOf(name); return at >= 0 ? process.argv[at + 1] : undefined; };
 const sourceHome = argument("--home") || os.homedir();
 const repetitions = Number(argument("--runs") || 1);
 const requestedTimeout = Number(argument("--timeout-ms") || 30 * 60_000);
+const campaignTokenCap = argument("--token-cap") ? Number(argument("--token-cap")) : Infinity;
+if (campaignTokenCap !== Infinity && (!Number.isSafeInteger(campaignTokenCap) || campaignTokenCap < 1)) throw new Error("token-cap must be a positive integer");
+const traceDirectory = argument("--trace-dir") ? path.resolve(argument("--trace-dir")) : null;
+const campaignUsage = { settled_tokens_including_unknown_reservations: 0, held_tokens: 0, stopped: false, requests_rejected_before_dispatch: 0 };
 if (!Number.isSafeInteger(repetitions) || repetitions < 1 || !Number.isSafeInteger(requestedTimeout) || requestedTimeout < 1) throw new Error("runs and timeout-ms must be positive integers");
 const filter = argument("--cases")?.split(",");
 const baseline = argument("--reuse-standard") ? JSON.parse(fs.readFileSync(path.resolve(argument("--reuse-standard")), "utf8")) : null;
 const target = path.resolve(argument("--output") || "docs/fast-live-benchmark.json");
+const artifactDirectory = argument("--artifact-dir") ? path.resolve(argument("--artifact-dir")) : null;
 const approvalDirectory = argument("--approval-dir") ? path.resolve(argument("--approval-dir")) : null;
 if (approvalDirectory) fs.mkdirSync(approvalDirectory, { recursive: true });
 const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "neutrino-fast-live-"));
 const originalHomedir = os.homedir;
-const priorEnvironment = { NEUTRINO_HOME: process.env.NEUTRINO_HOME, NEUTRINO_PLUGIN_HOME: process.env.NEUTRINO_PLUGIN_HOME };
+const priorEnvironment = { NEUTRINO_HOME: process.env.NEUTRINO_HOME, NEUTRINO_PLUGIN_HOME: process.env.NEUTRINO_PLUGIN_HOME, NEUTRINO_DIAGNOSTICS_DIR: process.env.NEUTRINO_DIAGNOSTICS_DIR };
 const originalDispatcher = getGlobalDispatcher();
 const proxy = process.env.NEUTRINO_BENCHMARK_PROXY || process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
 if (proxy) setGlobalDispatcher(new ProxyAgent(proxy));
@@ -27,43 +34,29 @@ const report = { kind: "live_model_end_to_end", state: "running", repetitions, s
   note: "Identical model, intensity, fixture requirements and verification for both modes. Correctness uses exact fixture oracles; broader answer quality requires human review. One sample does not establish population P95.",
   scenarios: [], untested: ["Human-reviewed open-ended answer quality", "Provider cache billing (not exposed by current client)"] };
 report.benchmark_id = randomUUID();
-report.engine_sha256 = createHash("sha256").update(["engine", "scheduler", "worker", "pool", "artifacts", "types"]
+report.engine_sha256 = createHash("sha256").update(["engine", "scheduler", "worker", "pool", "artifacts", "types", "planner"]
   .map(name => fs.readFileSync(new URL(`../dist/fast/${name}.js`, import.meta.url), "utf8")).join("\n")).digest("hex");
-let originalStream, originalTool, TaskRuntime, LLMClient, sessions = [];
+let originalStream, originalTool, originalRequest, originalFinish, TaskRuntime, TaskControlError, currentTask, LLMClient, sessions = [];
+const finishedTurns = new WeakMap();
+const sampledRuntimes = [];
+const sampleScopes = new WeakMap();
+report.execution_order = [];
+const awaitTurnFinish = runtime => {
+  if (!runtime) return Promise.resolve();
+  let completion = finishedTurns.get(runtime);
+  if (!completion) { let resolve; const promise = new Promise(done => { resolve = done; }); completion = { promise, resolve }; finishedTurns.set(runtime, completion); }
+  return completion.promise;
+};
 let interrupted = false;
 const stop = () => { interrupted = true; for (const session of sessions) session.livePause(); };
 process.on("SIGINT", stop); process.on("SIGTERM", stop);
-const cases = [
-  { name: "multi_source_retrieval", files: { "a.txt": "Alpha population: 12\n", "b.txt": "Beta population: 18\n", "c.txt": "Gamma population: 30\n" },
-    prompt: "Read all three original sources a.txt, b.txt and c.txt. Cross-check each population and calculate their sum. Write answer.json with the numeric key total. Cite the three source paths in your final answer.", expected: { total: 60 } },
-  { name: "multi_dimension_comparison", files: { "products.json": JSON.stringify([{ name: "A", cost: 10, latency: 7 }, { name: "B", cost: 13, latency: 4 }, { name: "C", cost: 9, latency: 8 }]) },
-    prompt: "Compare every product in products.json by cost, latency, and score=cost+2*latency. Independently verify each score. Write answer.json containing scores (an object keyed by product name) and winner (the lowest-score product name).", expected: { scores: { A: 24, B: 21, C: 25 }, winner: "B" } },
-  { name: "complex_logic", files: { "constraints.txt": "Integers a,b,c are positive, a<b<c, a+b+c=12, a*b=8. Find the unique solution.\n" },
-    prompt: "Read constraints.txt. Derive the unique solution and verify uniqueness by enumerating all positive integer triples satisfying every constraint. Write answer.json with numeric keys a, b, c and solutions (the count of valid triples).", expected: { a: 2, b: 4, c: 6, solutions: 1 } },
-  { name: "multi_module_code", files: { "package.json": "{\"type\":\"module\"}", "test.mjs": "import assert from 'node:assert/strict'; import {tax} from './tax.mjs'; import {shipping} from './shipping.mjs'; assert.equal(tax(100),20); assert.equal(shipping(2),7); assert.equal(tax(0),0); assert.equal(shipping(0),3); console.log('PASS');" },
-    prompt: "Implement tax.mjs exporting tax(amount)=amount*0.2 and shipping.mjs exporting shipping(weight)=3+2*weight. Run node test.mjs and ensure all tests pass. Write answer.json with numeric keys tax100 and shipping2 from the implemented functions. Keep the two modules independent.", expected: { tax100: 20, shipping2: 7 }, command: "test.mjs" },
-  { name: "multi_agent_collaboration", files: { "east.txt": "East: 3, 5, 7\n", "west.txt": "West: 2, 4, 6\n" },
-    prompt: "Use at least two independent sub-agents or scheduled Agent workers to inspect east.txt and west.txt separately. Verify the reports against both original files, integrate them, and write answer.json containing east and west (their sums) and combined (the overall sum).", expected: { east: 15, west: 12, combined: 27 } },
-  { name: "long_tool_sequence", files: { "input.json": "[1,2,3,4,5]" },
-    prompt: "Read input.json, write doubled.json containing the doubled values, read that saved file and write evens.json with values greater than 5, then read evens.json and write answer.json with values (that saved array) and sum. Verify every saved intermediate file and the final sum.", expected: { values: [6, 8, 10], sum: 24 } },
-  { name: "iterative_correction", files: { "package.json": "{\"type\":\"module\"}", "math.mjs": "export const sum = xs => xs.reduce((a,b)=>a-b,0); export const mean = xs => sum(xs)/(xs.length+1);", "test.mjs": "import assert from 'node:assert/strict'; import {sum,mean} from './math.mjs'; assert.equal(sum([2,4,6]),12); assert.equal(mean([2,4,6]),4); assert.equal(sum([]),0); console.log('PASS');" },
-    prompt: "Run node test.mjs to observe the real initial failure. Diagnose and fix all math.mjs bugs without modifying tests. Rerun the tests until every assertion passes. Write answer.json with sum and mean for [2,4,6] from the implemented functions.", expected: { sum: 12, mean: 4 }, command: "test.mjs" },
-  { name: "strong_sequential_dependencies", files: { "seed.txt": "3" },
-    prompt: "Execute this strict file pipeline in order: read seed.txt, add 2 and write stage1.txt; read stage1.txt, square its value and write stage2.txt; read stage2.txt, subtract 4 and write stage3.txt; read and verify every stage, then write answer.json containing the numeric keys stage1, stage2 and stage3 from the saved files. Never calculate a downstream stage before its required file exists.", expected: { stage1: 5, stage2: 25, stage3: 21 } },
-];
-const regions = ["north", "south", "east", "west"];
-const parallelData = Object.fromEntries(regions.map((region, index) => [region,
-  Array.from({ length: 10 }, (_, row) => ({ id: row + 1, units: ((index + 3) * (row + 1)) % 17 + 1, weight: row % 3 + 1 }))]));
-const expectedRegions = Object.fromEntries(regions.map(region => [region, { count: parallelData[region].length,
-  units: parallelData[region].reduce((sum, row) => sum + row.units, 0),
-  weighted: parallelData[region].reduce((sum, row) => sum + row.units * row.weight, 0) }]));
-cases.push({ name: "parallel_analysis", minimumInspectors: 4,
-  files: Object.fromEntries(regions.map(region => [`${region}.json`, JSON.stringify(parallelData[region])])),
-  prompt: "Use at least four independent read-only Agent inspectors, one for each of north.json, south.json, east.json and west.json. Each inspector must read only its own source using read_file/list_files (no shell or edits), report its count, sum of units, and sum of units*weight with original evidence. Inspectors may reason about these values; the coordinator must independently recompute ALL four original datasets with Node and verify the inspectors' results before integration. Write answer.json with regions (an object keyed by north/south/east/west; each entry has count, units, weighted), grand_units, and grand_weighted. Do not build a reusable framework or test unrelated inputs; verify all requested values and source completeness.",
-  common: "Work only inside this fixture. Read-only inspectors must preserve their restricted scope; the coordinator must use Node for deterministic global verification and output. Preserve all original requirements. Do not access credentials or external services from tools.",
-  expected: { regions: expectedRegions, grand_units: regions.reduce((sum, name) => sum + expectedRegions[name].units, 0),
-    grand_weighted: regions.reduce((sum, name) => sum + expectedRegions[name].weighted, 0) } });
-const persist = () => { fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, JSON.stringify(report, null, 2) + "\n"); };
+const cases = fastLiveCases();
+const revisionFiles = ["dist/fast/engine.js", "dist/fast/planner.js", "dist/fast/evidence.js", "dist/fast/scheduler.js", "dist/fast/worker.js", "dist/fast/pool.js", "dist/fast/artifacts.js", "dist/fast/types.js", "dist/llm/client.js", "dist/llm/runtime.js", "dist/llm/workspace.js", "dist/llm/tools.js", "dist/llm/approval.js", "dist/llm/risk.js", "dist/web/session.js", "assets/fast-planner.txt", "assets/fast-replanner.txt", "assets/prompt.txt", "assets/planner.txt", "assets/subagent.txt", "scripts/benchmark-fast-live.mjs", "scripts/fast-live-cases.mjs"];
+const revision = () => Object.fromEntries(revisionFiles.map(name => [name, createHash("sha256").update(fs.readFileSync(new URL(`../${name}`, import.meta.url))).digest("hex")]));
+report.revision_sha256 = revision();
+const assertRevision = () => { if (JSON.stringify(revision()) !== JSON.stringify(report.revision_sha256)) throw new Error("Benchmark runtime revision changed during the campaign"); };
+report.requested_cases = cases.filter(c => !filter || filter.includes(c.name)).map(c => c.name);
+const persist = () => { report.campaign_token_cap = Number.isFinite(campaignTokenCap) ? campaignTokenCap : null; report.campaign_usage = { ...campaignUsage }; fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, JSON.stringify(report, null, 2) + "\n"); };
 try {
   const catalogue = JSON.parse(fs.readFileSync(path.join(sourceHome, ".neutrino", "model.json"), "utf8"));
   const sourceConfig = JSON.parse(fs.readFileSync(path.join(sourceHome, ".neutrino", "config.json"), "utf8"));
@@ -74,7 +67,15 @@ try {
   process.env.NEUTRINO_HOME = path.join(fixture, ".neutrino"); process.env.NEUTRINO_PLUGIN_HOME = path.join(fixture, "plugins");
   const config = await import("../dist/config.js");
   ({ LLMClient } = await import("../dist/llm/client.js"));
-  ({ TaskRuntime } = await import("../dist/llm/runtime.js"));
+  ({ TaskRuntime, TaskControlError, currentTask } = await import("../dist/llm/runtime.js"));
+  if (traceDirectory) process.env.NEUTRINO_DIAGNOSTICS_DIR = traceDirectory;
+  originalFinish = TaskRuntime.prototype.finish;
+  TaskRuntime.prototype.finish = function(status) {
+    const value = originalFinish.call(this, status);
+    let completion = finishedTurns.get(this);
+    if (!completion) { completion = { promise: Promise.resolve(), resolve: () => {} }; finishedTurns.set(this, completion); }
+    completion.resolve(); return value;
+  };
   const { createWebSession } = await import("../dist/web/session.js");
   const { spawnSync } = await import("node:child_process");
   config.saveModels({ providers: [{ name: provider.name, models: [model] }] });
@@ -83,6 +84,11 @@ try {
     default_intensity: intensity, plan_first: true, task_budget_scope: "task", task_timeout_ms: requestedTimeout,
     model_context_windows: sourceConfig.model_context_windows ?? {}, fast_mode_enabled: true });
   report.model = { provider: provider.name, name: model.name, intensity, available_inference_slots: 4 };
+  if ((argument("--expect-provider") && argument("--expect-provider") !== provider.name) ||
+      (argument("--expect-model") && argument("--expect-model") !== model.name) ||
+      (argument("--expect-intensity") && argument("--expect-intensity") !== intensity)) {
+    throw new TaskControlError("diagnostic_model_mismatch", "Configured model/intensity differs from the diagnostic baseline");
+  }
   if (baseline) {
     const proof = baseline.baseline_validation;
     if (!proof || baseline.model.provider !== provider.name || baseline.model.name !== model.name || baseline.model.intensity !== intensity) throw new Error("Standard baseline model/configuration mismatch");
@@ -112,6 +118,7 @@ try {
   report.conditions = { task_timeout_ms: requestedTimeout, budget_scope: "task", model_slots: 4,
     agent_runs: config.DEFAULT_CONFIG.task_max_agents, model_requests: config.DEFAULT_CONFIG.task_max_requests,
     tool_calls: config.DEFAULT_CONFIG.task_max_tools, tokens: config.DEFAULT_CONFIG.task_max_tokens };
+  if (campaignTokenCap < 17_000) { campaignUsage.stopped = true; throw new TaskControlError("diagnostic_campaign_cap", "Diagnostic cap cannot reserve the unchanged connectivity request budget"); }
   const connectivityStarted = performance.now();
   const probe = new LLMClient(model, provider.name, intensity);
   const probeSignal = AbortSignal.timeout(30_000);
@@ -119,9 +126,28 @@ try {
     signal: probeSignal, retry: { attempts: 1 }, maxOutputTokens: 16384,
   })) { /* Connectivity output is intentionally not copied into the benchmark. */ }
   report.connectivity = { elapsed_ms: performance.now() - connectivityStarted, status: probe.outcome?.status ?? "unknown",
-    input_tokens: probe.usage?.prompt ?? null, output_tokens: probe.usage?.completion ?? null };
+    input_tokens: probe.usage?.prompt ?? null, output_tokens: probe.usage?.completion ?? null,
+    http_status: Number(probe.outcome?.error?.message.match(/HTTP (\d+)/)?.[1]) || null,
+    error_kind: /insufficient.?balance/i.test(probe.outcome?.error?.message || "") ? "insufficient_balance" : null };
+  campaignUsage.settled_tokens_including_unknown_reservations += probe.usage?.total ?? 17_000;
+  originalRequest = TaskRuntime.prototype.request;
+  TaskRuntime.prototype.request = function(inputTokens, outputTokens, final) {
+    const reservation = Math.max(1, Math.ceil(inputTokens)) + Math.max(1, Math.ceil(outputTokens));
+    if (campaignUsage.settled_tokens_including_unknown_reservations + campaignUsage.held_tokens + reservation > campaignTokenCap) {
+      campaignUsage.stopped = true; campaignUsage.requests_rejected_before_dispatch++;
+      throw new TaskControlError("diagnostic_campaign_cap", "Diagnostic campaign Token cap reached before another provider attempt");
+    }
+    const original = originalRequest.call(this, inputTokens, outputTokens, final);
+    campaignUsage.held_tokens += reservation; let settled = false;
+    return { settle(used) {
+      if (settled) return; settled = true;
+      campaignUsage.held_tokens -= reservation;
+      campaignUsage.settled_tokens_including_unknown_reservations += Math.max(0, Math.ceil(used));
+      original.settle(used);
+    } };
+  };
   if (probe.outcome?.status !== "completed" || !probe.usage) throw new Error("Model unavailable: configured API did not return a successful response and usage within the connectivity check. All live cases remain untested.");
-  let retryCount = 0, toolWait = 0, actualUsage = { prompt: 0, completion: 0, missing: 0 };
+  let retryCount = 0, toolWait = 0, actualUsage = { prompt: 0, completion: 0, missing: 0, notDispatched: 0 };
   originalTool = TaskRuntime.prototype.tool;
   TaskRuntime.prototype.tool = async function (name, args, callback) {
     const start = performance.now();
@@ -130,35 +156,51 @@ try {
   };
   originalStream = LLMClient.prototype.streamTurn;
   LLMClient.prototype.streamTurn = async function* (messages, tools, options = {}) {
+    const scope = currentTask();
+    if (artifactDirectory && scope) {
+      let scopes = sampleScopes.get(scope.runtime);
+      if (!scopes) { scopes = new Map(); sampleScopes.set(scope.runtime, scopes); }
+      const context = scope.runtime.diagnostics?.context(scope);
+      scopes.set(scope.runId, { run_id: scope.runId, parent_run_id: scope.parentRunId, role: scope.role,
+        diagnostic_role: context?.role, task_id: context?.task_id, read_only: scope.policy.readOnly, workspace_only: scope.runtime.workspaceOnly });
+    }
     try { yield* originalStream.call(this, messages, tools, { ...options, onRetry: notice => { retryCount++; options.onRetry?.(notice); } }); }
     finally {
       if (this.usage) { actualUsage.prompt += this.usage.prompt; actualUsage.completion += this.usage.completion; }
+      else if (this.outcome?.error?.code === "diagnostic_campaign_cap") actualUsage.notDispatched++;
       else actualUsage.missing++;
     }
   };
-  for (const scenario of cases.filter(c => !filter || filter.includes(c.name))) {
+  for (const [scenarioIndex, scenario] of cases.filter(c => !filter || filter.includes(c.name)).entries()) {
     const row = { name: scenario.name, samples: { standard: [], fast_dag: [] } }; report.scenarios.push(row);
     for (let run = 0; run < repetitions; run++) {
-      for (const mode of run % 2 ? ["fast_dag", "standard"] : ["standard", "fast_dag"]) {
+      for (const mode of (run + scenarioIndex) % 2 ? ["fast_dag", "standard"] : ["standard", "fast_dag"]) {
         const prior = mode === "standard" ? baseline?.scenarios.find(row => row.name === scenario.name)?.samples.standard[run] : null;
         if (prior?.success && prior.fixture_correct && prior.elapsed_ms < baseline.conditions.task_timeout_ms) {
           row.samples.standard.push({ ...structuredClone(prior), reused_from: path.basename(argument("--reuse-standard")) });
           console.log(`${scenario.name} standard: reused validated baseline ${(prior.elapsed_ms / 1000).toFixed(1)}s tokens=${prior.tokens}`);
           persist(); continue;
         }
+        assertRevision();
         const cwd = path.join(fixture, scenario.name, mode, String(run)); fs.mkdirSync(cwd, { recursive: true });
         for (const [name, content] of Object.entries(scenario.files)) fs.writeFileSync(path.join(cwd, name), content);
         const session = createWebSession(cwd, { provider: provider.name, model, intensity }, "auto", "standard", undefined, mode);
-        sessions.push(session); session.start(); retryCount = 0; toolWait = 0; actualUsage = { prompt: 0, completion: 0, missing: 0 };
-        let pending = null, approvalWait = 0, blockedOnApproval = false;
+        sessions.push(session); session.start(); retryCount = 0; toolWait = 0; actualUsage = { prompt: 0, completion: 0, missing: 0, notDispatched: 0 };
+        let pending = null, approvalWait = 0, blockedOnApproval = false, blockedApproval = null;
         const approvals = [];
+        const order = { scenario: scenario.name, round: run + 1, mode, started_at_utc: new Date().toISOString(), status: "running" };
+        report.execution_order.push(order); persist();
         const started = performance.now();
         session.liveSend(scenario.prompt + "\n" + (scenario.common || "Work only inside this temporary fixture. Preserve all task requirements and perform the required verification. Use node (not Python) for computations and tests. Do not access credentials or external services from tools."));
+        const sampleRuntime = session.taskRuntime;
+        if (sampleRuntime) sampledRuntimes.push(sampleRuntime);
+        const turnFinished = awaitTurnFinish(sampleRuntime);
         while (session.liveMeta().busy) {
           if (interrupted) throw new Error("Live benchmark interrupted; remaining cases are untested");
+          if (campaignUsage.stopped) { session.livePause(); break; }
           const approval = session.liveMeta().approval;
           if (approval) {
-            if (!approvalDirectory) { blockedOnApproval = true; session.livePause(); break; }
+            if (!approvalDirectory) { blockedOnApproval = true; blockedApproval = structuredClone(approval); session.livePause(); break; }
             if (!pending) {
               const id = `${report.benchmark_id}-${scenario.name}-${mode}-${run}-${approvals.length}`;
               pending = { id, started: performance.now(), response: path.join(approvalDirectory, `${id}.response.json`) };
@@ -176,7 +218,10 @@ try {
           if (performance.now() - started > requestedTimeout + 60_000) { session.livePause(); break; }
           await new Promise(resolve => setTimeout(resolve, 50));
         }
-        await session.taskRuntime?.drain();
+        const drainStarted = performance.now();
+        await turnFinished;
+        await sampleRuntime?.drain();
+        const diagnosticDrainMs = performance.now() - drainStarted;
         if (interrupted) throw new Error("Live benchmark interrupted; remaining cases are untested");
         const elapsed = performance.now() - started, snapshot = session.liveSnapshot("benchmark");
         const canonical = value => value && typeof value === "object" && !Array.isArray(value)
@@ -193,25 +238,56 @@ try {
         }
         if (scenario.minimumInspectors) {
           const inspectors = mode === "fast_dag"
-            ? (snapshot.fast?.tasks.filter(task => task.kind === "work" && task.read_only).length ?? 0) +
+            ? (snapshot.fast?.tasks.filter(task => !task.verifies && task.read_only).length ?? 0) +
               (session.taskRuntime?.evidence.filter(e => e.name === "delegate" && e.status === "completed").length ?? 0)
             : snapshot.task?.counts.agentRuns ?? 0;
           correct &&= inspectors >= scenario.minimumInspectors;
         }
-        const sample = { elapsed_ms: elapsed, approval_wait_ms: approvalWait, execution_ms: elapsed - approvalWait, approval_events: approvals,
-          blocked_on_approval: blockedOnApproval, tokens: actualUsage.prompt + actualUsage.completion, input_tokens: actualUsage.prompt,
-          output_tokens: actualUsage.completion, missing_usage_requests: actualUsage.missing,
+        const sample = { round: run + 1, elapsed_ms: elapsed, approval_wait_ms: approvalWait, execution_ms: elapsed - approvalWait, approval_events: approvals,
+          blocked_on_approval: blockedOnApproval, ...(blockedApproval ? { blocked_approval: JSON.parse(JSON.stringify(blockedApproval).replaceAll(model.api_key, "[redacted]")) } : {}), tokens: actualUsage.prompt + actualUsage.completion, input_tokens: actualUsage.prompt,
+          output_tokens: actualUsage.completion, missing_usage_requests: actualUsage.missing, requests_blocked_before_dispatch: actualUsage.notDispatched, diagnostic_drain_ms: diagnosticDrainMs,
           tokens_per_second: (actualUsage.prompt + actualUsage.completion) * 1000 / elapsed,
           success: snapshot.task?.state === "completed" && (mode !== "fast_dag" || snapshot.fast?.phase === "completed"),
           fixture_correct: correct, retries: retryCount + (snapshot.fast?.metrics.retries ?? 0), tool_wait_ms: toolWait,
           scheduling_ms: snapshot.fast?.metrics.scheduling_ms ?? null, model_requests: snapshot.task?.counts.modelRequests ?? null,
           agent_runs: snapshot.task?.counts.agentRuns ?? null, tool_calls: snapshot.task?.counts.toolCalls ?? null,
-          ...(snapshot.fast ? { fast_tasks: snapshot.fast.tasks.map(t => ({ task_id: t.task_id, status: t.status, error: t.error })),
-            review: snapshot.fast.review, fast_metrics: structuredClone(snapshot.fast.metrics) } : {}),
+          ...(session.taskRuntime?.diagnostics ? { trace_file: session.taskRuntime.diagnostics.file,
+            trace_analysis: analyzeTimeline(fs.readFileSync(session.taskRuntime.diagnostics.file, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line))) } : {}),
+          ...(snapshot.fast ? { fast_tasks: snapshot.fast.tasks.map(t => ({ task_id: t.task_id, kind: t.kind, verifies: t.verifies, dependencies: t.dependencies, read_only: t.read_only, exclusive: t.exclusive, write_paths: t.write_paths, acceptance_criteria: t.acceptance_criteria, output_contract: t.output_contract, status: t.status, error: t.error })),
+            review: snapshot.fast.review, fast_metrics: structuredClone(snapshot.fast.metrics),
+            ...(snapshot.fast.planning_errors?.length ? { fast_planning_errors: snapshot.fast.planning_errors.map(error => error.replaceAll(model.api_key, "[redacted]")) } : {}) } : {}),
           ...(snapshot.fast?.error ? { fast_error: snapshot.fast.error.replaceAll(model.api_key, "[redacted]") } : {}) };
+        if (artifactDirectory) {
+          const directory = path.join(artifactDirectory, report.benchmark_id, scenario.name, mode, String(run));
+          fs.mkdirSync(directory, { recursive: true });
+          const files = [];
+          // Export only named fixture inputs/outputs, never the temporary model catalogue or session config.
+          for (const name of [...new Set([...Object.keys(scenario.files), ...(scenario.outputs ?? ["answer.json"])])]) {
+            const source = path.join(cwd, name);
+            if (!fs.existsSync(source) || !fs.lstatSync(source).isFile()) continue;
+            const content = fs.readFileSync(source);
+            if (content.includes(Buffer.from(model.api_key))) throw new Error("Refusing to export a credential in a fixture artifact");
+            const destination = path.join(directory, name); fs.mkdirSync(path.dirname(destination), { recursive: true }); fs.writeFileSync(destination, content);
+            files.push({ name, bytes: content.length, sha256: createHash("sha256").update(content).digest("hex") });
+          }
+          const answer = [...snapshot.messages].reverse().find(message => message.role === "assistant")?.content ?? "";
+          fs.writeFileSync(path.join(directory, "final-answer.md"), String(answer).replaceAll(model.api_key, "[redacted]") + "\n");
+          const evidence = { original_cwd: cwd, root_run_id: sampleRuntime?.rootRunId,
+            scopes: [...(sampleScopes.get(sampleRuntime)?.values() ?? [])], tools: sampleRuntime?.evidence ?? [] };
+          const evidenceBody = JSON.stringify(evidence, null, 2).replaceAll(model.api_key, "[redacted]") + "\n";
+          fs.writeFileSync(path.join(directory, "tool-evidence.json"), evidenceBody);
+          sample.artifacts = { directory, files, final_answer: "final-answer.md", tool_evidence: "tool-evidence.json" };
+          if (snapshot.fast) {
+            const body = JSON.stringify({ engine_run_id: snapshot.fast.run_id, artifacts: snapshot.fast.artifacts }, null, 2).replaceAll(model.api_key, "[redacted]") + "\n";
+            fs.writeFileSync(path.join(directory, "agent-artifacts.json"), body);
+            sample.artifacts.agent_artifacts = "agent-artifacts.json";
+          }
+        }
+        order.status = "finished"; order.success = sample.success;
         row.samples[mode].push(sample); session.dispose();
-        console.log(`${scenario.name} ${mode}: ${(elapsed / 1000).toFixed(1)}s tokens=${sample.tokens} success=${sample.success} fixture_correct=${correct}`);
+        console.log(`${scenario.name} [${run + 1}/${repetitions}] ${mode}: ${(elapsed / 1000).toFixed(1)}s tokens=${sample.tokens} success=${sample.success} fixture_correct=${correct}`);
         persist();
+        if (campaignUsage.stopped) throw new TaskControlError("diagnostic_campaign_cap", "Diagnostic campaign cap stopped further execution");
         if (sample.tokens === 0 && !sample.success) throw new Error("Model unavailable: first real request produced no usage. Remaining live cases were not run.");
       }
     }
@@ -235,14 +311,18 @@ try {
   report.state = "completed";
 } catch (error) {
   report.state = "incomplete";
-  report.untested.push(...cases.filter(c => !report.scenarios.some(s => s.name === c.name && s.standard && s.fast_dag)).map(c => c.name));
+  report.untested.push(...cases.filter(c => report.requested_cases.includes(c.name) && !report.scenarios.some(s => s.name === c.name && s.standard && s.fast_dag)).map(c => c.name));
   // Report only controlled or filesystem error messages. Provider response text is not copied here.
   report.error = error.code || (String(error.message).startsWith("Model unavailable") ? error.message : "Live benchmark could not complete; inspect local configuration and connectivity.");
+  if (report.connectivity?.http_status === 402) report.external_blocker = { code: "HTTP 402", reason: report.connectivity.error_kind || "provider_account_error" };
   process.exitCode = 1;
 } finally {
+  for (const session of sessions) session.dispose();
+  await Promise.all(sampledRuntimes.map(async runtime => { await awaitTurnFinish(runtime); await runtime.drain(); }));
   if (originalStream && LLMClient) LLMClient.prototype.streamTurn = originalStream;
   if (originalTool && TaskRuntime) TaskRuntime.prototype.tool = originalTool;
-  await Promise.all(sessions.map(async session => { session.dispose(); await session.taskRuntime?.drain(); }));
+  if (originalRequest && TaskRuntime) TaskRuntime.prototype.request = originalRequest;
+  if (originalFinish && TaskRuntime) TaskRuntime.prototype.finish = originalFinish;
   process.removeListener("SIGINT", stop); process.removeListener("SIGTERM", stop);
   os.homedir = originalHomedir; fs.rmSync(fixture, { recursive: true, force: true }); persist();
   setGlobalDispatcher(originalDispatcher);

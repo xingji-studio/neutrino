@@ -853,6 +853,7 @@ export class ChatScreen extends Screen implements LiveAgent {
         loadPlannerPrompt(),
         buildPlannerInput({ request, cwd: this.liveDir, transcript: planTranscript(this.messages) }),
         {
+          ...(currentTask()?.runtime.diagnostics ? { diagnostic: { role: "planning" as const } } : {}),
           onRetry: (notice) => {
             this.retryNotice =
               `Planning — network hiccup, retrying in ${formatDelay(notice.delayMs)} ` +

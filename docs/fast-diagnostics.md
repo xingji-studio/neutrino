@@ -1,5 +1,7 @@
 # 极速模式调试记录
 
+这是第一轮根因复现的记录。后续默认关闭的生产观测、22 组详细消融和真实试跑状态见 `docs/fast-timeline-diagnosis.md`；下文构建指纹和测试结果对应第一轮诊断当时的构建。
+
 本轮目标是找出变慢的具体机制。新增离线诊断脚本与结果记录，没有修改 Standard 或 Fast 的运行算法，没有调用付费模型，也没有改写之前的性能结果。
 
 诊断对象为交付构建 `2261361cf8276f9b047e7fbd8fd00f7ab450c16ffe9334a608901767f2a365fc`。脚本为 `scripts/diagnose-fast-mode.mjs`，完整结果、任务区间和请求事件在 `docs/fast-diagnostics.json`。

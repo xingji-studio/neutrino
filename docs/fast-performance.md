@@ -1,5 +1,7 @@
 # 极速模式性能与验证报告
 
+本文件保留初始实现的历史活动。最新 Token、DAG 与审批/目录优化后的四场景三轮真实对照见 [fast-efficiency-v3-comparison.md](fast-efficiency-v3-comparison.md)：24 次新运行，Fast 完整验收 12/12、Standard 9/12，9 对合格配对均更快，4 对减少 Token。复杂 DAG 规划明显缩短，但独立验证 Token 未下降，且仅 1 对完整合格对照；尚未确认跨任务普遍节省 Token 或 50% 缩时目标。前两版试验、失败与修复说明见 [fast-efficiency-optimization.md](fast-efficiency-optimization.md)。后文的 incomplete/HTTP 402 属于历史活动，不代表当前模型不可用。
+
 本报告由机器可读实测结果生成。真实模型活动状态：`incomplete`。模型：`DeepSeek/deepseek-flash`，推理档位：`Max`。两种模式使用同一模型配置、任务要求、必要检查及账户配额。
 
 **50% 端到端缩时目标：尚未证实达到。** 有效成功对照 7 类，合计时间节省 -76.4%（负值表示变慢）。

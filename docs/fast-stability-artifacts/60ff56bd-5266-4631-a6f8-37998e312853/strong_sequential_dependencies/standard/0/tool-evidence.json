@@ -1,0 +1,199 @@
+{
+  "original_cwd": "/tmp/neutrino-fast-live-PgKqxR/strong_sequential_dependencies/standard/0",
+  "root_run_id": "6e9640f8-7752-4376-b14f-807399d35152",
+  "scopes": [
+    {
+      "run_id": "6e9640f8-7752-4376-b14f-807399d35152",
+      "role": "main",
+      "diagnostic_role": "main",
+      "read_only": false
+    }
+  ],
+  "tools": [
+    {
+      "id": "c064c704-eac6-4038-bfe8-fe90ff37ac60",
+      "runId": "6e9640f8-7752-4376-b14f-807399d35152",
+      "name": "list_files",
+      "arguments": {
+        "reason": "Need to see the current state of the temporary fixture directory before reading seed.txt."
+      },
+      "result": "seed.txt",
+      "status": "completed"
+    },
+    {
+      "id": "e6bc38a7-e827-4b55-9d1a-17a953d41eb2",
+      "runId": "6e9640f8-7752-4376-b14f-807399d35152",
+      "name": "read_file",
+      "arguments": {
+        "path": "seed.txt",
+        "reason": "The first pipeline step needs the numeric seed value from seed.txt."
+      },
+      "result": "3",
+      "status": "completed"
+    },
+    {
+      "id": "467281e3-9f44-48d9-a627-de5361be3422",
+      "runId": "6e9640f8-7752-4376-b14f-807399d35152",
+      "name": "run_command",
+      "arguments": {
+        "command": "node -e '\nconst fs = require(\"fs\");\nif (!fs.existsSync(\"seed.txt\")) { console.error(\"FAIL: seed.txt is missing\"); process.exit(1); }\nconst raw = fs.readFileSync(\"seed.txt\", \"utf8\").trim();\nconst seed = Number(raw);\nif (raw === \"\" || !Number.isFinite(seed)) { console.error(\"FAIL: seed.txt is not numeric: \" + JSON.stringify(raw)); process.exit(1); }\nconst value = seed + 2;\nfs.writeFileSync(\"stage1.txt\", String(value) + \"\\n\");\nif (!fs.existsSync(\"stage1.txt\")) { console.error(\"FAIL: stage1.txt was not created\"); process.exit(1); }\nconsole.log(\"seed=\" + seed + \" stage1=\" + value);\n'",
+        "reason": "Step 1 requires reading numeric seed.txt in node, adding 2, and writing stage1.txt with failure checks."
+      },
+      "result": "seed=3 stage1=5",
+      "status": "completed"
+    },
+    {
+      "id": "1c3c3a5c-8b00-4a14-a7dd-275052bef204",
+      "runId": "6e9640f8-7752-4376-b14f-807399d35152",
+      "name": "run_command",
+      "arguments": {
+        "command": "node -e '\nconst fs = require(\"fs\");\nconst raw = fs.readFileSync(\"stage1.txt\", \"utf8\").trim();\nconsole.log(\"stage1.txt exists, raw=\" + JSON.stringify(raw) + \" numeric=\" + Number(raw));\n'",
+        "reason": "Confirms the step-1 artifact on disk holds the expected numeric value 5."
+      },
+      "result": "stage1.txt exists, raw=\"5\" numeric=5",
+      "status": "completed"
+    },
+    {
+      "id": "17df9a3d-93f2-41c6-a4f9-d4a9275cec2d",
+      "runId": "6e9640f8-7752-4376-b14f-807399d35152",
+      "name": "list_files",
+      "arguments": {
+        "reason": "To confirm which stage files exist before reading stage1.txt for step 2."
+      },
+      "result": "seed.txt\nstage1.txt",
+      "status": "completed"
+    },
+    {
+      "id": "8a17e048-02d5-4f2f-a29f-b1963f798f84",
+      "runId": "6e9640f8-7752-4376-b14f-807399d35152",
+      "name": "read_file",
+      "arguments": {
+        "path": "stage1.txt",
+        "reason": "To check that stage1.txt really exists and holds the value step 2 must square."
+      },
+      "result": "5\n",
+      "status": "completed"
+    },
+    {
+      "id": "36e5e6ec-be96-4915-829c-5155947acaf2",
+      "runId": "6e9640f8-7752-4376-b14f-807399d35152",
+      "name": "run_command",
+      "arguments": {
+        "command": "node -e \"const fs=require('fs');if(!fs.existsSync('stage1.txt')){console.error('FAIL: stage1.txt missing');process.exit(1);}const raw=fs.readFileSync('stage1.txt','utf8').trim();const v=Number(raw);if(raw===''||!Number.isFinite(v)){console.error('FAIL: stage1.txt not numeric: '+JSON.stringify(raw));process.exit(1);}fs.writeFileSync('stage2.txt',String(v*v));if(!fs.existsSync('stage2.txt')){console.error('FAIL: stage2.txt not created');process.exit(1);}console.log('stage1='+v+' stage2='+v*v);\"",
+        "reason": "This runs step 2's node computation: read numeric stage1.txt, square it, and write stage2.txt with explicit failure checks."
+      },
+      "result": "stage1=5 stage2=25",
+      "status": "completed"
+    },
+    {
+      "id": "5b64945f-4074-4ff1-8bd3-120611eaf99a",
+      "runId": "6e9640f8-7752-4376-b14f-807399d35152",
+      "name": "run_command",
+      "arguments": {
+        "command": "node -e \"const fs=require('fs');const raw=fs.readFileSync('stage2.txt','utf8');const v=Number(raw.trim());console.log('stage2.txt raw='+JSON.stringify(raw)+' numeric='+v+' isSquareOfStage1='+(v===25));\"",
+        "reason": "Independent node read-back to prove stage2.txt exists on disk with the squared value."
+      },
+      "result": "stage2.txt raw=\"25\" numeric=25 isSquareOfStage1=true",
+      "status": "completed"
+    },
+    {
+      "id": "95c71cbb-0bfe-45df-9725-efcb0ac38336",
+      "runId": "6e9640f8-7752-4376-b14f-807399d35152",
+      "name": "list_files",
+      "arguments": {
+        "path": ".",
+        "reason": "To see the actual current fixture contents before creating stage3.txt, since step 3 depends on stage2.txt existing."
+      },
+      "result": "seed.txt\nstage1.txt\nstage2.txt",
+      "status": "completed"
+    },
+    {
+      "id": "47ac2fca-d445-4610-ae06-407d6b0bf758",
+      "runId": "6e9640f8-7752-4376-b14f-807399d35152",
+      "name": "read_file",
+      "arguments": {
+        "path": "stage2.txt",
+        "reason": "To confirm stage2.txt holds the numeric value that step 3 must read and subtract 4 from."
+      },
+      "result": "25",
+      "status": "completed"
+    },
+    {
+      "id": "649074f2-65c2-4667-b6e6-864197dc94a2",
+      "runId": "6e9640f8-7752-4376-b14f-807399d35152",
+      "name": "read_file",
+      "arguments": {
+        "path": "stage1.txt",
+        "reason": "To sanity-check the upstream stage value that stage2.txt was derived from."
+      },
+      "result": "5\n",
+      "status": "completed"
+    },
+    {
+      "id": "5839fc84-1cea-43ff-952f-05ee17394c00",
+      "runId": "6e9640f8-7752-4376-b14f-807399d35152",
+      "name": "run_command",
+      "arguments": {
+        "command": "node -e \"\nconst fs=require('fs');\nif(!fs.existsSync('stage2.txt')){console.error('FAIL: stage2.txt missing');process.exit(1);}\nconst raw=fs.readFileSync('stage2.txt','utf8').trim();\nif(raw===''||Number.isNaN(Number(raw))){console.error('FAIL: stage2.txt not numeric: '+JSON.stringify(raw));process.exit(1);}\nconst v=Number(raw);\nconst out=v-4;\nfs.writeFileSync('stage3.txt',String(out));\nif(!fs.existsSync('stage3.txt')){console.error('FAIL: stage3.txt not created');process.exit(1);}\nconsole.log('stage2='+v+' stage3='+out);\n\"",
+        "reason": "This is step 3: use node to read the existing numeric stage2.txt, subtract 4, and write stage3.txt with guards for a missing input or missing output."
+      },
+      "result": "stage2=25 stage3=21",
+      "status": "completed"
+    },
+    {
+      "id": "5b4031fa-75b9-45f8-8252-d36506a10d39",
+      "runId": "6e9640f8-7752-4376-b14f-807399d35152",
+      "name": "run_command",
+      "arguments": {
+        "command": "node -e \"\nconst fs=require('fs');\nconst raw=fs.readFileSync('stage3.txt','utf8').trim();\nconst n=Number(raw);\nconsole.log('stage3.txt exists, raw='+JSON.stringify(raw)+' numeric='+n+' isStage2Minus4='+(n===Number(fs.readFileSync('stage2.txt','utf8').trim())-4));\n\"",
+        "reason": "To verify independently that stage3.txt was written and its value equals stage2 minus 4."
+      },
+      "result": "stage3.txt exists, raw=\"21\" numeric=21 isStage2Minus4=true",
+      "status": "completed"
+    },
+    {
+      "id": "c9c4505a-2133-4033-afe2-ffc915d357b2",
+      "runId": "6e9640f8-7752-4376-b14f-807399d35152",
+      "name": "list_files",
+      "arguments": {
+        "reason": "To see which stage files actually exist in the fixture before verifying them.",
+        "path": "."
+      },
+      "result": "seed.txt\nstage1.txt\nstage2.txt\nstage3.txt",
+      "status": "completed"
+    },
+    {
+      "id": "9e851716-471c-4185-8d4b-512b0e503205",
+      "runId": "6e9640f8-7752-4376-b14f-807399d35152",
+      "name": "run_command",
+      "arguments": {
+        "command": "node -e \"const fs=require('fs');for(const f of ['seed.txt','stage1.txt','stage2.txt','stage3.txt']){try{console.log(f,'=',JSON.stringify(fs.readFileSync(f,'utf8')))}catch(e){console.log(f,'MISSING')}}\"",
+        "reason": "To read the raw contents of the seed and stage files so verification uses the saved values rather than assumed ones."
+      },
+      "result": "seed.txt = \"3\"\nstage1.txt = \"5\\n\"\nstage2.txt = \"25\"\nstage3.txt = \"21\"",
+      "status": "completed"
+    },
+    {
+      "id": "6848f5ac-6510-4c8c-a1e3-8b177d4c4e2e",
+      "runId": "6e9640f8-7752-4376-b14f-807399d35152",
+      "name": "run_command",
+      "arguments": {
+        "command": "node -e \"\nconst fs=require('fs');\nfunction readNum(f){ if(!fs.existsSync(f)){ console.error('FAIL missing '+f); process.exit(1);} const raw=fs.readFileSync(f,'utf8').trim(); const n=Number(raw); if(raw===''||!Number.isFinite(n)){ console.error('FAIL non-numeric '+f+' -> '+JSON.stringify(raw)); process.exit(1);} return n; }\nconst stage1=readNum('stage1.txt'), stage2=readNum('stage2.txt'), stage3=readNum('stage3.txt');\nconsole.log('read stage1='+stage1+' stage2='+stage2+' stage3='+stage3);\nlet ok=true;\nif(stage2!==stage1*stage1){ console.error('MISMATCH stage2 '+stage2+' !== stage1^2 '+(stage1*stage1)); ok=false; }\nif(stage3!==stage2-4){ console.error('MISMATCH stage3 '+stage3+' !== stage2-4 '+(stage2-4)); ok=false; }\nif(!ok){ process.exit(1); }\nfs.writeFileSync('answer.json', JSON.stringify({stage1:stage1, stage2:stage2, stage3:stage3}, null, 2)+'\\n');\nif(!fs.existsSync('answer.json')){ console.error('FAIL answer.json not created'); process.exit(1); }\nconsole.log('verified: stage2=stage1^2 and stage3=stage2-4');\nconsole.log('answer.json -> '+fs.readFileSync('answer.json','utf8').trim());\n\"",
+        "reason": "This is step 4: verify the three saved stage files with node and write answer.json from them, failing on any mismatch."
+      },
+      "result": "read stage1=5 stage2=25 stage3=21\nverified: stage2=stage1^2 and stage3=stage2-4\nanswer.json -> {\n  \"stage1\": 5,\n  \"stage2\": 25,\n  \"stage3\": 21\n}",
+      "status": "completed"
+    },
+    {
+      "id": "f4ba0c67-e14f-46d7-8919-16bbeb81c031",
+      "runId": "6e9640f8-7752-4376-b14f-807399d35152",
+      "name": "run_command",
+      "arguments": {
+        "command": "node -e \"const a=require('./answer.json');console.log('keys:',Object.keys(a).join(','));console.log('types:',Object.values(a).map(v=>typeof v).join(','));console.log('match files:',a.stage1===Number(require('fs').readFileSync('stage1.txt','utf8').trim())&&a.stage2===Number(require('fs').readFileSync('stage2.txt','utf8').trim())&&a.stage3===Number(require('fs').readFileSync('stage3.txt','utf8').trim()))\"",
+        "reason": "To confirm answer.json holds exactly the three numeric keys with values equal to the saved stage files."
+      },
+      "result": "keys: stage1,stage2,stage3\ntypes: number,number,number\nmatch files: true",
+      "status": "completed"
+    }
+  ]
+}

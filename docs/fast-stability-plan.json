@@ -1,0 +1,42 @@
+{
+  "created_at_utc": "2026-11-10T11:50:43.384728+00:00",
+  "scenarios": [
+    "multi_source_retrieval",
+    "multi_module_code",
+    "strong_sequential_dependencies",
+    "parallel_analysis"
+  ],
+  "rounds_per_scenario": 3,
+  "modes": [
+    "standard",
+    "fast_dag"
+  ],
+  "expected_pairs": 12,
+  "expected_runs": 24,
+  "provider": "DeepSeek",
+  "model": "deepseek-flash",
+  "intensity": "Max",
+  "output_budget": 16384,
+  "campaign_token_cap": 8000000,
+  "counterbalance": "mode order alternates by (scenario_index + round_index) parity; 6 Standard-first and 6 Fast-first pairs",
+  "runtime_policy": "same preceding verified Agent implementation; no algorithm changes during the campaign",
+  "preflight": [
+    "npm run build",
+    "node scripts/test-fast-benchmark-budget.mjs",
+    "node scripts/test-fast-stability.mjs"
+  ],
+  "preflight_status": "passed",
+  "independent_quality": "Immutable inputs, exact outputs, original code tests plus 16 formula cases; saved pipeline relationships; effective read-only inspector scopes; manual review of source-read and coordination/order provenance before final quality verdict",
+  "source_files_sha256": {
+    "scripts/benchmark-fast-live.mjs": "53b10ce640dacd590e14d5d80fc308b0482cdeb5b559dbb331959ccadc30b4ac",
+    "scripts/fast-live-cases.mjs": "3b4ff19c0e02640bbd1c0e76ed5ec3f650662437b00d8df698a72fabfa86db57",
+    "scripts/audit-fast-live.mjs": "2794a9bb32e6780ce7b3811c68486a631c79ef5b4daad689bf3050974311096a",
+    "scripts/fast-stability-analysis.mjs": "5fc7937f1fef10bf95c617db221003280d7bf5c88c610fbb81b4bf1faa31b8cb",
+    "scripts/test-fast-stability.mjs": "b2dba8055d1d594dac1bdcf3835360c8a8c33f1eb422964dd890afbc6d2bc3e9",
+    "scripts/test-fast-benchmark-budget.mjs": "3e9fc4771b71a6b921a1126b5265f54e4c053fb9d6994d2d6955fc8da75a9c2e",
+    "src/fast/engine.ts": "ff07f7c548b368db857328ae43cf38e9e4ba3afa96f0c3d35a33f75263b85279",
+    "src/fast/planner.ts": "e6914ba97b3daf596ec5d1fd830dc0688e5131dfd2f74a7edab48df8560ffe6c",
+    "assets/fast-planner.txt": "0c41df73a1074864fd23931b05f1aced491b242d4d18a3fbe1a0d30b2f95fa11",
+    "assets/fast-replanner.txt": "03fb1fa2d3b8d097d6dd237fdb70df4579cb86e78051595c8eb3deb395733d63"
+  }
+}

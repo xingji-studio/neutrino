@@ -19,6 +19,7 @@
  */
 import type { ModelInfo } from "../config.js";
 import { LLMClient } from "./client.js";
+import { currentTask } from "./runtime.js";
 import type { RiskAssessment } from "./risk.js";
 
 /** Opt out of approval for the `high` class. */
@@ -460,8 +461,12 @@ export class ApprovalGate {
    * explicit denial instead.
    */
   async decide(request: ApprovalRequest): Promise<ApprovalDecision> {
+    const scope = currentTask();
+    const span = scope?.runtime.diagnostics?.span("approval_decision", { tool_name: request.tool }, scope);
     try {
-      return await this.route(request, 0);
+      const decision = await this.route(request, 0);
+      span?.end({ approved: decision.approved, status: decision.source });
+      return decision;
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       return {
@@ -469,7 +474,7 @@ export class ApprovalGate {
         source: "ai",
         reason: `the approval gate could not run (${detail}); the call was not approved`,
       };
-    }
+    } finally { span?.end(); }
   }
 
   /** Route one request to the prompt, the human, or the reviewers. */
@@ -522,7 +527,9 @@ export class ApprovalGate {
   private async human(request: ApprovalRequest, note?: string, depth = 0): Promise<ApprovalDecision> {
     const malformed = refuseUnjustified(request);
     if (malformed) return malformed;
-    const approved = await this.options.askHuman(request);
+    const scope = currentTask();
+    const span = scope?.runtime.diagnostics?.span("human_approval", { tool_name: request.tool }, scope);
+    const approved = await this.options.askHuman(request).finally(() => span?.end());
     // A mode change reroutes the same request without treating it as consent.
     if (approved === null) return this.route(request, depth + 1);
     return {
@@ -682,7 +689,8 @@ export class ApprovalGate {
       const rolePrompt = this.options.reviewerSystemPrompt?.();
       const system = rolePrompt ? `${rolePrompt}\n\n${REVIEW_SYSTEM_PROMPT}` : REVIEW_SYSTEM_PROMPT;
       const controller = new AbortController();
-      const raw = await withTimeout(client.complete(system, prompt, { signal: controller.signal, cancelled: this.options.cancelled }), timeout)
+      const raw = await withTimeout(client.complete(system, prompt, { signal: controller.signal, cancelled: this.options.cancelled,
+        ...(currentTask()?.runtime.diagnostics ? { diagnostic: { role: "approval" as const } } : {}) }), timeout)
         .finally(() => controller.abort());
       if (raw === null) {
         // Fail closed: a reviewer that never answers must not stall the turn.

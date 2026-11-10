@@ -1,0 +1,1433 @@
+{
+  "kind": "post_run_independent_fixture_audit",
+  "benchmark_id": "60ff56bd-5266-4631-a6f8-37998e312853",
+  "audited_at": "2026-11-10T12:24:18.810Z",
+  "repetitions": 3,
+  "same_acceptance_for_both": true,
+  "external_model_calls": 0,
+  "scenarios": [
+    {
+      "name": "multi_source_retrieval",
+      "samples": {
+        "standard": [
+          {
+            "round": 1,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/multi_source_retrieval/standard/0",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:a.txt",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:b.txt",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:c.txt",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "recalculate_from_original_sources",
+                "passed": true
+              },
+              {
+                "name": "all_source_citations",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "original_sources_actually_read",
+                "reason": "Executed Node loops read a.txt, b.txt and c.txt from the original fixture; later independent verification reread all three and compared the stored numeric total.",
+                "status": "passed",
+                "evidence_ids": [
+                  "6f4bd697-b110-4d2f-b000-52b4cdb0bbc5",
+                  "81d4aa23-f686-491e-a6bf-a723fe57f122",
+                  "496189e5-11f1-4cd0-bb8f-8bbf133e410d",
+                  "e5349ee8-ea6a-4209-adda-558ba4efbcd0"
+                ]
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/multi_source_retrieval/standard/0/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex, inspection of recorded executed fixture tool commands",
+              "tool_evidence_sha256": "60480c8411baf3e98129101f009a2daf133bb2f845ffbb7dd2cb6527820872ca"
+            }
+          },
+          {
+            "round": 2,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/multi_source_retrieval/standard/1",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:a.txt",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:b.txt",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:c.txt",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "recalculate_from_original_sources",
+                "passed": true
+              },
+              {
+                "name": "all_source_citations",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "original_sources_actually_read",
+                "reason": "Inspected completed direct read_file calls or executed Node loops that read a.txt, b.txt and c.txt, parse each original population and independently compare their sum to answer.json.",
+                "status": "passed",
+                "evidence_ids": [
+                  "880ad851-26e0-4966-93cc-4901d7d0f64e",
+                  "e8a61942-d627-4d91-b704-8aa0e69b1861",
+                  "20314ea6-66d9-4190-bdfc-35eafbad67d5",
+                  "91bf823e-6b40-4d79-bef9-0ae6534b039e"
+                ]
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/multi_source_retrieval/standard/1/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex, inspection of recorded executed fixture tool commands",
+              "tool_evidence_sha256": "cd72e764d2a5761aec6ee8c8254351e683d369005d7fa01b560aad02dde4cc0b"
+            }
+          },
+          {
+            "round": 3,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/multi_source_retrieval/standard/2",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:a.txt",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:b.txt",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:c.txt",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "recalculate_from_original_sources",
+                "passed": true
+              },
+              {
+                "name": "all_source_citations",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "original_sources_actually_read",
+                "reason": "Inspected completed direct read_file calls or executed Node loops that read a.txt, b.txt and c.txt, parse each original population and independently compare their sum to answer.json.",
+                "status": "passed",
+                "evidence_ids": [
+                  "64150189-9491-4637-bc0b-e91139afa05f"
+                ]
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/multi_source_retrieval/standard/2/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex, inspection of recorded executed fixture tool commands",
+              "tool_evidence_sha256": "d342b8961723b898e1c8e66303c98ba4470443776893060b1b3336eadeb59bec"
+            }
+          }
+        ],
+        "fast_dag": [
+          {
+            "round": 1,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/multi_source_retrieval/fast_dag/0",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:a.txt",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:b.txt",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:c.txt",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "recalculate_from_original_sources",
+                "passed": true
+              },
+              {
+                "name": "all_source_citations",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "original_sources_actually_read",
+                "reason": "Inspected completed direct read_file calls or executed Node loops that read a.txt, b.txt and c.txt, parse each original population and independently compare their sum to answer.json.",
+                "status": "passed",
+                "evidence_ids": [
+                  "ebad3a04-2652-4f05-8383-728723835d19",
+                  "7ce622f1-3aa4-4e82-a430-01aac54a8542"
+                ]
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/multi_source_retrieval/fast_dag/0/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex, inspection of recorded executed fixture tool commands",
+              "tool_evidence_sha256": "68132d420172fae0a5144fcd51ca942999ea33107fca825da59e0e908be1e2b8"
+            }
+          },
+          {
+            "round": 2,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/multi_source_retrieval/fast_dag/1",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:a.txt",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:b.txt",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:c.txt",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "recalculate_from_original_sources",
+                "passed": true
+              },
+              {
+                "name": "all_source_citations",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "original_sources_actually_read",
+                "reason": "Inspected completed direct read_file calls or executed Node loops that read a.txt, b.txt and c.txt, parse each original population and independently compare their sum to answer.json.",
+                "status": "passed",
+                "evidence_ids": [
+                  "d13ed8e2-6d87-41dd-b53d-91521ae28ec7",
+                  "03913716-cf4a-4711-a62f-71c45e636426"
+                ]
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/multi_source_retrieval/fast_dag/1/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex, inspection of recorded executed fixture tool commands",
+              "tool_evidence_sha256": "f1ca7481163a7bbe82e2c74c4deafe65918a1f941bca5c54a6d3637c1ffabe5e"
+            }
+          },
+          {
+            "round": 3,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/multi_source_retrieval/fast_dag/2",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:a.txt",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:b.txt",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:c.txt",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "recalculate_from_original_sources",
+                "passed": true
+              },
+              {
+                "name": "all_source_citations",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "original_sources_actually_read",
+                "reason": "Inspected completed direct read_file calls or executed Node loops that read a.txt, b.txt and c.txt, parse each original population and independently compare their sum to answer.json.",
+                "status": "passed",
+                "evidence_ids": [
+                  "91b5c78c-f79e-44ee-8fcb-d7d64d882b5b"
+                ]
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/multi_source_retrieval/fast_dag/2/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex, inspection of recorded executed fixture tool commands",
+              "tool_evidence_sha256": "eadb4d14e0dd400e5cbcf28f314c5a6e0fdd85c5fbb475e04972c9d030e26c63"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "multi_module_code",
+      "samples": {
+        "standard": [
+          {
+            "round": 1,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/multi_module_code/standard/0",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:package.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:test.mjs",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "original_four_assertions",
+                "passed": true
+              },
+              {
+                "name": "sixteen_formula_cases_and_exports",
+                "passed": true
+              },
+              {
+                "name": "independent_modules",
+                "passed": true
+              }
+            ],
+            "manual_checks": [],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/multi_module_code/standard/0/final-answer.md"
+          },
+          {
+            "round": 2,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/multi_module_code/standard/1",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:package.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:test.mjs",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "original_four_assertions",
+                "passed": true
+              },
+              {
+                "name": "sixteen_formula_cases_and_exports",
+                "passed": true
+              },
+              {
+                "name": "independent_modules",
+                "passed": true
+              }
+            ],
+            "manual_checks": [],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/multi_module_code/standard/1/final-answer.md"
+          },
+          {
+            "round": 3,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/multi_module_code/standard/2",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:package.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:test.mjs",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "original_four_assertions",
+                "passed": true
+              },
+              {
+                "name": "sixteen_formula_cases_and_exports",
+                "passed": true
+              },
+              {
+                "name": "independent_modules",
+                "passed": true
+              }
+            ],
+            "manual_checks": [],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/multi_module_code/standard/2/final-answer.md"
+          }
+        ],
+        "fast_dag": [
+          {
+            "round": 1,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/multi_module_code/fast_dag/0",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:package.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:test.mjs",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "original_four_assertions",
+                "passed": true
+              },
+              {
+                "name": "sixteen_formula_cases_and_exports",
+                "passed": true
+              },
+              {
+                "name": "independent_modules",
+                "passed": true
+              }
+            ],
+            "manual_checks": [],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/multi_module_code/fast_dag/0/final-answer.md"
+          },
+          {
+            "round": 2,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/multi_module_code/fast_dag/1",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:package.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:test.mjs",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "original_four_assertions",
+                "passed": true
+              },
+              {
+                "name": "sixteen_formula_cases_and_exports",
+                "passed": true
+              },
+              {
+                "name": "independent_modules",
+                "passed": true
+              }
+            ],
+            "manual_checks": [],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/multi_module_code/fast_dag/1/final-answer.md"
+          },
+          {
+            "round": 3,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/multi_module_code/fast_dag/2",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:package.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:test.mjs",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "original_four_assertions",
+                "passed": true
+              },
+              {
+                "name": "sixteen_formula_cases_and_exports",
+                "passed": true
+              },
+              {
+                "name": "independent_modules",
+                "passed": true
+              }
+            ],
+            "manual_checks": [],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/multi_module_code/fast_dag/2/final-answer.md"
+          }
+        ]
+      }
+    },
+    {
+      "name": "strong_sequential_dependencies",
+      "samples": {
+        "standard": [
+          {
+            "round": 1,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/strong_sequential_dependencies/standard/0",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:seed.txt",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "saved_stages_and_relationships",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "strict_execution_order",
+                "reason": "Inspected ordered executed Node calls: read seed then write stage1; later read persisted stage1 before calculating/writing stage2; later read persisted stage2 before stage3; finally reread all stages and write answer.json.",
+                "status": "passed",
+                "evidence_ids": [
+                  "467281e3-9f44-48d9-a627-de5361be3422",
+                  "36e5e6ec-be96-4915-829c-5155947acaf2",
+                  "5839fc84-1cea-43ff-952f-05ee17394c00",
+                  "6848f5ac-6510-4c8c-a1e3-8b177d4c4e2e"
+                ]
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/strong_sequential_dependencies/standard/0/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex, inspection of recorded executed fixture tool commands",
+              "tool_evidence_sha256": "1214e7b8b1a8f7c641b88d1cefdd21af9336f4a3d0efbeb30b8e7434caafe538"
+            }
+          },
+          {
+            "round": 2,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/strong_sequential_dependencies/standard/1",
+            "functional_passed": false,
+            "passed": false,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": false,
+                "error": "runtime or primary fixture oracle failed"
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:seed.txt",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "saved_stages_and_relationships",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "strict_execution_order",
+                "reason": "Inspected ordered executed Node calculations: stage1 is persisted before stage1 is read to calculate stage2; stage2 is persisted before it is read to calculate stage3; final JSON is generated from saved stages.",
+                "status": "passed",
+                "evidence_ids": [
+                  "c58f51d8-1ae8-4b1f-b9c2-d9dcc48c9386",
+                  "e241b0ee-30cc-456c-97fa-69ce33a699df",
+                  "e8a74c4a-9ba6-4180-a775-4d3a0c012fdb",
+                  "94a030d6-ea50-47b7-9baa-f66d9f5bd5b5"
+                ]
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/strong_sequential_dependencies/standard/1/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex, inspection of recorded executed fixture tool commands",
+              "tool_evidence_sha256": "e108ecf1b9e8094feff2a9db815e55859f26b2acc240a98256d2e9b37a9b5be4"
+            }
+          },
+          {
+            "round": 3,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/strong_sequential_dependencies/standard/2",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:seed.txt",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "saved_stages_and_relationships",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "strict_execution_order",
+                "reason": "Inspected ordered executed Node calculations: stage1 is persisted before stage1 is read to calculate stage2; stage2 is persisted before it is read to calculate stage3; final JSON is generated from saved stages.",
+                "status": "passed",
+                "evidence_ids": [
+                  "30d17413-dd65-41cf-bff2-8e584c428319",
+                  "17e72922-eeb6-4f29-8b84-a1795c5cace9",
+                  "91ec5fa9-2bbb-410f-a41e-2cf8ba526f56",
+                  "3549b87b-35e9-4a9f-a2a3-8a9bd10bb72d"
+                ]
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/strong_sequential_dependencies/standard/2/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex, inspection of recorded executed fixture tool commands",
+              "tool_evidence_sha256": "ba9e0d2e2e00d885094b007907e92f0d6a225e20e9f2b26ac7d2868dc6685997"
+            }
+          }
+        ],
+        "fast_dag": [
+          {
+            "round": 1,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/strong_sequential_dependencies/fast_dag/0",
+            "functional_passed": false,
+            "passed": false,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": false,
+                "error": "runtime or primary fixture oracle failed"
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:seed.txt",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "saved_stages_and_relationships",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "strict_execution_order",
+                "reason": "Executed stage programs are ordered and each reads its saved predecessor before computing and writing its own stage; answer creation rereads and verifies all saved stages.",
+                "status": "passed",
+                "evidence_ids": [
+                  "dbf6d114-0df0-468b-983d-22f07f53bac8",
+                  "02b2b945-ea7c-4f74-89ac-df3a9feef07d",
+                  "fdc8d129-9bed-42d2-9601-314bfd87ace0",
+                  "21b5dc92-71bb-46c3-8eb7-0fa2fc947530"
+                ]
+              },
+              {
+                "name": "fixture_only_scope",
+                "status": "failed",
+                "evidence_ids": [
+                  "dbf6d114-0df0-468b-983d-22f07f53bac8",
+                  "02b2b945-ea7c-4f74-89ac-df3a9feef07d",
+                  "fdc8d129-9bed-42d2-9601-314bfd87ace0",
+                  "21b5dc92-71bb-46c3-8eb7-0fa2fc947530"
+                ],
+                "reason": "Completed commands created /tmp/stage1.js, /tmp/stage2.js, /tmp/stage3.js and /tmp/verify_and_answer.js outside this fixture, violating the original work-only-inside-fixture constraint."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/strong_sequential_dependencies/fast_dag/0/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex, inspection of recorded executed fixture tool commands",
+              "tool_evidence_sha256": "b097f980c1434d0a2b7fe7a4a99f33e1d0aaa366c249a3fe36857263894dd4f8"
+            }
+          },
+          {
+            "round": 2,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/strong_sequential_dependencies/fast_dag/1",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:seed.txt",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "saved_stages_and_relationships",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "strict_execution_order",
+                "reason": "Inspected ordered executed Node calculations: stage1 is persisted before stage1 is read to calculate stage2; stage2 is persisted before it is read to calculate stage3; final JSON is generated from saved stages.",
+                "status": "passed",
+                "evidence_ids": [
+                  "c8082f06-c4e2-4389-9e95-844b66922c84",
+                  "700c5431-17ac-4023-82eb-7e58a0253c8a",
+                  "b585dda0-859b-47a8-b4b5-268a2784c617",
+                  "56775613-31a4-47cf-912e-34044705491f",
+                  "0a7c7fdc-8333-42cf-aed7-0d405f69f812"
+                ]
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/strong_sequential_dependencies/fast_dag/1/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex, inspection of recorded executed fixture tool commands",
+              "tool_evidence_sha256": "d6dd22a6bb362a5176c7c4c31632eac7d2a3bb88c1f35e0e8481e431c41af8a6"
+            }
+          },
+          {
+            "round": 3,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/strong_sequential_dependencies/fast_dag/2",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:seed.txt",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "saved_stages_and_relationships",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "strict_execution_order",
+                "reason": "Inspected executed Node sequence: seed read before stage1 write; saved stage1 read before stage2 calculation/write; saved stage2 read before stage3 calculation/write; answer written only after saved stages were reread and checked.",
+                "status": "passed",
+                "evidence_ids": [
+                  "3f8210cd-326b-492b-9759-b42c42dc0f1a",
+                  "9d48fca1-3c4a-4c4d-869d-8e083c939696",
+                  "04e08082-08fa-4aab-9602-9f3a59bcc669",
+                  "a05df751-814a-4a0e-82e8-6470d35ff0bb"
+                ]
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/strong_sequential_dependencies/fast_dag/2/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex, inspection of recorded executed fixture tool commands",
+              "tool_evidence_sha256": "774f69bcf78200ad58f658388fb085990bb4df15ec8d9422b3ab30f3abeb7ce9"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "parallel_analysis",
+      "samples": {
+        "standard": [
+          {
+            "round": 1,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/parallel_analysis/standard/0",
+            "functional_passed": true,
+            "passed": false,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:north.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:south.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:east.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:west.json",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "independent_recalculation_all_datasets",
+                "passed": true
+              },
+              {
+                "name": "four_actual_read_only_inspectors",
+                "passed": true
+              },
+              {
+                "name": "coordinator_executed_node",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "coordinator_verified_inspector_reports",
+                "reason": "Inspected all four delegate reports, then executed Node verifier rereads all sources, checks evidence/count/units/weighted against report claims and exits on failure. Only afterward is answer.json written from verified values.",
+                "status": "passed",
+                "evidence_ids": [
+                  "b8f1ea20-a668-4053-a3dc-f548e9eddcec",
+                  "74ea096e-b73b-4170-ba36-5c5d278f425d",
+                  "0c803df1-2442-4ddc-83bb-814efc40ea4b",
+                  "4dfec3e7-31a1-4f3f-9291-78c43353f1e2",
+                  "8070a632-9266-435d-99c7-8794030a1715",
+                  "d1986ae8-29ca-4f84-996e-8578f0a837bf"
+                ]
+              },
+              {
+                "name": "fixture_only_scope",
+                "status": "failed",
+                "evidence_ids": [
+                  "8070a632-9266-435d-99c7-8794030a1715"
+                ],
+                "reason": "Completed shell command created /tmp/verify_step5.js outside the designated fixture. A later write_file to /tmp/validate_step7.js was denied, but the earlier external write already violated the original fixture-only instruction."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/parallel_analysis/standard/0/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex, inspection of recorded executed fixture tool commands",
+              "tool_evidence_sha256": "f20388daaccecfbee49f72b9fc429d1cee5e6d18a74c8c37a51d172c5490fdc3"
+            }
+          },
+          {
+            "round": 2,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/parallel_analysis/standard/1",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:north.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:south.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:east.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:west.json",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "independent_recalculation_all_datasets",
+                "passed": true
+              },
+              {
+                "name": "four_actual_read_only_inspectors",
+                "passed": true
+              },
+              {
+                "name": "coordinator_executed_node",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "coordinator_verified_inspector_reports",
+                "reason": "Inspected all four actual delegate report values. Before creating answer.json, coordinator Node reread all four datasets, compared count/units/weighted to reports, and printed all MATCH plus VERIFY PASS; a subsequent Node call generated answer.json from the original datasets.",
+                "status": "passed",
+                "evidence_ids": [
+                  "6f416227-8a32-45fd-b394-0d96984b30b0",
+                  "5879ce5e-fc74-439a-b4a0-4dc2f09df53d",
+                  "25390f19-277d-4b28-bba6-c8950e4a9f68",
+                  "d0c47586-a5d6-4186-bb43-155e36e04b50",
+                  "c689b628-15d0-4d86-8802-be203c7d449c",
+                  "afb15a5d-166c-4f6b-aa5a-128c0f9e342c"
+                ]
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/parallel_analysis/standard/1/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex, inspection of recorded executed fixture tool commands",
+              "tool_evidence_sha256": "be97771146bde895440ef36dd6cc364d0e0b8ac9c07396c2fe2c32a669c91cb6"
+            }
+          },
+          {
+            "round": 3,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/parallel_analysis/standard/2",
+            "functional_passed": false,
+            "passed": false,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": false,
+                "error": "runtime or primary fixture oracle failed"
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:north.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:south.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:east.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:west.json",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "independent_recalculation_all_datasets",
+                "passed": true
+              },
+              {
+                "name": "four_actual_read_only_inspectors",
+                "passed": true
+              },
+              {
+                "name": "coordinator_executed_node",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "coordinator_verified_inspector_reports",
+                "reason": "Four actual inspector delegate reports contain the correct metrics and raw records. Coordinator Node reads all four originals and verifies their count, units and weighted totals against the inspector reports before write_file creates answer.json. A second Node command prints every record before integration. Later final validation passed, but the runtime remains blocked on approval and is independently classified incomplete.",
+                "status": "passed",
+                "evidence_ids": [
+                  "f5ad996d-64f1-4930-b5fd-678bdc605ce2",
+                  "095cf59d-4999-4968-b71c-0f312b0cee4e",
+                  "a1f4b944-96d1-463e-84fc-ac4458d4ff83",
+                  "ddcd6a0e-3c1a-49a8-a2d7-704b254cf11f",
+                  "d281bf12-d953-4320-8c7b-b5508d0aca80",
+                  "95b995a6-8344-4268-a393-0f080e268a62",
+                  "d4fc030f-a21e-4c73-93ea-336a7504a01d"
+                ]
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/parallel_analysis/standard/2/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex, inspection of recorded executed fixture tool commands",
+              "tool_evidence_sha256": "004bff422fb6a6f5e0777eee1dab5973866ab7e0cd08fad39fa2e5c5da658981"
+            }
+          }
+        ],
+        "fast_dag": [
+          {
+            "round": 1,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/parallel_analysis/fast_dag/0",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:north.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:south.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:east.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:west.json",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "independent_recalculation_all_datasets",
+                "passed": true
+              },
+              {
+                "name": "four_actual_read_only_inspectors",
+                "passed": true
+              },
+              {
+                "name": "coordinator_executed_node",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "coordinator_verified_inspector_reports",
+                "reason": "Inspected all four actual inspector artifact reports (10/90/167, 10/94/171, 10/98/209, 10/85/145). Coordinator Node code rereads every original dataset, compares count/units/weighted to those reports and exits on mismatch before writing answer.json.",
+                "status": "passed",
+                "evidence_ids": [
+                  "9553ecba-e4a9-4caa-ae38-f982ffc83ab6"
+                ]
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/parallel_analysis/fast_dag/0/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex, inspection of recorded executed fixture tool commands",
+              "tool_evidence_sha256": "5bfb2f66968c91b6f97a43e4ce280b942df85d9555f23b0bc2fa554ba76718a6",
+              "agent_artifacts_sha256": "d645afebcdcaecee14d529d385ee12c1819512ba23bc6ba4695c955efd8dde49"
+            }
+          },
+          {
+            "round": 2,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/parallel_analysis/fast_dag/1",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:north.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:south.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:east.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:west.json",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "independent_recalculation_all_datasets",
+                "passed": true
+              },
+              {
+                "name": "four_actual_read_only_inspectors",
+                "passed": true
+              },
+              {
+                "name": "coordinator_executed_node",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "coordinator_verified_inspector_reports",
+                "reason": "All four actual inspector artifact reports were inspected. Coordinator Node rereads every original dataset, compares count/units/weighted with those reports and prints allMatch=true before writing answer.json.",
+                "status": "passed",
+                "evidence_ids": [
+                  "27324eda-b21c-4079-a6ca-f7820ccdbd2d"
+                ]
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/parallel_analysis/fast_dag/1/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex, inspection of recorded executed fixture tool commands",
+              "tool_evidence_sha256": "d1b5af20e5cf0ac453a998ed8d08e1f12f4b123984254d85e88f63e016a7cd24",
+              "agent_artifacts_sha256": "eda0f491f758cf41d924948b972dac3831e314ea91b24bb4afc3740b278d9a9e"
+            }
+          },
+          {
+            "round": 3,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/parallel_analysis/fast_dag/2",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:north.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:south.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:east.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:west.json",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "independent_recalculation_all_datasets",
+                "passed": true
+              },
+              {
+                "name": "four_actual_read_only_inspectors",
+                "passed": true
+              },
+              {
+                "name": "coordinator_executed_node",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "coordinator_verified_inspector_reports",
+                "reason": "The coordinator Node command reads all four originals, recomputes all three metrics, compares each against the four actual verified inspector artifact reports, then writes answer.json. All four comparisons returned true. The failure-exit test follows the write, but the comparisons themselves precede integration in this observed run.",
+                "status": "passed",
+                "evidence_ids": [
+                  "744e745d-cd9f-4138-bcb0-d10e65dba057"
+                ]
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-stability-artifacts/60ff56bd-5266-4631-a6f8-37998e312853/parallel_analysis/fast_dag/2/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex, inspection of recorded executed fixture tool commands",
+              "tool_evidence_sha256": "c1299a958711e4892fc1443c050dda831c5b659f9e59fe7213ee5bf94df1927f",
+              "agent_artifacts_sha256": "9733091510b3446e05cf0989d80bbbedbd7545786bf591de96e5793415789088"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "expected_samples": 24,
+  "observed_samples": 24,
+  "all_functional_passed": false,
+  "all_quality_passed": false,
+  "pending_manual_checks": 0
+}

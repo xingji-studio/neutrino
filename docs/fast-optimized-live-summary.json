@@ -1,0 +1,96 @@
+{
+  "benchmark_id": "c7c8ecc8-e6cd-401e-a5a2-a702f0b505c4",
+  "evaluated_at_utc": "2026-11-10T09:54:53.562705+00:00",
+  "model": {
+    "provider": "DeepSeek",
+    "name": "deepseek-flash",
+    "intensity": "Max",
+    "available_inference_slots": 4
+  },
+  "same_model_configuration_hash": "2b9a793ce1340f2f913e4ec6a72ffa684c0b3df3a15f9f4222743325a055a123",
+  "output_budgets": {
+    "standard": [
+      16384
+    ],
+    "fast_dag": [
+      16384
+    ]
+  },
+  "fresh_samples": true,
+  "order": [
+    "standard",
+    "fast_dag"
+  ],
+  "fixture": "multi_module_code",
+  "repetitions": 1,
+  "valid_completed_time_comparison": true,
+  "complete_token_usage_comparison": false,
+  "token_comparison_basis": "Provider-reported input+output only. One Fast HTTP 500 attempt had no usage; unknown is not counted as zero or as actual billed usage.",
+  "time_increase_fraction": 1.2423539064998392,
+  "reported_token_increase_fraction": 0.3305525108594163,
+  "known_input_tokens": {
+    "standard": 92288,
+    "fast_dag": 118267
+  },
+  "known_output_tokens": {
+    "standard": 6244,
+    "fast_dag": 12835
+  },
+  "request_coverage": {
+    "standard": {
+      "logical_requests": 29,
+      "http_attempts": 29,
+      "attempts_missing_usage": 0
+    },
+    "fast_dag": {
+      "logical_requests": 24,
+      "http_attempts": 25,
+      "attempts_missing_usage": 1
+    }
+  },
+  "provider_reported_cached_input_tokens": {
+    "standard": 62208,
+    "fast_dag": 84608
+  },
+  "peak_http_concurrency": {
+    "standard": 2,
+    "fast_dag": 2
+  },
+  "fast_failed_attempts": [
+    {
+      "role": "approval",
+      "http_status": 500,
+      "status": "retry",
+      "duration_ms": 22300.598786000162,
+      "input_tokens": null,
+      "output_tokens": null
+    }
+  ],
+  "quality": {
+    "both_passed": true,
+    "original_assertions_per_mode": 4,
+    "additional_formula_cases_per_mode": 16,
+    "functional_modules_byte_identical": true,
+    "answer_semantically_identical": true
+  },
+  "source_files_sha256": {
+    "assets/fast-planner.txt": "403b9a869cae9d3fd3cad7b2f49664a4d7c2b751892f02a8055180867616a2bb",
+    "assets/planner.txt": "fc04fa98b5791c673894a6ddee612246011096ba0c64dc0492edf7f345222404",
+    "assets/prompt.txt": "09113ad4dd66a6060ce5711c45c5dcc6e0d4576a00ac2c9889f07d9f5ba5936e",
+    "assets/subagent.txt": "6388adc7560233932ac586e34bf60c738cdcdd155905779a619da0f8da4b1cf5",
+    "src/fast/engine.ts": "c45cee22020aa4fb606513640fcdf66cb95692f6598e7e2add9008825f88318f",
+    "src/fast/scheduler.ts": "0905b430c89f6fd0273d6da1bbd7f950fbd93cecac8f862c38f02515dae87301",
+    "src/fast/worker.ts": "5121dd57623cef745bcfde340d6af3afec4e40031844947b27f0f9fdd2198dee",
+    "src/llm/client.ts": "90ead073158bc559c56872b5212ec8e6439fa67f5524c2e2b887fd7505d6ff8b",
+    "src/llm/runtime.ts": "20917fb343299b78d3fff994874fc8a6033adfccb969b34a73e3a80519d4a461",
+    "src/llm/approval.ts": "dd3b9e841596c0d26c1811202ef48c3a41aa9084ed992780f46f8fd8cdfb9684",
+    "scripts/benchmark-fast-live.mjs": "1713c8777bf593740d601e57c14e110988d69decb157e0874ed20a58967a1508",
+    "scripts/test-fast-benchmark-budget.mjs": "0c1921c73fc54e4ee45fc8bdad4da32f8580f40e5e5876f0955fa192e669bebb"
+  },
+  "limitations": [
+    "One pair and one fixture; not population performance or P95",
+    "Observed HTTP 500 retry and backoff remain in measured wall time",
+    "Reported Tokens are not exact billing; one failed attempt is unknown",
+    "No comparison against the old Fast implementation was performed"
+  ]
+}

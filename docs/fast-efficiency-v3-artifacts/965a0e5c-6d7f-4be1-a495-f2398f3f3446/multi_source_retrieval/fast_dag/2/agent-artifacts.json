@@ -1,0 +1,55 @@
+{
+  "engine_run_id": "9aa614f2-47b0-448d-9631-2a50a0b7231d",
+  "artifacts": [
+    {
+      "result": "Read all three original sources and produced answer.json.\n\nSources (cited, all inside the fixture /tmp/neutrino-fast-live-b4eG5i/multi_source_retrieval/fast_dag/2):\n- a.txt — \"Alpha population: 12\"\n- b.txt — \"Beta population: 18\"\n- c.txt — \"Gamma population: 30\"\n\nCross-check (Node, inline `node -e`, no Python): each file contains exactly one non-blank line matching `^<Label> population: <int>$`; labels came out Alpha/Beta/Gamma in the expected order and each population parsed as a non-negative integer. Sum: 12 + 18 + 30 = 60.\n\nOutput: answer.json = {\"total\": 60}, where total is a JSON number (typeof \"number\"), with `total` as the only key.\n\nVerification: a second Node test re-read the three source files, independently recomputed the sum, parsed answer.json from disk and asserted exact key set [\"total\"], numeric finite total, and equality with the recomputed 60 — output \"PASS keys=[\"total\"] total=60 (typeof number) recomputed=12+18+30=60\", plus `cat answer.json` showing the written file.\n\nTooling constraints respected: Node used for all computation/tests; only local files in the fixture touched; no credentials or external services accessed.",
+      "conclusions": [
+        "Populations are Alpha=12 (a.txt), Beta=18 (b.txt), Gamma=30 (c.txt); the total is 60 and answer.json holds {\"total\": 60} as a number, confirmed by an independent recomputation test."
+      ],
+      "evidence": [
+        "9503dcf0-a174-4f23-94f2-811568e124e5",
+        "45ab9852-5bde-4f34-a8b4-610f9837c8fc",
+        "000b7813-d865-44f7-996b-c9d0e4f5546e",
+        "03166828-62f1-4820-be1c-5e9f8248862d",
+        "83741793-ca6c-49c1-9fc0-09cda4f47a1f",
+        "d3a37f27-a6a5-4584-8376-9b4f8f8e7227"
+      ],
+      "assumptions": [],
+      "unresolved": [],
+      "side_effects": true,
+      "task_id": "main",
+      "version": 1,
+      "input_versions": {
+        "request": "d97073fa4b378db1613a615cecf1782d5f64d411fa3cc88bcbb2a8850a6573e4",
+        "history": "3dfd0b0f8571e21e19290f0e6e46670da60c0a3185b984a2010834010f440f78"
+      },
+      "verification": "verified",
+      "created_at": "2026-11-10T14:11:42.330Z"
+    },
+    {
+      "result": "Independent verification passed. I re-read the three original sources from disk instead of trusting the dependency report, and re-derived the result with Node 18.19.1 (no Python).\n\nSources (all in fixture /tmp/neutrino-fast-live-b4eG5i/multi_source_retrieval/fast_dag/2):\n- a.txt → \"Alpha population: 12\" (21 bytes)\n- b.txt → \"Beta population: 18\" (20 bytes)\n- c.txt → \"Gamma population: 30\" (21 bytes)\n\nCross-check: each file holds exactly one non-blank line matching `^<Label> population: <int>$`, labels Alpha/Beta/Gamma as expected, populations 12/18/30 parsed as integers. Recomputed sum 12+18+30 = 60.\n\nOutput: answer.json on disk = {\"total\": 60} (18 bytes), JSON-parses, key set exactly [\"total\"], total typeof \"number\", finite, equals the independently recomputed 60, and is not the string \"60\". Directory contains only a.txt, b.txt, c.txt and answer.json — no stray helper scripts.\n\nConstraints respected: all work confined to the fixture, computations/tests via Node, no credentials or external services accessed. No conflicts or discrepancies found with the dependency artifact main@1.",
+      "conclusions": [
+        "Populations confirmed from original files: a.txt=12, b.txt=18, c.txt=30; total 60.",
+        "answer.json holds {\"total\": 60} as a numeric value with exactly one key, matching an independent Node recomputation."
+      ],
+      "evidence": [
+        "e2c7364b-97d0-4bd0-be56-6830519056fa",
+        "a0e386b7-6760-488e-bbf1-0a507ed49efa",
+        "d498aafc-912d-412f-be71-7298b3cd0d2e"
+      ],
+      "assumptions": [],
+      "unresolved": [],
+      "side_effects": true,
+      "verification_passed": true,
+      "task_id": "main.verify",
+      "version": 1,
+      "input_versions": {
+        "request": "d97073fa4b378db1613a615cecf1782d5f64d411fa3cc88bcbb2a8850a6573e4",
+        "history": "3dfd0b0f8571e21e19290f0e6e46670da60c0a3185b984a2010834010f440f78",
+        "main": 1
+      },
+      "verification": "verified",
+      "created_at": "2026-11-10T14:11:53.867Z"
+    }
+  ]
+}

@@ -16,7 +16,9 @@ export interface FastTask {
   write_paths: string[];
   exclusive: boolean;
   status: FastStatus;
+  /** Planned work gets an automatic verifier; planned verification executes its checks once. */
   kind: "work" | "verification";
+  /** Present only on the automatic verifier of a work task. */
   verifies?: string;
   attempts: number;
   generation: number;
@@ -69,6 +71,7 @@ export interface FastSnapshot {
   resources: { model: number; tools: number; background: number };
   integrated?: Record<string, number>;
   review?: Array<{ accepted: boolean; reason: string; evidence_ids: string[] }>;
+  planning_errors?: string[];
   error?: string;
 }
 export interface FastSettings {

@@ -1,0 +1,27 @@
+{
+  "validated_at_utc": "2026-11-10T14:54:59.383455+00:00",
+  "base_commit": "3f7db0d1f7852366fb0cf441dc592211539f80ea",
+  "scope": "Fast Mode optimization, diagnostics, tests and archived benchmark evidence; folder-picker implementation and test excluded",
+  "isolated_staged_tree": true,
+  "validation_command": "npm run test:fast",
+  "validation_exit_code": 0,
+  "validation_log": "docs/fast-commit-validation.log",
+  "fast_test_scripts": 9,
+  "declared_full_suite_scripts_in_this_commit": 83,
+  "prior_measured_full_workspace_suite_scripts": 84,
+  "partial_shared_files": {
+    "package.json": "Fast test and diagnostic scripts only",
+    "web/app.js": "Fast planned-check progress rendering only"
+  },
+  "suite_difference": "The benchmark-time working tree included an independently developed folder-picker test. This commit stages only the Fast additions to package.json; it leaves that test and feature in the working tree. Historical benchmark/test records are retained verbatim.",
+  "live_benchmark": "docs/fast-efficiency-v3-benchmark.json",
+  "measured_model": "DeepSeek/deepseek-flash Max",
+  "quality_passed": {
+    "fast_dag": 12,
+    "standard": 9
+  },
+  "original_runtime_fingerprints_reproduced_in_staged_build": 22,
+  "provider_calls_for_commit_validation": 0,
+  "configured_secrets_checked": 2,
+  "credential_leaks": 0
+}

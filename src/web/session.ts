@@ -886,6 +886,7 @@ export class WebSession implements LiveAgent {
         loadPlannerPrompt(),
         buildPlannerInput({ request, cwd: this.dir, transcript: planTranscript(this.messages) }),
         {
+          ...(currentTask()?.runtime.diagnostics ? { diagnostic: { role: "planning" as const } } : {}),
           onRetry: (notice) => {
             this.retrying = notice;
             this.publishLive();

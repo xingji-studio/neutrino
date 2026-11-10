@@ -1,0 +1,59 @@
+{
+  "engine_run_id": "ec4359fb-9c29-4e8b-b6e1-14494bcf0c00",
+  "artifacts": [
+    {
+      "result": "Read all three original sources inside the fixture and wrote answer.json.\n\nSources (cited paths, relative to the working directory /tmp/neutrino-fast-live-b4eG5i/multi_source_retrieval/fast_dag/1):\n- a.txt — \"Alpha population: 12\" → 12\n- b.txt — \"Beta population: 18\" → 18\n- c.txt — \"Gamma population: 30\" → 30\n\nCross-checks performed in Node (sum.js, kept in the fixture): each file matches the strict pattern `^<Label> population: <int>$`; the three population labels (Alpha/Beta/Gamma) are distinct, so each population is represented exactly once; each parsed value is re-confirmed against a re-read of its file; all values are safe integers.\n\nTotal: 12 + 18 + 30 = 60.\n\nOutput written: answer.json containing exactly one key, `total`, with numeric integer value 60 ({\"total\":60}, 13 bytes).\n\nVerification evidence:\n- Evidence 5c3030db-3ed5-4aad-bee0-365c1120ca99 — node sum.js output listing all three parsed rows (a=12, b=18, c=30) and total 60.\n- Evidence cb0db237-0a28-42e9-a72a-bcad425f71e0 — post-write check: answer.json present, keys == [\"total\"], typeof total == number, isInteger true, and an independent recomputation straight from the three files (12+18+30) equals 60; MATCH: true.\n- Evidence 0568e2a3-3cef-4e00-a3d9-a567fcc0e82c — raw contents of a.txt, b.txt, c.txt.\n\nAll computation and testing used node; no Python, no credentials, no external services; every file operation stayed inside the fixture.",
+      "conclusions": [
+        "Populations are a.txt=12, b.txt=18, c.txt=30, each appearing once with distinct labels; sum = 60.",
+        "answer.json holds exactly {\"total\":60} with a numeric integer total, confirmed by an independent Node recomputation."
+      ],
+      "evidence": [
+        "2bb06963-01c9-43ed-94ce-526cba45c088",
+        "0568e2a3-3cef-4e00-a3d9-a567fcc0e82c",
+        "5c3030db-3ed5-4aad-bee0-365c1120ca99",
+        "cb0db237-0a28-42e9-a72a-bcad425f71e0"
+      ],
+      "assumptions": [],
+      "unresolved": [],
+      "side_effects": true,
+      "task_id": "main",
+      "version": 1,
+      "input_versions": {
+        "request": "ac6a8f76e509780ea7c5443ce059d6c079f3d3306af02e5fd075ed81473a48db",
+        "history": "92dbb77e258ce5d5e64ad39cebf63be7591d97ddd738df6d0535fc7ea7511369"
+      },
+      "verification": "verified",
+      "created_at": "2026-11-10T14:09:39.995Z"
+    },
+    {
+      "result": "Independent verification of artifact main@1 passed. I re-listed the fixture and re-read the raw bytes of all three sources, then recomputed everything in a fresh Node one-liner (no Python, no network, no credentials).\n\nSources (paths relative to /tmp/neutrino-fast-live-b4eG5i/multi_source_retrieval/fast_dag/1):\n- a.txt — `Alpha population: 12` → 12\n- b.txt — `Beta population: 18` → 18\n- c.txt — `Gamma population: 30` → 30\n\nRecomputation result: rows parsed with the strict pattern `^<Label> population: <digits>\\n$`; 3 distinct labels out of 3, so each population appears exactly once; all values safe integers; independent total = 12 + 18 + 30 = 60.\n\nanswer.json on disk: `{\"total\":60}` (13 bytes). Keys == [\"total\"], typeof total === \"number\", Number.isInteger true, value 60 → MATCH: true against the recomputation. Requirement \"numeric key total\" is satisfied as an integer; no extra keys present.\n\nCmd 1 (evidence 96d067fa-2176-4b67-b8d2-722dfd867acc) proved the fixture contents and that answer.json plus the node helper sum.js are the only added files inside the fixture. Cmd 2 (evidence d894989d-d248-4a76-9180-9fb25812c1ac) proved the per-file cross-check and the total/key/type match. Claims in the dependency report (12/18/30, total 60, single numeric key) are confirmed by my own reads and computation, not taken on trust.\n\nNothing left unfinished; the three source paths are cited above as the original request requires.",
+      "conclusions": [
+        "a.txt=12, b.txt=18, c.txt=30 with distinct labels; independent Node recomputation gives total 60.",
+        "answer.json contains exactly one key `total` with numeric integer value 60, matching the independent recomputation (MATCH: true)."
+      ],
+      "evidence": [
+        "96d067fa-2176-4b67-b8d2-722dfd867acc",
+        "d894989d-d248-4a76-9180-9fb25812c1ac",
+        "cb0db237-0a28-42e9-a72a-bcad425f71e0",
+        "5c3030db-3ed5-4aad-bee0-365c1120ca99",
+        "0568e2a3-3cef-4e00-a3d9-a567fcc0e82c",
+        "2bb06963-01c9-43ed-94ce-526cba45c088"
+      ],
+      "assumptions": [
+        "The helper sum.js left in the fixture is an allowed scratch file; optional cleanup was not required by the request."
+      ],
+      "unresolved": [],
+      "side_effects": true,
+      "verification_passed": true,
+      "task_id": "main.verify",
+      "version": 1,
+      "input_versions": {
+        "request": "ac6a8f76e509780ea7c5443ce059d6c079f3d3306af02e5fd075ed81473a48db",
+        "history": "92dbb77e258ce5d5e64ad39cebf63be7591d97ddd738df6d0535fc7ea7511369",
+        "main": 1
+      },
+      "verification": "verified",
+      "created_at": "2026-11-10T14:09:50.044Z"
+    }
+  ]
+}

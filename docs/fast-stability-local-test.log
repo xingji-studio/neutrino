@@ -1,0 +1,1 @@
+PASS stability measurement: 24 artifact audits, fixed oracles, read-only inspectors, hash-bound protocol reviews, paired spread/wins, failures and unknown usage; no model calls

@@ -1,0 +1,1956 @@
+{
+  "kind": "post_run_independent_fixture_audit",
+  "benchmark_id": "965a0e5c-6d7f-4be1-a495-f2398f3f3446",
+  "audited_at": "2026-11-10T14:34:29.888Z",
+  "repetitions": 3,
+  "same_acceptance_for_both": true,
+  "external_model_calls": 0,
+  "scenarios": [
+    {
+      "name": "multi_source_retrieval",
+      "samples": {
+        "standard": [
+          {
+            "round": 1,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/multi_source_retrieval/standard/0",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:a.txt",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:b.txt",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:c.txt",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "recalculate_from_original_sources",
+                "passed": true
+              },
+              {
+                "name": "all_source_citations",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "original_sources_actually_read",
+                "reason": "Inspected executed cat/Node reads of all three original source files and actual Alpha 12, Beta 18, Gamma 30 outputs. The final answer cites all three; immutable inputs, exact answer and citations are also independently audited by the original external checker.",
+                "status": "passed",
+                "evidence_ids": [
+                  "421feecb-3b73-499a-9400-dac27d922c90"
+                ]
+              },
+              {
+                "name": "fixture_only_scope",
+                "status": "passed",
+                "evidence_ids": [
+                  "ba882a9e-96d6-439c-901c-0bed0c08c3d8",
+                  "69702b61-3a28-4315-9e09-aaf3a34878cb",
+                  "421feecb-3b73-499a-9400-dac27d922c90",
+                  "bdd66994-c79c-4727-a00b-f581836d5b84",
+                  "b046e486-9499-4140-afe6-bc39a606ff5b",
+                  "f2b73368-887f-4909-b08a-0117c8928ca3",
+                  "e69105de-3771-47cb-8a32-f818efab4f36",
+                  "67f95de1-2c5a-45cc-8c90-7a650c94f569",
+                  "cde0f911-f81b-46ec-accd-78b8c76eafe8",
+                  "f84fb4a3-504a-4147-bc6b-21a154a9a78e"
+                ],
+                "reason": "Inspected explicit paths, shell/Node file operations and local helper creation for these saved calls. No executed operation outside this original sample directory was identified. Required file calls and computed paths resolve within original_cwd. Denied proposals are separate and did not execute. This review of recorded calls is not an OS sandbox or a guarantee for arbitrary dynamic code."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/multi_source_retrieval/standard/0/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex inspection of saved original sources, executed programs, actual inspector reports and workspace paths; no paid model calls",
+              "tool_evidence_sha256": "cc3ea34533ef5b8743bc95b54328120145824baf83fff428d117348b1a9862eb"
+            }
+          },
+          {
+            "round": 2,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/multi_source_retrieval/standard/1",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:a.txt",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:b.txt",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:c.txt",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "recalculate_from_original_sources",
+                "passed": true
+              },
+              {
+                "name": "all_source_citations",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "original_sources_actually_read",
+                "reason": "Inspected executed cat/Node reads of all three original source files and actual Alpha 12, Beta 18, Gamma 30 outputs. The final answer cites all three; immutable inputs, exact answer and citations are also independently audited by the original external checker.",
+                "status": "passed",
+                "evidence_ids": [
+                  "9dce7805-baaf-42d0-8441-53671bb2e9a4"
+                ]
+              },
+              {
+                "name": "fixture_only_scope",
+                "status": "passed",
+                "evidence_ids": [
+                  "f3de7b1e-e52f-415b-9343-35f53a148c21",
+                  "9dce7805-baaf-42d0-8441-53671bb2e9a4",
+                  "b3dc139f-ef89-4fae-b65e-eb2e04c323b8",
+                  "eea2afa0-fd2a-4ba1-9a2b-73360f2b738c",
+                  "40c9bd31-f109-4ecd-b22f-dd299c2c3d08",
+                  "f30adbc5-4f12-4a7c-90d4-9669572041d5",
+                  "0a60a2a7-8ece-457a-bdd0-d51e74a274ed",
+                  "c4c9a252-e95c-4256-81ec-e9bdf47bc3d2"
+                ],
+                "reason": "Inspected explicit paths, shell/Node file operations and local helper creation for these saved calls. No executed operation outside this original sample directory was identified. Required file calls and computed paths resolve within original_cwd. Denied proposals are separate and did not execute. This review of recorded calls is not an OS sandbox or a guarantee for arbitrary dynamic code."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/multi_source_retrieval/standard/1/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex inspection of saved original sources, executed programs, actual inspector reports and workspace paths; no paid model calls",
+              "tool_evidence_sha256": "77a34e56889f5b12b2a0d6599c2dcb71b6303377e62cb53cdc5dcefec408a6ba"
+            }
+          },
+          {
+            "round": 3,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/multi_source_retrieval/standard/2",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:a.txt",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:b.txt",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:c.txt",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "recalculate_from_original_sources",
+                "passed": true
+              },
+              {
+                "name": "all_source_citations",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "original_sources_actually_read",
+                "reason": "Read_file evidence contains the three exact original source bodies Alpha 12, Beta 18, Gamma 30. Inspected actual completed Node computations and final citations. Input hashes, exact answer and citations remain subject to the unchanged independent auditor.",
+                "status": "passed",
+                "evidence_ids": [
+                  "d9e91e55-bf49-42e8-9f6f-7fb0d3bbef91",
+                  "06a7c12c-ffaf-41d0-8bc9-a4a02a6a8b2c",
+                  "dc058a38-3dee-4520-9f89-8eb77204d5bd"
+                ]
+              },
+              {
+                "name": "fixture_only_scope",
+                "status": "passed",
+                "evidence_ids": [
+                  "a2451f8a-a475-4b04-bfca-9f87786d6681",
+                  "d9e91e55-bf49-42e8-9f6f-7fb0d3bbef91",
+                  "06a7c12c-ffaf-41d0-8bc9-a4a02a6a8b2c",
+                  "dc058a38-3dee-4520-9f89-8eb77204d5bd",
+                  "9d62a501-547d-4ed1-b4ec-d0552c562196",
+                  "350ec427-a92a-4693-8af2-ca5d7ff7d21f",
+                  "c84d16d9-3a6a-4d17-a6cd-2ce7ca43d978",
+                  "10049cab-07c5-434b-ba88-55c08aee84ab",
+                  "b2464bc9-300f-4c94-980e-bb429f4fd5d1",
+                  "421fd2bd-5d71-4ba0-b4ae-917b0e0ebc17",
+                  "7ea4c5b0-35b7-408d-b158-f9009b17fd7f",
+                  "65eb0657-f507-4be5-a363-f73e66215088"
+                ],
+                "reason": "Inspected explicit paths, shell/Node file operations and local helper creation for these saved calls. No executed operation outside this original sample directory was identified. Required file calls and computed paths resolve within original_cwd. Denied proposals are separate and did not execute. This review of recorded calls is not an OS sandbox or a guarantee for arbitrary dynamic code."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/multi_source_retrieval/standard/2/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex inspection of saved original sources, executed programs, actual inspector reports and workspace paths; no paid model calls",
+              "tool_evidence_sha256": "428df7debbcc542aa961dc84900b1aad8b1d25096a8db353c6c19580aa5eb848"
+            }
+          }
+        ],
+        "fast_dag": [
+          {
+            "round": 1,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/multi_source_retrieval/fast_dag/0",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:a.txt",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:b.txt",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:c.txt",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "recalculate_from_original_sources",
+                "passed": true
+              },
+              {
+                "name": "all_source_citations",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "original_sources_actually_read",
+                "reason": "Inspected executed cat/Node reads of all three original source files and actual Alpha 12, Beta 18, Gamma 30 outputs. The final answer cites all three; immutable inputs, exact answer and citations are also independently audited by the original external checker.",
+                "status": "passed",
+                "evidence_ids": [
+                  "07b8db86-f6a9-48c4-bc2e-9b88b19f915b"
+                ]
+              },
+              {
+                "name": "fixture_only_scope",
+                "status": "passed",
+                "evidence_ids": [
+                  "63449149-af3c-44fd-9062-5b3214fabea5",
+                  "07b8db86-f6a9-48c4-bc2e-9b88b19f915b",
+                  "2d0e3cdd-fbc3-4686-8554-9d039fa1f747",
+                  "139ea848-10bb-4a95-be5e-da24affa296c",
+                  "99c1033e-ce35-4d11-b9d6-ee96ad3bac19",
+                  "7bbe89ac-cfed-4b86-92e4-c457caed9522",
+                  "7b847e68-d563-49c1-bcf5-7352408b2e2f",
+                  "8b99487b-101a-41d0-8084-c3e64df4dd47"
+                ],
+                "reason": "Inspected explicit paths, shell/Node file operations and local helper creation for these saved calls. No executed operation outside this original sample directory was identified. Required file calls and computed paths resolve within original_cwd. Denied proposals are separate and did not execute. This review of recorded calls is not an OS sandbox or a guarantee for arbitrary dynamic code."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/multi_source_retrieval/fast_dag/0/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex inspection of saved original sources, executed programs, actual inspector reports and workspace paths; no paid model calls",
+              "tool_evidence_sha256": "c2c37963558566c0ca93fa2d957949060ebc7dc0bfadfba1f45b301104bb823c",
+              "agent_artifacts_sha256": "3675168c25b053c8b0fe3a6374542033434001e6fb9f4f6f0394fd65271e437b"
+            }
+          },
+          {
+            "round": 2,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/multi_source_retrieval/fast_dag/1",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:a.txt",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:b.txt",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:c.txt",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "recalculate_from_original_sources",
+                "passed": true
+              },
+              {
+                "name": "all_source_citations",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "original_sources_actually_read",
+                "reason": "Inspected executed cat/Node reads of all three original source files and actual Alpha 12, Beta 18, Gamma 30 outputs. The final answer cites all three; immutable inputs, exact answer and citations are also independently audited by the original external checker.",
+                "status": "passed",
+                "evidence_ids": [
+                  "0568e2a3-3cef-4e00-a3d9-a567fcc0e82c"
+                ]
+              },
+              {
+                "name": "fixture_only_scope",
+                "status": "passed",
+                "evidence_ids": [
+                  "2bb06963-01c9-43ed-94ce-526cba45c088",
+                  "0568e2a3-3cef-4e00-a3d9-a567fcc0e82c",
+                  "5c3030db-3ed5-4aad-bee0-365c1120ca99",
+                  "cb0db237-0a28-42e9-a72a-bcad425f71e0",
+                  "96d067fa-2176-4b67-b8d2-722dfd867acc",
+                  "d894989d-d248-4a76-9180-9fb25812c1ac",
+                  "82e05cdb-c224-4cec-ba46-66b675c144cd"
+                ],
+                "reason": "Inspected explicit paths, shell/Node file operations and local helper creation for these saved calls. No executed operation outside this original sample directory was identified. Required file calls and computed paths resolve within original_cwd. Denied proposals are separate and did not execute. This review of recorded calls is not an OS sandbox or a guarantee for arbitrary dynamic code."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/multi_source_retrieval/fast_dag/1/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex inspection of saved original sources, executed programs, actual inspector reports and workspace paths; no paid model calls",
+              "tool_evidence_sha256": "b3e8846d99c3b481a1d18cb4c1e695392d3543cfa2e4a674e73ff863f71c2c40",
+              "agent_artifacts_sha256": "a37bb84f13f940751821ba1cff38c3b012c00dc7a0da7b85c2fb92f06f7a478a"
+            }
+          },
+          {
+            "round": 3,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/multi_source_retrieval/fast_dag/2",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:a.txt",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:b.txt",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:c.txt",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "recalculate_from_original_sources",
+                "passed": true
+              },
+              {
+                "name": "all_source_citations",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "original_sources_actually_read",
+                "reason": "Read_file evidence contains the three exact original source bodies Alpha 12, Beta 18, Gamma 30. Inspected actual completed Node computations and final citations. Input hashes, exact answer and citations remain subject to the unchanged independent auditor.",
+                "status": "passed",
+                "evidence_ids": [
+                  "45ab9852-5bde-4f34-a8b4-610f9837c8fc",
+                  "000b7813-d865-44f7-996b-c9d0e4f5546e",
+                  "03166828-62f1-4820-be1c-5e9f8248862d"
+                ]
+              },
+              {
+                "name": "fixture_only_scope",
+                "status": "passed",
+                "evidence_ids": [
+                  "9503dcf0-a174-4f23-94f2-811568e124e5",
+                  "45ab9852-5bde-4f34-a8b4-610f9837c8fc",
+                  "000b7813-d865-44f7-996b-c9d0e4f5546e",
+                  "03166828-62f1-4820-be1c-5e9f8248862d",
+                  "83741793-ca6c-49c1-9fc0-09cda4f47a1f",
+                  "d3a37f27-a6a5-4584-8376-9b4f8f8e7227",
+                  "e2c7364b-97d0-4bd0-be56-6830519056fa",
+                  "a0e386b7-6760-488e-bbf1-0a507ed49efa",
+                  "d498aafc-912d-412f-be71-7298b3cd0d2e",
+                  "5f52ac83-7084-43fe-865a-d390229970ac"
+                ],
+                "reason": "Inspected explicit paths, shell/Node file operations and local helper creation for these saved calls. No executed operation outside this original sample directory was identified. Required file calls and computed paths resolve within original_cwd. Denied proposals are separate and did not execute. This review of recorded calls is not an OS sandbox or a guarantee for arbitrary dynamic code."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/multi_source_retrieval/fast_dag/2/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex inspection of saved original sources, executed programs, actual inspector reports and workspace paths; no paid model calls",
+              "tool_evidence_sha256": "e1c0e444878045a82166f6f47aaf01b48eb67328555de90347f664e89d2eff9e",
+              "agent_artifacts_sha256": "735c825b559aa496d9c21c47d18b9cdec1f3c1886879afdfd30a0cf4a3e3d13a"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "multi_module_code",
+      "samples": {
+        "standard": [
+          {
+            "round": 1,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/multi_module_code/standard/0",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:package.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:test.mjs",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "original_four_assertions",
+                "passed": true
+              },
+              {
+                "name": "sixteen_formula_cases_and_exports",
+                "passed": true
+              },
+              {
+                "name": "independent_modules",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "fixture_only_scope",
+                "status": "passed",
+                "evidence_ids": [
+                  "9b7339eb-5c4c-47fe-8a11-5ceb5ca6bcdd",
+                  "e7cec223-d5fa-49e7-ab18-097847b2a58a",
+                  "facd1e14-33be-43df-a4e2-6f7dac0bd496",
+                  "a4b8dfbc-6793-4865-adc9-52a19a782d3f",
+                  "be700d7a-d183-484b-89b3-6fe54b4355cf",
+                  "b64815a4-93f4-4f59-9d2b-bf8fc9ee6bd7",
+                  "62e9bcd6-96ea-4632-92ae-032780870f2a",
+                  "b1715ea5-0074-4984-96a2-a720dec4e996",
+                  "e2e8a6d6-689c-4b63-ba57-548747a3dcbc",
+                  "3fb8f750-7d20-4969-9bab-ea53cda50dcb",
+                  "130162df-3bda-4dc4-bf4d-f73d0edee3d1",
+                  "cb6e2858-c2b5-4f6b-b015-562759be2194",
+                  "0716c430-8192-4bd7-8100-7f8be26fa6a7",
+                  "813dadcc-e284-49a5-b1eb-9a6721141549",
+                  "aaa920aa-6a6c-4ede-942c-84132f9b46d2",
+                  "5279bfe4-69bc-4c64-94bb-3e6e880565d8"
+                ],
+                "reason": "Inspected explicit paths, shell/Node file operations and local helper creation for these saved calls. No executed operation outside this original sample directory was identified. Required file calls and computed paths resolve within original_cwd. Denied proposals are separate and did not execute. This review of recorded calls is not an OS sandbox or a guarantee for arbitrary dynamic code."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/multi_module_code/standard/0/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex inspection of saved original sources, executed programs, actual inspector reports and workspace paths; no paid model calls",
+              "tool_evidence_sha256": "59134e9036bb001ae1fb3dec5046471570f6c1ef509dc9f6074cc1c17f83c3cf"
+            }
+          },
+          {
+            "round": 2,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/multi_module_code/standard/1",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:package.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:test.mjs",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "original_four_assertions",
+                "passed": true
+              },
+              {
+                "name": "sixteen_formula_cases_and_exports",
+                "passed": true
+              },
+              {
+                "name": "independent_modules",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "fixture_only_scope",
+                "status": "passed",
+                "evidence_ids": [
+                  "0b1e22f4-b191-49e3-90b8-1fa5cabb4849",
+                  "be5c58e1-64ce-4a16-a986-1612393df893",
+                  "c2574495-81d4-4c19-b177-46ab4c6eaceb",
+                  "fe505ce1-09d6-4943-8d45-7820d59102c1",
+                  "576bea83-67d7-4d95-ba6d-04a1e753b52e",
+                  "7f771aba-6c2a-4a99-8721-a3984464cea6",
+                  "9590c33a-9afb-43ed-b845-fc83e556eff9",
+                  "ed8da0d0-de92-4120-afa2-916496eb308a",
+                  "91f95217-fee9-4797-b78c-fe7b608f58ee",
+                  "76589517-6b11-4467-8f00-a9837e6ee30a",
+                  "b05a9e79-c378-4348-a647-631dc6c350ca",
+                  "914a47dd-4176-49ee-b433-19ee3001158b",
+                  "9326d29b-d5ea-4ec3-8a54-6ece814c8f96",
+                  "1f770dd3-55b1-407e-9c12-beae8e58cae0",
+                  "da86aa92-59eb-4438-8372-c4db3a2a873a",
+                  "67fc4f38-e5a1-4722-852f-900b270f0017"
+                ],
+                "reason": "Inspected explicit paths, shell/Node file operations and local helper creation for these saved calls. No executed operation outside this original sample directory was identified. Required file calls and computed paths resolve within original_cwd. Denied proposals are separate and did not execute. This review of recorded calls is not an OS sandbox or a guarantee for arbitrary dynamic code."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/multi_module_code/standard/1/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex inspection of saved original sources, executed programs, actual inspector reports and workspace paths; no paid model calls",
+              "tool_evidence_sha256": "23f55b91cb346d3bff3c55791aba2af1ecc140527402a15e15cde5ee16f40c0e"
+            }
+          },
+          {
+            "round": 3,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/multi_module_code/standard/2",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:package.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:test.mjs",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "original_four_assertions",
+                "passed": true
+              },
+              {
+                "name": "sixteen_formula_cases_and_exports",
+                "passed": true
+              },
+              {
+                "name": "independent_modules",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "fixture_only_scope",
+                "status": "passed",
+                "evidence_ids": [
+                  "406e6c82-e013-4510-bd65-69dc87bd8fe0",
+                  "2c4101db-7cbf-461f-bbf7-c5267b9507f4",
+                  "67230256-5bee-4a72-ac06-2625bbadb79c",
+                  "f196a925-18bd-49cf-bcb8-4b3de70e9c74",
+                  "76e61e69-9921-4872-a80d-b912772dc5d4",
+                  "3192e191-cd14-47a3-8b11-87c83756daf9",
+                  "24310e87-3d12-4b65-a7e2-a78d3e92d0c1",
+                  "cf9a7fdf-8f06-4004-aae6-a59cf45b7a90",
+                  "090d2844-44d8-417e-aa89-36874dc0cbdc",
+                  "c77698f8-0619-4539-b38e-5f53d0737bfa",
+                  "216b6fe0-0f43-4add-a500-67f5146631cb",
+                  "1ab461c7-39e4-4f39-86f6-1fe9346567ad",
+                  "3d2344e8-559c-49fa-8ee9-b98c8d6b2d0d",
+                  "63b5ad38-8e95-49be-b204-5eb6f2cfa8d2",
+                  "420cbc60-a7f4-40f2-8abf-d79e3c119d0f"
+                ],
+                "reason": "Inspected explicit paths, shell/Node file operations and local helper creation for these saved calls. No executed operation outside this original sample directory was identified. Required file calls and computed paths resolve within original_cwd. Denied proposals are separate and did not execute. This review of recorded calls is not an OS sandbox or a guarantee for arbitrary dynamic code."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/multi_module_code/standard/2/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex inspection of saved original sources, executed programs, actual inspector reports and workspace paths; no paid model calls",
+              "tool_evidence_sha256": "a7cad6b8851de4d31bfbd549b25c4431f07be5d27ce45821bba5750a552da162"
+            }
+          }
+        ],
+        "fast_dag": [
+          {
+            "round": 1,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/multi_module_code/fast_dag/0",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:package.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:test.mjs",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "original_four_assertions",
+                "passed": true
+              },
+              {
+                "name": "sixteen_formula_cases_and_exports",
+                "passed": true
+              },
+              {
+                "name": "independent_modules",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "fixture_only_scope",
+                "status": "passed",
+                "evidence_ids": [
+                  "b8863916-daf5-4f2d-ae07-6a6375f08f2b",
+                  "b9fee1be-c67e-42ad-8cb1-5411d1e136e8",
+                  "ad964551-d37b-498d-80ac-a223f50a944a",
+                  "2bf17ea0-f7dd-411f-a02b-1c4fdbc30be6",
+                  "b09da92a-d872-4764-9897-1a192392559a",
+                  "16f4b639-7710-499a-93a2-b697f4d095a5",
+                  "15226cd0-5806-44dc-807d-717f3ad9df5f",
+                  "604f0b81-99b7-4acb-9932-92328e5a2eb1",
+                  "fda39fac-67d7-4a37-8ade-4a204c65ce44",
+                  "e1325c66-b842-48bf-9a06-ae9a9877497c",
+                  "50288e5f-8387-49f1-a0c2-6192775bee20"
+                ],
+                "reason": "Inspected explicit paths, shell/Node file operations and local helper creation for these saved calls. No executed operation outside this original sample directory was identified. Required file calls and computed paths resolve within original_cwd. Denied proposals are separate and did not execute. This review of recorded calls is not an OS sandbox or a guarantee for arbitrary dynamic code."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/multi_module_code/fast_dag/0/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex inspection of saved original sources, executed programs, actual inspector reports and workspace paths; no paid model calls",
+              "tool_evidence_sha256": "d252ff6b095c723778424371adefc2dfbb59d1ff9d8d0a1dd2b2be60bef0d21a",
+              "agent_artifacts_sha256": "dec8a3da44e5d72d18d408885872d6fb6cc4d7e10fcfc5dfc4f29929db0f222e"
+            }
+          },
+          {
+            "round": 2,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/multi_module_code/fast_dag/1",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:package.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:test.mjs",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "original_four_assertions",
+                "passed": true
+              },
+              {
+                "name": "sixteen_formula_cases_and_exports",
+                "passed": true
+              },
+              {
+                "name": "independent_modules",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "fixture_only_scope",
+                "status": "passed",
+                "evidence_ids": [
+                  "eaf3d808-4a23-49b1-b6ec-8670b2187c15",
+                  "81ddd676-533c-49e4-85a7-fa31484f454f",
+                  "80cfcb18-ca43-453b-862f-dc6a9d11d880",
+                  "23f6b9f2-837d-4f95-83b7-a563117829e8",
+                  "b4653da3-60eb-4fb6-91c3-d782dcbacc6c",
+                  "242e6a3a-450b-4e9b-a25c-2a1e8be49fdc",
+                  "99bd1561-0cb2-48da-841d-cb0de22ee86a",
+                  "a22a3d28-ce6e-42a7-84fb-deca920b555d",
+                  "ecae1a06-a8f0-4beb-8ab8-144b549a4521",
+                  "cbf90e9b-5478-4a85-a014-98e71ec03d50",
+                  "deb72f85-fd33-4c7b-9f87-f7a179c36999"
+                ],
+                "reason": "Inspected explicit paths, shell/Node file operations and local helper creation for these saved calls. No executed operation outside this original sample directory was identified. Required file calls and computed paths resolve within original_cwd. Denied proposals are separate and did not execute. This review of recorded calls is not an OS sandbox or a guarantee for arbitrary dynamic code."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/multi_module_code/fast_dag/1/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex inspection of saved original sources, executed programs, actual inspector reports and workspace paths; no paid model calls",
+              "tool_evidence_sha256": "c0ab8335820884682a3d5e08c28f7b7adb9df799cc11ec44facf783b0817d7e5",
+              "agent_artifacts_sha256": "edfa99d289000262ade990312b9b1880118ae08463b98b43ec2cb763ad9fdc0f"
+            }
+          },
+          {
+            "round": 3,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/multi_module_code/fast_dag/2",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:package.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:test.mjs",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "original_four_assertions",
+                "passed": true
+              },
+              {
+                "name": "sixteen_formula_cases_and_exports",
+                "passed": true
+              },
+              {
+                "name": "independent_modules",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "fixture_only_scope",
+                "status": "passed",
+                "evidence_ids": [
+                  "7b2a267a-ff2b-4dee-927e-033c578062d0",
+                  "8c8d101f-7d3a-47ec-bd96-b49f04302e0f",
+                  "09ed5730-0dfa-42d8-82a6-c4a43c9dcec3",
+                  "8cfd6267-35d3-4505-9c85-889508ee36af",
+                  "314f7f7a-31b9-45c6-bd12-6e9aec12d411",
+                  "b802874b-732c-4b8f-8364-db5b0b06d6e2",
+                  "e5ca1802-9d15-45b5-bdc4-ad13eb45d33e",
+                  "4145ef5f-c421-4fb1-ad9c-2f1dc6d9be51",
+                  "c75e0a1a-d4e9-4e5e-8a96-2b205a7f4d30",
+                  "2661cbd9-0ae3-4ea0-8fc5-60a208fb26d3",
+                  "9a5b9d07-b50d-4abf-aec4-15f123ba76a3",
+                  "a69a36e0-577a-4360-9e49-0551e1ec3b01"
+                ],
+                "reason": "Inspected explicit paths, shell/Node file operations and local helper creation for these saved calls. No executed operation outside this original sample directory was identified. Required file calls and computed paths resolve within original_cwd. Denied proposals are separate and did not execute. This review of recorded calls is not an OS sandbox or a guarantee for arbitrary dynamic code."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/multi_module_code/fast_dag/2/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex inspection of saved original sources, executed programs, actual inspector reports and workspace paths; no paid model calls",
+              "tool_evidence_sha256": "50508de13675152fd49efca2ccfdb02374e7a4e9270a596019daf50467bcb195",
+              "agent_artifacts_sha256": "f77010de52e321e10c0fbd79f77920097948cd00d2f62894dfc4d56ca09f4875"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "strong_sequential_dependencies",
+      "samples": {
+        "standard": [
+          {
+            "round": 1,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/strong_sequential_dependencies/standard/0",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:seed.txt",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "saved_stages_and_relationships",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "strict_execution_order",
+                "reason": "Inspected chronologically executed Node bodies and outputs. They read actual seed and save stage1=5, then read existing saved stage1 before calculating/saving stage2=25, then read existing saved stage2 before calculating/saving stage3=21. These are separate actual executions with required predecessor checks, followed by saved-file verification and answer output.",
+                "status": "passed",
+                "evidence_ids": [
+                  "d54f4488-b0f8-40f9-bbc8-222ac2bc60fd",
+                  "5413dd76-898e-4fc1-bb14-c037ff067766",
+                  "bd37f87c-e140-4f35-9476-99a5341e1091"
+                ]
+              },
+              {
+                "name": "fixture_only_scope",
+                "status": "passed",
+                "evidence_ids": [
+                  "e0b64895-b039-483f-9ae1-c9b2c0f9dd7e",
+                  "1640fcb8-8f5f-453f-8581-0e806646c0db",
+                  "760b6bf7-660d-40a0-b86b-e42ef20feaa5",
+                  "fa8cef29-8244-4408-a58d-d3e5ba1381ec",
+                  "cbec8c87-ac7c-4c23-be63-29a906335fb6",
+                  "d54f4488-b0f8-40f9-bbc8-222ac2bc60fd",
+                  "ce944520-8c43-4ebe-81f0-f1cf034d55c6",
+                  "8ad97fdc-4e4f-4239-b246-6608f627916f",
+                  "5413dd76-898e-4fc1-bb14-c037ff067766",
+                  "6891ffa6-5436-49e8-b384-00d0b1aa2e47",
+                  "bd37f87c-e140-4f35-9476-99a5341e1091",
+                  "1296057e-32ed-4cfb-a93d-68e1d103d962",
+                  "9fbc1b47-5835-41a6-8249-2fa9b5fe29e7",
+                  "eab91833-93e0-49df-9317-4ba5eec4d8ce",
+                  "11227a92-53ba-468f-89dc-5434b8cac0aa"
+                ],
+                "reason": "Inspected explicit paths, shell/Node file operations and local helper creation for these saved calls. No executed operation outside this original sample directory was identified. Required file calls and computed paths resolve within original_cwd. Denied proposals are separate and did not execute. This review of recorded calls is not an OS sandbox or a guarantee for arbitrary dynamic code."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/strong_sequential_dependencies/standard/0/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex inspection of saved original sources, executed programs, actual inspector reports and workspace paths; no paid model calls",
+              "tool_evidence_sha256": "0668bfcc514115eab9c691f6bd74604c2b7ae1c1e237c22fd28729982661abcd"
+            }
+          },
+          {
+            "round": 2,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/strong_sequential_dependencies/standard/1",
+            "functional_passed": false,
+            "passed": false,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": false,
+                "error": "runtime or primary fixture oracle failed"
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:seed.txt",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": false,
+                "error": "ENOENT: no such file or directory, open '/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/strong_sequential_dependencies/standard/1/answer.json'"
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "saved_stages_and_relationships",
+                "passed": false,
+                "error": "ENOENT: no such file or directory, open '/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/strong_sequential_dependencies/standard/1/answer.json'"
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "strict_execution_order",
+                "reason": "The three actual completed Node calculations read saved predecessors and then write stage1/2/3 in order; saved values 5/25/21 were independently re-read and checked. This protocol fact does not mark the overall sample complete: an unrequested negative test and cleanup later reached the human approval gate before answer.json was produced.",
+                "status": "passed",
+                "evidence_ids": [
+                  "dd8c9283-41a0-47b4-8b8c-12d1597ec682",
+                  "2b7f09ee-9b17-4b9f-be94-1418a1f44ad9",
+                  "f48cdf5f-d9e8-441d-b9da-ebeea0d7ac4d"
+                ]
+              },
+              {
+                "name": "fixture_only_scope",
+                "status": "passed",
+                "evidence_ids": [
+                  "2082e477-2b12-4bc6-a33f-fc35f88a9d47",
+                  "dd8c9283-41a0-47b4-8b8c-12d1597ec682",
+                  "6ba61136-afab-4b36-8ddb-b4bb35f70d42",
+                  "10af38ee-dc13-4474-90cc-3d544e4e0313",
+                  "2b7f09ee-9b17-4b9f-be94-1418a1f44ad9",
+                  "19397052-b666-4d57-aff0-531d07275daa",
+                  "7a0b2244-f8d8-4533-a36f-22d040b558d7",
+                  "f48cdf5f-d9e8-441d-b9da-ebeea0d7ac4d",
+                  "2be9b3cf-7b97-4cbe-abd5-03d3d1e27bf9",
+                  "d09d61b3-0b09-4f61-9b1b-f5ef76b34827",
+                  "54efe9bb-456b-4c71-ba4f-c18ecaa99e9f"
+                ],
+                "reason": "Inspected explicit paths, shell/Node file operations and local helper creation for these saved calls. No executed operation outside this original sample directory was identified. Required file calls and computed paths resolve within original_cwd. Denied proposals are separate and did not execute. This review of recorded calls is not an OS sandbox or a guarantee for arbitrary dynamic code."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/strong_sequential_dependencies/standard/1/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex inspection of saved original sources, executed programs, actual inspector reports and workspace paths; no paid model calls",
+              "tool_evidence_sha256": "f44999f1ae04ef51fd97bd799af8f37c1487563d9d4fdd2c1162bdfd8a0a0c1f"
+            }
+          },
+          {
+            "round": 3,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/strong_sequential_dependencies/standard/2",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:seed.txt",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "saved_stages_and_relationships",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "strict_execution_order",
+                "reason": "Reviewed the actual three ordered Node computations and outputs. Every stage requires and reads the saved predecessor from the fixture before deriving and writing its own output; resulting 5/25/21 and later answer are independently verified from saved files. No in-memory-only substitute for the required saved-file dependency chain.",
+                "status": "passed",
+                "evidence_ids": [
+                  "bfa04111-ae34-4876-9204-875130a8da30",
+                  "d284a0f9-877e-4dc2-81fd-b621e3978448",
+                  "c782eac4-638b-4d2a-9c8b-c46bb2ea1932"
+                ]
+              },
+              {
+                "name": "fixture_only_scope",
+                "status": "passed",
+                "evidence_ids": [
+                  "6f14cc07-8e2e-4a6f-a086-68b60d0a284f",
+                  "bfa04111-ae34-4876-9204-875130a8da30",
+                  "eb197513-04b6-4795-8582-6302186883e3",
+                  "e0b239cc-fdbe-40e3-bd17-6e464984e8d7",
+                  "d284a0f9-877e-4dc2-81fd-b621e3978448",
+                  "7edb492e-d7a4-4859-a4ef-28aa6f7aa3bc",
+                  "6ede4b17-9ee5-405d-bef6-61d7343844eb",
+                  "c782eac4-638b-4d2a-9c8b-c46bb2ea1932",
+                  "1908bfa3-d7d0-4838-802c-2abb9eba27de",
+                  "aadfac20-43ee-4e95-b481-98e42449096f",
+                  "f0ce2446-fc4e-4999-b00e-640591abf508",
+                  "7ca87d0c-1a7d-4fc8-92d0-cbeb9d8a9b64",
+                  "af9ca4b2-0f57-4195-b378-c743e5df52a6",
+                  "4956df9d-8fde-4530-9d40-e47687727acb",
+                  "f0d1d70b-18d8-4842-9aa0-c48f71365e70",
+                  "12611a58-f6ee-4ba4-9a3e-b666cb3f8b23",
+                  "7f0ce690-9c24-490b-8063-b526e2daa025"
+                ],
+                "reason": "Inspected explicit paths, shell/Node file operations and local helper creation for these saved calls. No executed operation outside this original sample directory was identified. Required file calls and computed paths resolve within original_cwd. Denied proposals are separate and did not execute. This review of recorded calls is not an OS sandbox or a guarantee for arbitrary dynamic code."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/strong_sequential_dependencies/standard/2/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex inspection of saved original sources, executed programs, actual inspector reports and workspace paths; no paid model calls",
+              "tool_evidence_sha256": "63eba8487b268ffca4a12a5b06312a3f4aacd8cc87bcca6d76df2f86ff620971"
+            }
+          }
+        ],
+        "fast_dag": [
+          {
+            "round": 1,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/strong_sequential_dependencies/fast_dag/0",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:seed.txt",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "saved_stages_and_relationships",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "strict_execution_order",
+                "reason": "Inspected chronologically executed Node bodies and outputs. They read actual seed and save stage1=5, then read existing saved stage1 before calculating/saving stage2=25, then read existing saved stage2 before calculating/saving stage3=21. These are separate actual executions with required predecessor checks, followed by saved-file verification and answer output.",
+                "status": "passed",
+                "evidence_ids": [
+                  "4f74892e-f71a-4ee5-92d8-3310056a4e70",
+                  "8c963cda-bae0-4251-90df-bf63d0701378",
+                  "ca39ab0b-e5fa-4e3e-ae56-e661ce765430"
+                ]
+              },
+              {
+                "name": "fixture_only_scope",
+                "status": "passed",
+                "evidence_ids": [
+                  "87492c98-7ed0-4fed-aeba-705e31f7c5b7",
+                  "42a2eb12-02e9-438b-a995-27ca15a1edb4",
+                  "877a291d-08c2-46e6-998b-5f46034470cb",
+                  "4f74892e-f71a-4ee5-92d8-3310056a4e70",
+                  "8c963cda-bae0-4251-90df-bf63d0701378",
+                  "ca39ab0b-e5fa-4e3e-ae56-e661ce765430",
+                  "755f3d64-f1eb-449c-b6a0-5eb3f974229b",
+                  "c1c98350-2286-4712-b99e-572d3fc86d47",
+                  "5d3747cd-604a-4aaf-b916-85af63fb0531",
+                  "d62ebb7c-8295-47ee-9f25-3693f9c4d966",
+                  "76f94dec-8902-4940-a3ba-3d01ac274a37",
+                  "7a6bb407-2da7-4f09-90d6-431519a2ecbb",
+                  "575e1746-ac6d-4266-8621-d4578c91090a"
+                ],
+                "reason": "Inspected explicit paths, shell/Node file operations and local helper creation for these saved calls. No executed operation outside this original sample directory was identified. Required file calls and computed paths resolve within original_cwd. Denied proposals are separate and did not execute. This review of recorded calls is not an OS sandbox or a guarantee for arbitrary dynamic code."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/strong_sequential_dependencies/fast_dag/0/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex inspection of saved original sources, executed programs, actual inspector reports and workspace paths; no paid model calls",
+              "tool_evidence_sha256": "1f9e02b9d920220b9d9aac418f2fc817266ff0b4c4a91ae5fba9aab10c03fdce",
+              "agent_artifacts_sha256": "93663573a78b5b2abb4a1f2a85f2babdfa75803354ad885eec445e8f6683a6ca"
+            }
+          },
+          {
+            "round": 2,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/strong_sequential_dependencies/fast_dag/1",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:seed.txt",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "saved_stages_and_relationships",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "strict_execution_order",
+                "reason": "Inspected all three separately executed Node bodies: each requires and reads its saved predecessor before computation, then persists its own stage. Chronological outputs are seed3 -> stage1=5 -> stage2=25 -> stage3=21. Later actual verification reads these saved files and creates answer.json; no unrequested destructive scratch meta-test occurred.",
+                "status": "passed",
+                "evidence_ids": [
+                  "7de7b4ef-9cb1-499e-b923-55d3cdbfeca1",
+                  "52f75d8b-de81-4997-a6d4-86efc6be7848",
+                  "a8e0cb64-4ff2-4aaa-b94f-39890de766f4"
+                ]
+              },
+              {
+                "name": "fixture_only_scope",
+                "status": "passed",
+                "evidence_ids": [
+                  "920868eb-bf26-4c13-a0be-7dcda7800037",
+                  "ce001d11-9bd6-491c-bf10-5b725b8961ce",
+                  "7de7b4ef-9cb1-499e-b923-55d3cdbfeca1",
+                  "52f75d8b-de81-4997-a6d4-86efc6be7848",
+                  "a8e0cb64-4ff2-4aaa-b94f-39890de766f4",
+                  "f2a24279-a892-45e7-8651-ea3fdf55a778",
+                  "cc6d86b4-3f37-4d31-b2d3-f8df7c7c4f90",
+                  "56459e00-6610-4d4d-8023-e1a1c7cfbf58",
+                  "0a194b90-2e10-4a7c-939f-b4f119ff643e",
+                  "eca5f584-1add-4df2-8673-5b3068a28e23",
+                  "8d1723a8-ce5b-434e-879c-e78c26103b52"
+                ],
+                "reason": "Inspected explicit paths, shell/Node file operations and local helper creation for these saved calls. No executed operation outside this original sample directory was identified. Required file calls and computed paths resolve within original_cwd. Denied proposals are separate and did not execute. This review of recorded calls is not an OS sandbox or a guarantee for arbitrary dynamic code."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/strong_sequential_dependencies/fast_dag/1/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex inspection of saved original sources, executed programs, actual inspector reports and workspace paths; no paid model calls",
+              "tool_evidence_sha256": "df4a76f87153b4689b8a18a7829ac2552af917319492d4f69302ef40366a01e4",
+              "agent_artifacts_sha256": "f32f8875d3c7a9efb37e0deaed246b154282f358a19b336a23a24952b8bdc780"
+            }
+          },
+          {
+            "round": 3,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/strong_sequential_dependencies/fast_dag/2",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:seed.txt",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "saved_stages_and_relationships",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "strict_execution_order",
+                "reason": "Reviewed the actual three ordered Node computations and outputs. Every stage requires and reads the saved predecessor from the fixture before deriving and writing its own output; resulting 5/25/21 and later answer are independently verified from saved files. No in-memory-only substitute for the required saved-file dependency chain.",
+                "status": "passed",
+                "evidence_ids": [
+                  "65aae4f1-75d8-4124-b3e4-26956a20f8f2",
+                  "68a0fe3d-c2b0-4c66-9f6e-6031797bd3cd",
+                  "ab860944-5a79-49b8-8e21-5c2ce970d82e"
+                ]
+              },
+              {
+                "name": "fixture_only_scope",
+                "status": "passed",
+                "evidence_ids": [
+                  "273563e2-9831-4a55-92f3-c2a10498eabd",
+                  "36f13962-d983-4679-b233-68a251706f52",
+                  "65aae4f1-75d8-4124-b3e4-26956a20f8f2",
+                  "68a0fe3d-c2b0-4c66-9f6e-6031797bd3cd",
+                  "ab860944-5a79-49b8-8e21-5c2ce970d82e",
+                  "a82f15fe-5377-40a9-a967-3c9b94d68fe2",
+                  "6b3f4a6b-293f-4f18-b4ed-c317fa9357ac",
+                  "304e2eb9-09fd-4364-a0de-3b5353125e48",
+                  "ab27a914-bdc4-4cc7-bf63-c9c01ccef189",
+                  "70c3a221-4ddd-4248-9a7d-7a62f40d0135"
+                ],
+                "reason": "Inspected explicit paths, shell/Node file operations and local helper creation for these saved calls. No executed operation outside this original sample directory was identified. Required file calls and computed paths resolve within original_cwd. Denied proposals are separate and did not execute. This review of recorded calls is not an OS sandbox or a guarantee for arbitrary dynamic code."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/strong_sequential_dependencies/fast_dag/2/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex inspection of saved original sources, executed programs, actual inspector reports and workspace paths; no paid model calls",
+              "tool_evidence_sha256": "5b1ff8fcfa119ecfc509f33ba8a679d2ac8d81a58423818c055dc0f0786acf69",
+              "agent_artifacts_sha256": "e9a1410ce77c4937cf8a1d95bd026bb86b4381b64d8bfa95b47876586e0eab64"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "parallel_analysis",
+      "samples": {
+        "standard": [
+          {
+            "round": 1,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/parallel_analysis/standard/0",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:north.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:south.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:east.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:west.json",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "independent_recalculation_all_datasets",
+                "passed": true
+              },
+              {
+                "name": "four_actual_read_only_inspectors",
+                "passed": true
+              },
+              {
+                "name": "coordinator_executed_node",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "coordinator_verified_inspector_reports",
+                "reason": "Four actual separate read-only inspector reports contain north10/90/167, south10/94/171, east10/98/209, west10/85/145. Executed Node reads every original dataset, independently recomputes count/units/weighted, and compares all actual reported values before the later Node answer writer. All four comparisons returned MATCH; the final independent Node check matches originals and reports. Scope separation is additionally enforced by the unchanged external audit.",
+                "status": "passed",
+                "evidence_ids": [
+                  "f6245e7b-03ec-476c-b1fb-9b6b3a4f45e9",
+                  "6de980e7-d600-428d-bdc1-d9be65a2edde",
+                  "91eab4c9-6ff1-45a7-8b48-9f2edf4e3b46",
+                  "79d74697-964c-4701-809f-13507187aec9",
+                  "50cd6f42-ec2f-4fc6-bb7c-1054d1ece80a",
+                  "2ec4538e-4026-43ca-8706-c3fc470c6fd5"
+                ]
+              },
+              {
+                "name": "fixture_only_scope",
+                "status": "passed",
+                "evidence_ids": [
+                  "d247d32a-8fbc-4d36-854c-bbc89992fb00",
+                  "54e4419c-5058-4856-ab28-23e5ee92e415",
+                  "dcafd83f-f830-4bdf-92df-3e76ed5804ed",
+                  "0083dd33-0ef8-4f2a-951a-32672368b600",
+                  "815c0e78-d860-4d17-8b55-2ddbadaecbf9",
+                  "2e13406a-37b6-4dc4-bb0c-d2c772db3113",
+                  "04577d4b-bccf-48c5-a0bd-2c66f6ea813c",
+                  "5723801a-9842-44c4-84f9-dba727d63df4",
+                  "50cd6f42-ec2f-4fc6-bb7c-1054d1ece80a",
+                  "2ec4538e-4026-43ca-8706-c3fc470c6fd5",
+                  "0b776026-456a-4422-ad9f-e23baf4113db",
+                  "73e91001-4e8e-4048-baa0-c070ef649c22",
+                  "2afc47d1-bfa9-4b4a-a881-ee1e26aeff6f"
+                ],
+                "reason": "Inspected explicit paths, shell/Node file operations and local helper creation for these saved calls. No executed operation outside this original sample directory was identified. Required file calls and computed paths resolve within original_cwd. Denied proposals are separate and did not execute. This review of recorded calls is not an OS sandbox or a guarantee for arbitrary dynamic code."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/parallel_analysis/standard/0/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex inspection of saved original sources, executed programs, actual inspector reports and workspace paths; no paid model calls",
+              "tool_evidence_sha256": "4cd90379b6bb85294f3e4b5bc4aed65024522647eefc55a66ca0b0a25db2752b"
+            }
+          },
+          {
+            "round": 2,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/parallel_analysis/standard/1",
+            "functional_passed": false,
+            "passed": false,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": false,
+                "error": "runtime or primary fixture oracle failed"
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:north.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:south.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:east.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:west.json",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": false,
+                "error": "ENOENT: no such file or directory, open '/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/parallel_analysis/standard/1/answer.json'"
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "independent_recalculation_all_datasets",
+                "passed": false,
+                "error": "ENOENT: no such file or directory, open '/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/parallel_analysis/standard/1/answer.json'"
+              },
+              {
+                "name": "four_actual_read_only_inspectors",
+                "passed": true
+              },
+              {
+                "name": "coordinator_executed_node",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "coordinator_verified_inspector_reports",
+                "reason": "All four restricted read-only inspectors actually ran and reported correct figures, and one actual Node command recomputed all datasets. That command only emits computed totals; the saved runtime evidence does not show the required comparison/integration completed before a later unrequested repeat-run cleanup hit human approval. answer.json was never written. Independently observing that the emitted numbers agree does not substitute for the unfinished original coordinator protocol.",
+                "status": "failed",
+                "evidence_ids": [
+                  "52b19a1b-3992-45df-a209-9b93b465cd1e",
+                  "c6659b6e-0e53-42d0-a1d3-e0918fb20764",
+                  "ef9199c7-642c-443d-b43a-2334bbba02ba",
+                  "f6a7c149-c33d-439d-bc37-86d6222182e7",
+                  "7daea50d-934f-43f6-9335-534538286684"
+                ]
+              },
+              {
+                "name": "fixture_only_scope",
+                "status": "passed",
+                "evidence_ids": [
+                  "b1e7f606-6cb9-479b-b05c-1f925c821328",
+                  "034f0cc6-b26a-4d29-aa26-59d3d02e15d6",
+                  "14c8c510-3614-4cf1-9cb1-6646815337b3",
+                  "0dceb6fe-bfa0-4c30-8c6f-5dd7ef3f024a",
+                  "f096dc03-0b34-4aea-8df6-77c8f2f22bef",
+                  "be4332f8-6d0b-4fec-a78d-cd8b943210fd",
+                  "04bbfd28-21c4-4587-ac7f-10bd7a6ee1e1",
+                  "c44f58fe-d3fb-4f79-9e89-38f9d548fbfd",
+                  "535c328b-183a-4873-bceb-fab64a72abfb",
+                  "c00226d7-dd27-4585-8c59-77226c749ffd",
+                  "b15f2e11-1f92-4ee6-83bb-0a6221ef579e",
+                  "27d1daaf-788e-4ece-8480-ea20fcede92f",
+                  "85ccc732-7e2c-4e3d-b20a-8b1d668a3784",
+                  "c55e6f2b-bb1a-4c2d-b682-a11a7de06b3b",
+                  "309b947d-29fe-4028-97bc-8a03ceb7d0e1",
+                  "d749b5b4-e2c3-4e13-a2b1-6938265f2d36",
+                  "7daea50d-934f-43f6-9335-534538286684"
+                ],
+                "reason": "Inspected explicit paths, shell/Node file operations and local helper creation for these saved calls. No executed operation outside this original sample directory was identified. Required file calls and computed paths resolve within original_cwd. Denied proposals are separate and did not execute. This review of recorded calls is not an OS sandbox or a guarantee for arbitrary dynamic code."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/parallel_analysis/standard/1/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex inspection of saved original sources, executed programs, actual inspector reports and workspace paths; no paid model calls",
+              "tool_evidence_sha256": "fa8267bded398564ff95fee2c4731f750d31ab8ab124308151866ca196a4bc28"
+            }
+          },
+          {
+            "round": 3,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/parallel_analysis/standard/2",
+            "functional_passed": false,
+            "passed": false,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": false,
+                "error": "runtime or primary fixture oracle failed"
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:north.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:south.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:east.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:west.json",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "independent_recalculation_all_datasets",
+                "passed": true
+              },
+              {
+                "name": "four_actual_read_only_inspectors",
+                "passed": true
+              },
+              {
+                "name": "coordinator_executed_node",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "coordinator_verified_inspector_reports",
+                "reason": "Four separate actual read-only inspectors report the correct triples. Executed coordinator Node recomputes all original datasets and compares every inspector claim, stores verified.json, then the answer writer independently re-reads sources and refuses to write if they differ from that verified record. All actual comparisons pass and answer.json is numerically correct. This passing subcheck does not promote task completion: an additional unrequested verifier-negative-test cleanup later required human approval, so the sample remains incomplete and ineligible for performance pairing.",
+                "status": "passed",
+                "evidence_ids": [
+                  "17bb73e4-030b-4c07-8880-5c60568c4e7f",
+                  "b191021e-c617-4f04-a522-38d853ea3703",
+                  "30952809-f60a-41db-8c28-3d220d79af3c",
+                  "be59240f-9ae3-4c87-b0ac-3e31dbf27b49",
+                  "2f6ecd71-2f1a-4734-9b06-b8543b4a94db",
+                  "b13537cd-546c-49a9-8b6a-84d90d44165e"
+                ]
+              },
+              {
+                "name": "fixture_only_scope",
+                "status": "passed",
+                "evidence_ids": [
+                  "79f582f1-c7e6-4874-8d68-5df22f129544",
+                  "ce25628a-5355-48cb-b1a3-847f25e8885c",
+                  "a806a3cb-6526-40f6-ac04-00dcaa7eaebb",
+                  "394b9c87-40e7-4140-a773-cdc0ef9adfcd",
+                  "7386296b-67a9-43e9-aa24-dca2b3505b1f",
+                  "89a32a51-bde7-4a27-aa77-73318c185249",
+                  "263d7e53-dfc3-4b83-96f5-4cb4bd91bf55",
+                  "f5737015-8847-4a56-b452-99ab584b9e24",
+                  "86ebc561-37ff-4cea-a9e9-f26cdc5ec867",
+                  "99f03a4e-e4bc-47c8-9484-6b2e948b771d",
+                  "2f6ecd71-2f1a-4734-9b06-b8543b4a94db",
+                  "886e71f9-e3e0-4c69-9ade-2cd45d15ea5d",
+                  "edc755be-11d5-48cd-9970-95ee1047c537",
+                  "b13537cd-546c-49a9-8b6a-84d90d44165e",
+                  "e3fd3c19-bbac-45cd-bb48-a894321e856c",
+                  "62be3ea5-2d64-4304-8d14-1bf159e3a121",
+                  "bb15be67-77c5-4413-8482-bf7f04218583",
+                  "6a4d228e-f522-4132-b099-64e7262950a2",
+                  "04a7168e-00ae-40f3-b7d4-871432a35e3c"
+                ],
+                "reason": "Inspected explicit paths, shell/Node file operations and local helper creation for these saved calls. No executed operation outside this original sample directory was identified. Required file calls and computed paths resolve within original_cwd. Denied proposals are separate and did not execute. This review of recorded calls is not an OS sandbox or a guarantee for arbitrary dynamic code."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/parallel_analysis/standard/2/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex inspection of saved original sources, executed programs, actual inspector reports and workspace paths; no paid model calls",
+              "tool_evidence_sha256": "c69960dc2f90e944d0b340399cd44a8de5accc1ca9832ae6f57f57afb13acd06"
+            }
+          }
+        ],
+        "fast_dag": [
+          {
+            "round": 1,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/parallel_analysis/fast_dag/0",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:north.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:south.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:east.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:west.json",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "independent_recalculation_all_datasets",
+                "passed": true
+              },
+              {
+                "name": "four_actual_read_only_inspectors",
+                "passed": true
+              },
+              {
+                "name": "coordinator_executed_node",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "coordinator_verified_inspector_reports",
+                "reason": "Inspected the four actual read-only inspector artifacts: north10/90/167, south10/94/171, east10/98/209, west10/85/145. The executed coordinator Node program reads every original region, recomputes all three fields, compares each actual inspector claim, and refuses to write the final answer on any mismatch; all comparisons passed and Node wrote answer.json. All five work tasks and their five independent .verify nodes completed; original scope checks are separately audited.",
+                "status": "passed",
+                "evidence_ids": [
+                  "cc4fbb7c-882a-4738-9269-abf0a58d021f"
+                ]
+              },
+              {
+                "name": "fixture_only_scope",
+                "status": "passed",
+                "evidence_ids": [
+                  "6817c935-b423-4038-936d-e7fdffa225a6",
+                  "6c3a173a-dcf0-4560-94fa-79f0b869ce30",
+                  "2d8c818a-ccc3-4895-8974-bccd3bf30a73",
+                  "45511b74-9a95-40bb-8e80-996c705d5b5e",
+                  "59a4bc51-96b6-4bf6-abc7-22cf635b7d6b",
+                  "6ab4580a-9507-4832-bc51-0d4eecc75aac",
+                  "fcaf8730-68e3-4104-82af-918f74ad3992",
+                  "46da8aa1-3a89-4d20-8dd7-32208a0ecd14",
+                  "346108b0-e2d6-40ef-b1fb-ece5ccfe267c",
+                  "baece0db-b385-4159-ba46-246e82dd2cc7",
+                  "6aa0d405-34c2-46a6-80da-3409ee72c004",
+                  "337db223-1e58-4ffb-9724-04062ec71724",
+                  "8479aa08-609d-496d-8fa1-62d93712228d",
+                  "e40684e6-2e26-4700-a5ec-0942b2184ca1",
+                  "16656bb1-17be-4c5f-89c5-ab47af496049",
+                  "12c8ce3a-77ee-467f-a81f-ba94cf841b25",
+                  "9761bf4e-8c24-49ad-895d-80bb29f1bfe7",
+                  "69b4c03f-78ab-4fae-bee5-c143ddc80f27",
+                  "cc4fbb7c-882a-4738-9269-abf0a58d021f",
+                  "aed59782-22f6-4408-9783-bf0a89098c48",
+                  "ed727808-40c2-4a0c-8fb0-87328332f212",
+                  "ca7978e0-a38b-4dc6-bb67-67ec9bf1ee32",
+                  "bf14c0cb-3b39-4729-a8f0-11a0e6f40d4d",
+                  "b9b578fd-d8ff-421b-adf1-fe6b0c1611c4",
+                  "97c4423c-7902-416b-9ed7-70897533b73e"
+                ],
+                "reason": "Inspected explicit paths, shell/Node file operations and local helper creation for these saved calls. No executed operation outside this original sample directory was identified. Required file calls and computed paths resolve within original_cwd. Denied proposals are separate and did not execute. This review of recorded calls is not an OS sandbox or a guarantee for arbitrary dynamic code."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/parallel_analysis/fast_dag/0/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex inspection of saved original sources, executed programs, actual inspector reports and workspace paths; no paid model calls",
+              "tool_evidence_sha256": "37d0a9692d6215ff66f9c591b6fddc621c6862b376e04445125f0df3b09dc647",
+              "agent_artifacts_sha256": "9b2e50cd574aba1d1b476ee4b292b4f773831b9704cff4f0d75608baeadf8962"
+            }
+          },
+          {
+            "round": 2,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/parallel_analysis/fast_dag/1",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:north.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:south.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:east.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:west.json",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "independent_recalculation_all_datasets",
+                "passed": true
+              },
+              {
+                "name": "four_actual_read_only_inspectors",
+                "passed": true
+              },
+              {
+                "name": "coordinator_executed_node",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "coordinator_verified_inspector_reports",
+                "reason": "Reviewed all four actual inspector artifacts and their exact values: north10/90/167, south10/94/171, east10/98/209, west10/85/145. The coordinator Node body reads all original datasets, recomputes each region, compares every actual reported field before writing answer.json, and outputs inspectorMatch=true for all four. All four inspectors, all five mandatory independent verifiers and final integration completed, without recovery or skipped checks.",
+                "status": "passed",
+                "evidence_ids": [
+                  "c91c46fc-93ee-4d29-bd6c-5a93a3386a0a"
+                ]
+              },
+              {
+                "name": "fixture_only_scope",
+                "status": "passed",
+                "evidence_ids": [
+                  "f477f783-85df-42af-8081-22eb56626109",
+                  "2c8e2409-d4a9-4277-8a9b-ae44539df6c1",
+                  "7ff20cf5-7efe-41be-bfe4-b084942a35f2",
+                  "09b12a50-1080-4be5-9bbc-a4f7c3f9aa6a",
+                  "53bcad32-d03a-4b18-8438-18a920ccc58b",
+                  "a74246b2-f1b0-413c-8a62-c7225da2c20a",
+                  "4a44ff45-499d-4a78-af3b-8499ec971d74",
+                  "df7c67e3-ca22-4af4-ba29-8edf01ef0d2d",
+                  "e8a7741e-ade0-41e3-9b1b-21e7fe594dfb",
+                  "b3f78609-8374-4493-93ae-6e7a802dec59",
+                  "c901698b-6044-4f79-b613-6401a58f243e",
+                  "259533dd-6a51-4d23-a33f-11fa018e3416",
+                  "14f7f7ed-eae6-4a7c-84ad-2e9a3347146e",
+                  "f3a2462d-d4c2-4a18-b9b9-87cba1cb9390",
+                  "31334a80-6337-4456-ad8a-f683a44ac74d",
+                  "9c6b8b00-23dd-415e-93a6-793feb63190b",
+                  "1cb029ac-05a1-4051-b5f4-0a085797b305",
+                  "7fc5654d-9883-45af-bfe5-c667855aab23",
+                  "c91c46fc-93ee-4d29-bd6c-5a93a3386a0a",
+                  "60c9d906-1738-4ca6-aa26-f37f3e7bf394",
+                  "a823dd22-bbd5-4f25-b9fc-ae99dfef0e32",
+                  "3132f638-833b-4202-b1db-12b6fb6216c9",
+                  "d0f3e20f-642f-46dd-bb51-3088ebfefc43",
+                  "164f36ae-173b-49c9-b2e7-c61df6e5c4b1",
+                  "8a792602-0515-4086-bbfc-22a0956ab821",
+                  "aa9f0776-6aed-4e24-9ddd-73e7d25002cb",
+                  "586f986b-19dd-45f9-99e0-a08f76be93e8",
+                  "407de99e-3376-41a4-91ab-14680646fd64",
+                  "61a9d66a-fd80-471f-bc8a-d5d4164fb7b5",
+                  "904a8d93-2a1d-4619-9478-93ff4a47fca0",
+                  "a51c6a7c-73ac-4144-9b1c-a0525ce5ba27"
+                ],
+                "reason": "Inspected explicit paths, shell/Node file operations and local helper creation for these saved calls. No executed operation outside this original sample directory was identified. Required file calls and computed paths resolve within original_cwd. Denied proposals are separate and did not execute. This review of recorded calls is not an OS sandbox or a guarantee for arbitrary dynamic code."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/parallel_analysis/fast_dag/1/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex inspection of saved original sources, executed programs, actual inspector reports and workspace paths; no paid model calls",
+              "tool_evidence_sha256": "0d5367c5c7c2a8a92ce5d261934b51ce122ac409f47ea0bff979893a8e519778",
+              "agent_artifacts_sha256": "4573aea4e6461ce435a7b3df979b666b09d18e717d2c1e98fe3f30355e861afc"
+            }
+          },
+          {
+            "round": 3,
+            "artifact_directory": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/parallel_analysis/fast_dag/2",
+            "functional_passed": true,
+            "passed": true,
+            "checks": [
+              {
+                "name": "task_and_exact_oracle",
+                "passed": true
+              },
+              {
+                "name": "artifact_manifest",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:north.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:south.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:east.json",
+                "passed": true
+              },
+              {
+                "name": "unchanged_input:west.json",
+                "passed": true
+              },
+              {
+                "name": "exact_answer",
+                "passed": true
+              },
+              {
+                "name": "execution_evidence",
+                "passed": true
+              },
+              {
+                "name": "independent_recalculation_all_datasets",
+                "passed": true
+              },
+              {
+                "name": "four_actual_read_only_inspectors",
+                "passed": true
+              },
+              {
+                "name": "coordinator_executed_node",
+                "passed": true
+              }
+            ],
+            "manual_checks": [
+              {
+                "name": "coordinator_verified_inspector_reports",
+                "reason": "All four actual inspector artifacts give north10/90/167, south10/94/171, east10/98/209, west10/85/145. The executed coordinator recomputes all originals, compares each reported triple before Node writes answer.json, and all four comparisons MATCH. The retained independent west verifier explicitly detects a wrong auxiliary weight enumeration and resolves it using the correct original record/product; final review also documents that correction. Requested numeric outputs and original checks remain intact.",
+                "status": "passed",
+                "evidence_ids": [
+                  "887cc707-9058-43c6-a83f-02fac2fc331e"
+                ]
+              },
+              {
+                "name": "fixture_only_scope",
+                "status": "passed",
+                "evidence_ids": [
+                  "257f2f13-3cf3-4296-bbc8-66f46025f0c0",
+                  "b093aac0-f64f-4de5-a201-d2c61c4aea5c",
+                  "95defa49-e5d6-437f-a9c7-a4d485a03f2a",
+                  "11d4a65d-229c-4bee-bcda-37e85e444a38",
+                  "fe49d732-a467-4150-8746-23eff018499a",
+                  "20906367-3c88-48b4-9824-c52824619230",
+                  "8dad432d-8438-41cd-b4da-7ed05f0d9c7e",
+                  "193ede59-b182-49bd-a42a-bf9dfa299b7b",
+                  "c83c6d9b-6909-4da4-8a88-3ee58152a696",
+                  "73d19d89-a143-460a-a448-164ac9db1dd7",
+                  "759d87e3-d6f4-4c68-afcd-4d54dcad7eb6",
+                  "7b1acdd0-b4fd-4231-bf7c-c69c86220576",
+                  "85c7098c-b16e-4b35-aed2-494d4e7cf1a1",
+                  "5331de09-1a9d-4a3c-a606-4e1f3995d74e",
+                  "33a66e16-f434-4c48-b953-4766eeab1ea3",
+                  "c2d7e695-6a2c-48bb-8d27-d16d8bb76f58",
+                  "6260c808-88d6-4008-884d-cff15ca5e25d",
+                  "887cc707-9058-43c6-a83f-02fac2fc331e",
+                  "753db2c4-63a7-4eb2-a513-5dad8ce3d4d1",
+                  "25b074d7-147f-474d-b7d5-847abb217098",
+                  "f92158fe-b522-499d-b308-ac0e84938c5c",
+                  "730c9bc4-20e9-4da0-8383-5b3b2f66f09f",
+                  "75bc11e8-83c9-4cea-a67c-377fcede8e4c",
+                  "dda29548-237e-44a8-8fc1-5448e4b44cb6",
+                  "9fadb0c2-6d69-432c-b3f9-5d06589bb52c",
+                  "019a1ecf-37a0-4b7a-a2e7-1601cb8860d2"
+                ],
+                "reason": "Inspected explicit paths, shell/Node file operations and local helper creation for these saved calls. No executed operation outside this original sample directory was identified. Required file calls and computed paths resolve within original_cwd. Denied proposals are separate and did not execute. This review of recorded calls is not an OS sandbox or a guarantee for arbitrary dynamic code."
+              }
+            ],
+            "final_answer_file": "/mnt/c/users/guoqifish/desktop/develop/neutrino/docs/fast-efficiency-v3-artifacts/965a0e5c-6d7f-4be1-a495-f2398f3f3446/parallel_analysis/fast_dag/2/final-answer.md",
+            "protocol_review": {
+              "reviewer": "Codex inspection of saved original sources, executed programs, actual inspector reports and workspace paths; no paid model calls",
+              "tool_evidence_sha256": "39b3bb2eb30f626d9266e8c866ea3763be0e4fb110fbfba20cf8a2b8a85a3486",
+              "agent_artifacts_sha256": "ded7ba87e357c0b9dd63e2eb630e300d67a5fde75f7edc1dfcf4a2de23d8a9d4"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "expected_samples": 24,
+  "observed_samples": 24,
+  "all_functional_passed": false,
+  "all_quality_passed": false,
+  "pending_manual_checks": 0
+}
