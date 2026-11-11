@@ -1,5 +1,6 @@
 import { runPluginTurn, pluginCommand, pluginApprovalContext } from "../plugins/session.js";
 import path from "node:path";
+import { ApprovalQueue } from "./approvalQueue.js";
 /**
  * Headless conversation runner for the web UI.
  *
@@ -288,7 +289,9 @@ export class WebSession implements LiveAgent {
   private disposed = false;
   private idleTimer: NodeJS.Timeout | null = null;
   /** Non-null while a tool call waits for the browser to answer. */
+  private approvalQueue = new ApprovalQueue();
   private pendingApproval: {
+    id: string;
     tool: string;
     args: Record<string, unknown>;
     risk: RiskAssessment;
@@ -339,6 +342,7 @@ export class WebSession implements LiveAgent {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.approvalQueue.cancelWaiting();
     this.proAbort?.abort();
     this.turnAbort?.abort();
     this.turnToken++;
@@ -417,7 +421,7 @@ export class WebSession implements LiveAgent {
       tokens: { prompt: this.tokens.prompt, completion: this.tokens.completion },
       subagent: this.subagent,
       approval: this.pendingApproval
-        ? liveApprovalDetails(this.pendingApproval.tool, this.pendingApproval.args, this.pendingApproval.risk, this.dir)
+        ? { ...liveApprovalDetails(this.pendingApproval.tool, this.pendingApproval.args, this.pendingApproval.risk, this.dir), id: this.pendingApproval.id }
         : null,
       reviewing: this.reviewing,
     };
@@ -486,9 +490,9 @@ export class WebSession implements LiveAgent {
     this.send(text);
   }
 
-  liveApprove(approved: boolean): boolean {
+  liveApprove(approved: boolean, approvalId?: string): boolean {
     const pending = this.pendingApproval;
-    if (!pending) return false;
+    if (!pending || (approvalId !== undefined && pending.id !== approvalId)) return false;
     this.pendingApproval = null;
     pending.resolve(approved);
     this.publishLive();
@@ -1177,15 +1181,18 @@ export class WebSession implements LiveAgent {
     const approvalToken = this.turnToken;
     const team = this.proTeam;
     const gate = new ApprovalGate({
-      askHuman: () =>
-        new Promise<boolean | null>((resolve) => {
+      askHuman: () => {
+        const requestedMode = this.approvalMode;
+        return this.approvalQueue.run(() => new Promise<boolean | null>((resolve) => {
           if (approvalToken !== this.turnToken || this.paused || this.disposed || signal?.aborted === true) {
             resolve(false);
             return;
           }
-          this.pendingApproval = { tool, args, risk, resolve };
+          if (requestedMode !== this.approvalMode) { resolve(null); return; }
+          this.pendingApproval = { id: randomUUID(), tool, args, risk, resolve };
           this.publishLive();
-        }),
+        }), signal);
+      },
       reviewer: () => this.reviewerModel(),
       ...(createReviewerClient ? { createReviewerClient } : {}),
       ...(this.mode === "pro" && team ? {

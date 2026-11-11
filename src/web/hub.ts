@@ -24,6 +24,7 @@ export type ModelChangeResult = { ok: true } | { ok: false; error: string };
 
 /** Complete proposal shown before a human or automated approval decision. */
 export interface LiveApprovalRequest {
+  id?: string;
   tool: string;
   level: "high" | "extreme";
   arguments: Record<string, unknown>;
@@ -138,7 +139,7 @@ export interface LiveAgent {
   /** Append a user message and start (or queue) a turn. */
   liveSend(text: string): void;
   /** Answer a pending approval. Returns false when nothing was pending. */
-  liveApprove?(approved: boolean): boolean;
+  liveApprove?(approved: boolean, approvalId?: string): boolean;
   liveSetApprovalMode?(mode: ApprovalMode): void;
   liveSetAgentMode?(mode: AgentMode): ModelChangeResult;
   /** Empty the conversation in place (a new chat in the same folder). */
@@ -323,10 +324,10 @@ class LiveHub {
     return { ok: true };
   }
 
-  approve(key: string, approved: boolean): boolean {
+  approve(key: string, approved: boolean, approvalId?: string): boolean {
     const entry = this.entries.get(key);
     if (!entry || !entry.agent.liveApprove) return false;
-    const handled = entry.agent.liveApprove(approved);
+    const handled = entry.agent.liveApprove(approved, approvalId);
     this.notify(key);
     return handled;
   }

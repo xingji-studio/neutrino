@@ -4,7 +4,7 @@ import process from "node:process";
 import { App } from "./app.js";
 import { loadConfig } from "./config.js";
 import { installCrashGuard } from "./terminal/restore.js";
-import { webUrls } from "./web/server.js";
+import { startWebServer, webUrls } from "./web/server.js";
 import {
   runningBackground, startBackgroundService, stopBackgroundService, type BackgroundStatus,
 } from "./background.js";
@@ -45,6 +45,7 @@ Usage:
   neutrino --safe-mode          Start without external plugins.
   neutrino --lan               Start both, reachable from other devices.
   neutrino web [--port <port>] Start only the web UI (serves saved history).
+  neutrino api [--port <port>] Start the local API without a Web listener.
   neutrino background start    Run the web UI in the background; conversations
                                started there survive the terminal/CLI exiting.
   neutrino background stop     Stop the background service.
@@ -65,6 +66,7 @@ Options:
 
 Environment:
   NEUTRINO_WEB_PORT   Same as --port in either mode.
+  NEUTRINO_API_PORT   Loopback programmatic API port (default 8766; 0 for automatic).
   NEUTRINO_WEB_HOST   Same as --host.
   NEUTRINO_NO_TRAY    Set to 1 to keep the background service out of the
                       Windows notification area.
@@ -100,7 +102,7 @@ function requireValue(argv: string[], index: number, flag: string): string {
 type BackgroundAction = "run" | "start" | "stop" | "status" | "open";
 
 interface Options {
-  mode: "tui" | "web" | "background";
+  mode: "tui" | "web" | "background" | "api";
   /** Only meaningful in `background` mode. */
   backgroundAction: BackgroundAction | null;
   port: number | null;
@@ -121,6 +123,8 @@ function parseArgs(argv: string[]): Options {
     const arg = argv[i];
     if (arg === "web") {
       options.mode = "web";
+    } else if (arg === "api") {
+      options.mode = "api";
     } else if (arg === "background") {
       options.mode = "background";
       options.backgroundAction = "status";
@@ -170,6 +174,9 @@ function parseArgs(argv: string[]): Options {
     } else {
       throw new Error(`unknown argument "${arg}"`);
     }
+  }
+  if (options.mode === "api" && (options.lan || options.host || options.noWeb || options.noAuth)) {
+    throw new Error("the local API always uses authenticated 127.0.0.1 access");
   }
   if (options.lan && options.host) {
     throw new Error("use either --lan or --host, not both");
@@ -268,7 +275,18 @@ const host = options.lan ? WILDCARD_HOST : options.host || process.env.NEUTRINO_
 const auth = !options.noAuth;
 const portFromEnv = envPort();
 
-if (options.mode === "web") {
+if (options.mode === "api") {
+  try {
+    const handle = await startWebServer({ port: 0, apiOnly: true, apiPort: options.port ?? undefined, publishApi: true, auth: false });
+    process.stdout.write(`Local API listening at ${handle.api!.url}; connection details: ${process.env.NEUTRINO_HOME || "~/.neutrino"}/api.json\n`);
+    const shutdown = () => { void handle.close().finally(() => process.exit(0)); };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+  } catch (error) {
+    process.stderr.write(`neutrino: failed to start local API: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  }
+} else if (options.mode === "web") {
   const result = await startBackgroundService({
     port: options.port ?? portFromEnv ?? DEFAULT_WEB_PORT, host, auth,
     tray: !options.noTray, resident: loadConfig().background === true, ownerPid: process.pid,

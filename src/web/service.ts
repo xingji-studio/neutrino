@@ -114,6 +114,7 @@ export async function runWebService(options: { port: number; host?: string; auth
   try {
     handle = await startWebServer({
       port: options.port, host: options.host, auth: options.auth,
+      publishApi: true,
       backgroundPrompt: !resident && process.env.NEUTRINO_BACKGROUND_PROMPT === "1",
       backgroundService: { token, onStop: shutdown, status, configure },
       onAddressChange: () => { if (handle) writeBackgroundStatus(status()); },

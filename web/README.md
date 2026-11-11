@@ -393,6 +393,8 @@ to know whether a conversation is driven by the terminal or by the server.
 
 ## API
 
+For other local programs, use the independently authenticated, loopback-only [programmatic API](LOCAL-API.md).
+
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/api/overview` | Sessions grouped by cwd + live sessions |

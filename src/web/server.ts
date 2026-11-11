@@ -1,4 +1,5 @@
 import { handlePlugins } from "./plugins.js";
+import { startLocalApi, type LocalApiHandle } from "./localApi.js";
 /**
  * A tiny, dependency-free HTTP server that exposes Neutrino to a browser.
  *
@@ -80,6 +81,12 @@ export interface WebServerOptions {
   };
   /** Keep service discovery in sync after a live LAN switch. */
   onAddressChange?: () => void;
+  /** Local API port. Zero selects an available port. */
+  apiPort?: number;
+  /** Publish connection information in the user data directory. */
+  publishApi?: boolean;
+  /** Run only the local API, with no Web listener. */
+  apiOnly?: boolean;
 }
 
 export interface WebServerHandle {
@@ -91,6 +98,8 @@ export interface WebServerHandle {
   host: string;
   /** Whether a browser must log in before using the API. */
   authRequired: boolean;
+  /** Local API connection information; token must be kept private. */
+  api?: { url: string; token: string };
   /**
    * Re-bind the same port on another interface. Live connections (a streaming
    * turn, the tab asking for the change) stay open; resolves once the new
@@ -1629,6 +1638,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
   // Every window watching for an update belongs to this console, not the module,
   // so a second embedded server (a test, an embedding) keeps its own set.
   const updates = createUpdateStreams();
+  let localApi: LocalApiHandle | null = null;
 
   const server = http.createServer((req, res) => {
     handleRequest(req, res, auth, binding, updates).catch((err) => {
@@ -1760,8 +1770,10 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
     url: "",
     urls: [],
     setHost: (next) => rebind(next),
-    close: () =>
-      new Promise<void>((resolve) => {
+    close: async () => {
+      await localApi?.close();
+      localApi = null;
+      await new Promise<void>((resolve) => {
         closed = true;
         // These streams never end on their own, so they are closed explicitly;
         // otherwise server.close() would wait for a window that stays open.
@@ -1772,14 +1784,33 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
           return;
         }
         server.close(() => resolve());
-      }),
+      });
+    },
   };
 
-  await listenRetry(host);
+  if (!options.apiOnly) await listenRetry(host);
   // Port 0 means "let the OS pick": remember the real one for every URL.
   const address = server.address();
   port = typeof address === "object" && address ? address.port : options.port;
   syncAddress();
+
+  try {
+    const rawPort = process.env.NEUTRINO_API_PORT;
+    const apiPort = options.apiPort ?? (rawPort === undefined ? (options.port === 0 && !options.apiOnly ? 0 : 8766) : Number(rawPort));
+    if (!Number.isSafeInteger(apiPort) || apiPort < 0 || apiPort > 65535 || (rawPort !== undefined && !/^\d+$/.test(rawPort))) {
+      throw new Error("NEUTRINO_API_PORT must be an integer between 0 and 65535");
+    }
+    const localAuth = new WebAuth(false);
+    localApi = await startLocalApi(apiPort, async (req, res, url, mode, pathname) => {
+      if (!await handleApi(req, res, url, localAuth, mode, pathname, binding, updates)) {
+        sendJson(res, 404, { error: "not found" });
+      }
+    }, options.publishApi ?? options.port !== 0);
+    handle.api = { url: localApi.url, token: localApi.token };
+  } catch (error) {
+    if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()));
+    throw error;
+  }
 
   // Once listening, the server must tolerate connection-level failures
   // (resets, EMFILE, half-open sockets) without the process dying: an 'error'

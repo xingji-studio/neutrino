@@ -68,7 +68,7 @@ export async function startTerminalBridge(): Promise<TerminalBridgeInfo & { clos
         const sent = hub.sendConfigured(key, body.text, body.agent_mode);
         if (!sent.ok) { sendJson(res, 409, { error: sent.error }); return; }
       } else if (action === "approve") {
-        if (!hub.approve(key, body.approved === true)) { sendJson(res, 409, { error: "no approval is pending" }); return; }
+        if (!hub.approve(key, body.approved === true, typeof body.approval_id === "string" ? body.approval_id : undefined)) { sendJson(res, 409, { error: "no approval is pending" }); return; }
       } else if (action === "approval-mode") {
         if (body.mode !== "request" && body.mode !== "auto") throw new Error("mode must be request or auto");
         if (!hub.setApprovalMode(key, body.mode)) { sendJson(res, 409, { error: "this session cannot change approval mode" }); return; }

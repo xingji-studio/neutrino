@@ -473,6 +473,8 @@ neutrino --host 100.64.0.7
 neutrino web --port 8765
 ```
 
+Local programs can use the separate [loopback API](./web/LOCAL-API.md) to start conversations, stream status, and answer approvals.
+
 Then open <http://127.0.0.1:8765>. The site itself lives in [`web/`](./web) and
 needs no build step; see [`web/README.md`](./web/README.md) for the API.
 

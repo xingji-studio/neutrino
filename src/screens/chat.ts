@@ -1,6 +1,8 @@
 import { terminalTemplate } from "../plugins/terminal.js";
 import { runPluginTurn, pluginCommand, pluginApprovalContext } from "../plugins/session.js";
 import path from "node:path";
+import { ApprovalQueue } from "../web/approvalQueue.js";
+import { randomUUID } from "node:crypto";
 import { FastAgentEngine } from "../fast/engine.js";
 import { FAST_MODE, assertFastAvailable, fastSettings, type FastSnapshot } from "../fast/types.js";
 import type { Buffer } from "../terminal/buffer.js";
@@ -260,7 +262,9 @@ export class ChatScreen extends Screen implements LiveAgent {
   // ---- approval gate ---------------------------------------------------
 
   /** Non-null while a tool call is waiting for a human decision. */
+  private approvalQueue = new ApprovalQueue();
   private pendingApproval: {
+    id: string;
     tool: string;
     args: Record<string, unknown>;
     risk: RiskAssessment;
@@ -338,6 +342,7 @@ export class ChatScreen extends Screen implements LiveAgent {
   }
 
   onDeactivate(): void {
+    this.approvalQueue.cancelWaiting();
     // Never leave the agent awaiting a decision nobody can give.
     if (this.pendingApproval) this.settleApproval(false);
     // A turn can continue after returning to the menu. Keep its exit checkpoint
@@ -394,7 +399,7 @@ export class ChatScreen extends Screen implements LiveAgent {
       tokens: { prompt: this.tokens.prompt, completion: this.tokens.completion },
       subagent: this.subagent,
       approval: this.pendingApproval
-        ? liveApprovalDetails(this.pendingApproval.tool, this.pendingApproval.args, this.pendingApproval.risk, this.liveDir)
+        ? { ...liveApprovalDetails(this.pendingApproval.tool, this.pendingApproval.args, this.pendingApproval.risk, this.liveDir), id: this.pendingApproval.id }
         : null,
       reviewing: this.reviewing,
     };
@@ -449,8 +454,8 @@ export class ChatScreen extends Screen implements LiveAgent {
   }
 
   /** Answer the pending call from the web UI. */
-  liveApprove(approved: boolean): boolean {
-    if (!this.pendingApproval) return false;
+  liveApprove(approved: boolean, approvalId?: string): boolean {
+    if (!this.pendingApproval || (approvalId !== undefined && this.pendingApproval.id !== approvalId)) return false;
     this.settleApproval(approved);
     return true;
   }
@@ -1423,7 +1428,7 @@ export class ChatScreen extends Screen implements LiveAgent {
     const cancelled = () => approvalToken !== this.turnToken || this.paused || signal?.aborted === true;
     const gate = new ApprovalGate({
       cancelled,
-      askHuman: () => cancelled() ? Promise.resolve(false) : this.askHuman(tool, args, risk),
+      askHuman: () => this.askHuman(tool, args, risk, cancelled, signal),
       reviewer: () => this.reviewerModel(),
       ...(createReviewerClient ? { createReviewerClient } : {}),
       autoApprovalEnabled: () => this.approvalMode === "auto",
@@ -1463,9 +1468,12 @@ export class ChatScreen extends Screen implements LiveAgent {
   }
 
   /** Park the turn until the user answers; the header turns orange meanwhile. */
-  private askHuman(tool: string, args: Record<string, unknown>, risk: RiskAssessment): Promise<boolean | null> {
-    return new Promise<boolean | null>((resolve) => {
-      this.pendingApproval = { tool, args, risk, resolve };
+  private askHuman(tool: string, args: Record<string, unknown>, risk: RiskAssessment, cancelled: () => boolean, signal?: AbortSignal): Promise<boolean | null> {
+    const requestedMode = this.approvalMode;
+    return this.approvalQueue.run(() => new Promise<boolean | null>((resolve) => {
+      if (cancelled()) { resolve(false); return; }
+      if (requestedMode !== this.approvalMode) { resolve(null); return; }
+      this.pendingApproval = { id: randomUUID(), tool, args, risk, resolve };
       this.app.state.approval = { tool, level: risk.level };
       // The card floats over the same corner the approval card needs on a short
       // terminal, and a decision the user cannot see is not a decision. The plan
@@ -1474,7 +1482,7 @@ export class ChatScreen extends Screen implements LiveAgent {
       this.app.bell?.("approval");
       this.app.render();
       this.publishLive();
-    });
+    }), signal);
   }
 
   /** Answer the pending request (keyboard, mouse, or the web UI). */
