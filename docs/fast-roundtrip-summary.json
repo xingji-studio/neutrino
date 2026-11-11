@@ -1,0 +1,75 @@
+{
+  "kind": "fast_roundtrip_pilot_summary",
+  "benchmark_id": "d42e00cb-c368-4a30-aa21-51b94afdc5af",
+  "paired_samples": 1,
+  "scenario": "parallel_analysis",
+  "model": {
+    "provider": "DeepSeek",
+    "name": "deepseek-flash",
+    "intensity": "Max",
+    "available_inference_slots": 4
+  },
+  "conditions": {
+    "task_timeout_ms": 1800000,
+    "budget_scope": "task",
+    "model_slots": 4,
+    "agent_runs": 24,
+    "model_requests": 128,
+    "tool_calls": 256,
+    "tokens": 2000000
+  },
+  "fresh_pair": {
+    "standard": {
+      "elapsed_ms": 116867.56134099979,
+      "tokens": 177921,
+      "input_tokens": 157528,
+      "output_tokens": 20393,
+      "model_requests": 35,
+      "tool_calls": 22,
+      "success": true,
+      "fixture_correct": true,
+      "blocked_on_approval": false,
+      "missing_usage_requests": 0
+    },
+    "fast_dag": {
+      "elapsed_ms": 85674.44172299979,
+      "tokens": 259438,
+      "input_tokens": 237430,
+      "output_tokens": 22008,
+      "model_requests": 31,
+      "tool_calls": 17,
+      "success": true,
+      "fixture_correct": true,
+      "blocked_on_approval": false,
+      "missing_usage_requests": 0
+    }
+  },
+  "time_saved_fraction_vs_standard": 0.2669099899071543,
+  "token_change_fraction_vs_standard": 0.4581640166141152,
+  "historical_fast_v3": {
+    "samples": 3,
+    "median_elapsed_ms": 98079.66067000479,
+    "median_tokens": 346885,
+    "current_elapsed_change_fraction": -0.12648105491252803,
+    "current_token_change_fraction": -0.252092191936809,
+    "limitation": "Historical comparison is descriptive, across different times with variable model outputs; not a causal estimate of the code change."
+  },
+  "measured_runtime_files_changed": [
+    "dist/fast/engine.js",
+    "dist/fast/worker.js"
+  ],
+  "fixed_runtime_and_harness_hashes_verified": true,
+  "token_budget": {
+    "pilot_settled_including_connectivity": 437427,
+    "prior_settled": 9681397,
+    "total_settled": 10118824,
+    "total_authorized_cap": 10500000,
+    "remaining": 381176,
+    "missing_usage_requests": 0
+  },
+  "limitations": [
+    "Single pair cannot establish stable speed or token savings.",
+    "Fast uses more tokens than the contemporaneous Standard control.",
+    "Prompt batching is guidance: one standalone directory-listing round still occurred."
+  ]
+}

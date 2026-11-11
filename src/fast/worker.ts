@@ -6,6 +6,10 @@ import type { ApprovalDecision } from "../llm/approval.js";
 import { FastTaskError } from "./scheduler.js";
 import type { FastOutput } from "./types.js";
 
+// Fast-only guidance; batching never changes tool availability, ordering or approval.
+export const FAST_INSPECTION_POLICY = "Read known required paths directly without a separate directory-listing round. If a listing is needed, request it together with independent reads whose paths are already known. Discover unknown paths before reading them. ";
+export const FAST_COMMAND_POLICY = "When commands are available and necessary, combine related reads, computation, writes and read-back assertions for THIS task in one command when the full sequence is known. Preserve prerequisite order and stop on failed assertions. Split calls when later actions require diagnosis or a separate safety decision. The full command body still requires normal approval. Keep independent verification in its separate agent scope. ";
+
 const FINISH = "finish_task";
 const list = (value: unknown): string[] => Array.isArray(value) ? value.filter((s): s is string => typeof s === "string") : [];
 function finishTool(verification: boolean): ToolDefinition {
@@ -52,6 +56,7 @@ export async function runFastWorker(options: {
       (options.verification
         ? "Perform the independent acceptance checks for this task against original sources and requested outputs. A scratch helper or verifier script is not a deliverable unless the user requested it. Do not test the tests, inject faults into scratch copies, replay an already evidenced pipeline in a new directory, or add cleanliness/byte-forensics checks unless the original request explicitly requires that coverage or an actual contradictory result requires diagnosis. Required negative/edge tests for the delivered product remain mandatory. Reuse actual execution evidence to audit recorded actions. All necessary source and correctness checks remain mandatory. "
         : "Produce the task output and necessary self-checks. The separate verifier owns independent acceptance checks; do not repeat a full independent/global audit in this worker. Prefer read_file/list_files for inspection, and run_command for necessary computation or tests. ") +
+      FAST_INSPECTION_POLICY + (scope.policy.readOnly ? "" : FAST_COMMAND_POLICY) +
       "Keep the report factual and concise; include requested findings and cite actual evidence IDs. Do not reproduce raw records, command bodies or long checklists already preserved in the ledger unless the output contract requires them. conclusions/evidence/assumptions are optional when they add no new facts; all actual tool evidence is attached automatically. This does not reduce reasoning or verification requirements. " +
       (options.verification ? "Your result MUST include top-level verification_passed (boolean), unresolved (string[]), and a factual report. Merely writing PASS or verification_passed=true inside prose is insufficient. " : "") +
       "Correct tool/input mistakes in this conversation, preserving actual failed and successful evidence. Do not repeat a denied call unchanged. Never claim that missing checks passed." },

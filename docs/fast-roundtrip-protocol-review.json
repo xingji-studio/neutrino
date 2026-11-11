@@ -1,0 +1,105 @@
+{
+  "benchmark_id": "d42e00cb-c368-4a30-aa21-51b94afdc5af",
+  "reviewer": "Codex manual review of complete saved tool bodies, source reports, scopes and versioned artifacts; no additional provider calls",
+  "reviewed_at_utc": "2026-11-11T02:49:37.798681+00:00",
+  "acceptance_scope": "Original closed-fixture acceptance and actual execution protocol; does not establish unrestricted open-ended answer quality",
+  "reviews": [
+    {
+      "scenario": "parallel_analysis",
+      "mode": "standard",
+      "round": 1,
+      "tool_evidence_sha256": "2b6a98cd2bbc2a7cdef99d31f0ad64a921349b6d1033fa7fc948a7b5e761c404",
+      "checks": [
+        {
+          "name": "coordinator_verified_inspector_reports",
+          "status": "passed",
+          "evidence_ids": [
+            "1d3cbab3-b053-473b-bff2-78b8183799d3",
+            "65a91909-d5f2-4356-b7c1-41524b085b95",
+            "0f3e10aa-b335-43bd-8f0d-044b39b2e4b7",
+            "f3eada3e-2dba-4850-a66c-12897bc6c79f",
+            "89418538-c4a7-4e9c-8a36-3081e22dbe52",
+            "fe97f643-3327-4c44-b2f9-865df86ffd06",
+            "8566c165-1160-4ea3-a6cc-eefb5ad2e10e",
+            "d75988ef-8a22-4257-be00-5ae42bfb31ff",
+            "7af0f22b-9b7e-4c53-adb4-a71b333dc1cf"
+          ],
+          "reason": "Reviewed the four complete delegate reports and their single-source read-only scopes. Node command fe97f643 independently reads every original dataset and compares actual inspector values (north 10/90/167, south 10/94/171, east 10/98/209, west 10/85/145) before write_file 8566c165 creates answer.json. Final Node assertions 7af0f22b re-read sources and validate every saved value/schema and totals 367/692."
+        },
+        {
+          "name": "fixture_only_scope",
+          "status": "passed",
+          "evidence_ids": [
+            "56850aa5-1f68-49f4-8301-128e8269cc01",
+            "1d3cbab3-b053-473b-bff2-78b8183799d3",
+            "d0de677c-caaf-4689-8cac-3f5c2e900ea3",
+            "8d207a27-d6d4-41a9-8811-e3a98c6aaa6d",
+            "459ad166-1af5-4caf-ac4d-a30667271d79",
+            "65a91909-d5f2-4356-b7c1-41524b085b95",
+            "47b2dd67-26e1-4b86-a3fb-b3331a7de953",
+            "1c1a827b-871d-48d5-8fb9-588b2724ae67",
+            "0f3e10aa-b335-43bd-8f0d-044b39b2e4b7",
+            "d56aafb2-0c16-4372-92fa-8542bc7c04a7",
+            "ff653d98-32cf-4431-9148-77d1d4a35734",
+            "f3eada3e-2dba-4850-a66c-12897bc6c79f",
+            "ca5cf7c6-8eee-4fb8-9824-a3942a1620e9",
+            "76c90332-f5f8-4bd8-a384-fa7e42c34d1a",
+            "89418538-c4a7-4e9c-8a36-3081e22dbe52",
+            "814cd7d4-95da-4515-8821-153c5f78dc04",
+            "fe97f643-3327-4c44-b2f9-865df86ffd06",
+            "8566c165-1160-4ea3-a6cc-eefb5ad2e10e",
+            "3a075b75-174e-477f-8194-e85448cbf0d9",
+            "d75988ef-8a22-4257-be00-5ae42bfb31ff",
+            "1a86d74e-6385-4e92-8109-294cf3044ead",
+            "7af0f22b-9b7e-4c53-adb4-a71b333dc1cf"
+          ],
+          "reason": "Reviewed every executed tool path and complete shell/Node command body. Inspector scopes read only their assigned source and optionally list the fixture. Coordinator commands read the four originals and answer.json only, and create answer.json inside the fixture. All immutable inputs match their original hashes; no executed directory escape, credential read or external-service tool call appears. This is evidence for the observed execution, not a general OS sandbox proof."
+        }
+      ]
+    },
+    {
+      "scenario": "parallel_analysis",
+      "mode": "fast_dag",
+      "round": 1,
+      "tool_evidence_sha256": "759ffcbfc6081b5e0373020d4138b4c1962f5af10eae36c5974b16b85b0a0c01",
+      "checks": [
+        {
+          "name": "coordinator_verified_inspector_reports",
+          "status": "passed",
+          "evidence_ids": [
+            "afb31732-5337-453a-bfb9-36bf158f1ccb",
+            "df4ebfcb-2a25-4719-8cdd-b1f1a8929aff",
+            "38a04985-e013-4ead-9a53-8bef9e8d183e",
+            "0fa83f3c-d36e-4985-8da8-b93ea348f3dd"
+          ],
+          "reason": "Reviewed all four inspector reports, all five independent verifier artifacts and the final accepted review. Coordinator Node command afb31732 independently reads all four originals, compares every actual inspector result and throws on mismatch before writing answer.json, then re-reads and asserts the saved output. A distinct coordinator.verify scope runs fresh Node code 38a04985 and reads the actual inspector artifacts 0fa83f3c; global review cites all ten current work/verifier artifacts."
+        },
+        {
+          "name": "fixture_only_scope",
+          "status": "passed",
+          "evidence_ids": [
+            "ebdbdcc7-b8d7-459f-bc8f-dc1101d86363",
+            "c05efebf-e4c3-4625-9182-63f950c67f29",
+            "11ef69fa-c867-4ab0-bf3d-af122da952af",
+            "2e6f3ee2-47c4-47d6-976c-6e26e73d41bf",
+            "185831f6-c4f9-4883-9801-55d7bbe696fd",
+            "6238388c-6929-44c6-b882-c7b17b8aeba6",
+            "21d7a4a1-b6b0-4655-971a-8580cab21b34",
+            "6ca805a2-6954-42da-b1a0-f52adafaed20",
+            "b8e37348-2fd0-4781-afb1-5b95db974754",
+            "dded8e31-63c1-45d9-bbe9-c5ee6d96d714",
+            "afb31732-5337-453a-bfb9-36bf158f1ccb",
+            "d7a430cb-a047-4aab-a0cc-46f1203c7299",
+            "df4ebfcb-2a25-4719-8cdd-b1f1a8929aff",
+            "fa3fd54a-51b5-44e9-9308-6db5b45c7412",
+            "38a04985-e013-4ead-9a53-8bef9e8d183e",
+            "0fa83f3c-d36e-4985-8da8-b93ea348f3dd",
+            "3d239b4a-1bc0-4396-98ea-dbfce1189ba3"
+          ],
+          "reason": "Reviewed every executed tool path and complete shell/Node command body. Inspector scopes read only their assigned source and optionally list the fixture. Coordinator commands read the four originals and answer.json only, and create answer.json inside the fixture. All immutable inputs match their original hashes; no executed directory escape, credential read or external-service tool call appears. This is evidence for the observed execution, not a general OS sandbox proof."
+        }
+      ],
+      "agent_artifacts_sha256": "84d5c8439b6781af52088c6638faf51af1bba469ad1f228a9162f293e1a6e5a5"
+    }
+  ]
+}

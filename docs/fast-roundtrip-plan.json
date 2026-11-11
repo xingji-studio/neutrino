@@ -1,0 +1,44 @@
+{
+  "kind": "fast_roundtrip_pilot_plan",
+  "created_at_utc": "2026-11-11T02:43:17.980806+00:00",
+  "scenario": "parallel_analysis",
+  "rounds": 1,
+  "fresh_runs": 2,
+  "mode_order": [
+    "standard",
+    "fast_dag"
+  ],
+  "model": {
+    "provider": "DeepSeek",
+    "name": "deepseek-flash",
+    "intensity": "Max",
+    "context_window": 1000000,
+    "output_allowance": 16384,
+    "model_slots": 4
+  },
+  "acceptance": "Unchanged original fixture, inspector scope/actual reads, independent Node recomputation and report reconciliation before integration, exact output and original independent/global checks. No acceptance change or auto-approval of pending human requests.",
+  "prior_guard_settled_tokens": 9681397,
+  "total_authorized_cap": 10500000,
+  "pilot_cap": 818603,
+  "interpretation": "Single fresh Standard/Fast pair; no replacements or discarded failures; historical v3 Fast results are descriptive only and do not establish causality or stable performance.",
+  "production_changes": [
+    "Known-path read batching guidance for Fast workers/review",
+    "Related known-sequence commands with full ordinary/extreme approval and separate independent verification",
+    "Global review evidence-reuse policy at system role; all original tests and gap/conflict/changed-input checks remain mandatory"
+  ],
+  "deferred": [
+    "Ancestor-report preloading and request-reference transport require separate measurements"
+  ],
+  "local_checks": "docs/fast-roundtrip-local-checks.json",
+  "source_sha256": {
+    "src/fast/engine.ts": "6f22bee2abee7bb4ad414f011873cfb9752ad49d227a5bf27d72c55590260dba",
+    "src/fast/worker.ts": "4847a1e9eb6c75bcc3f5a77d99101a25f88bd561e18c468df11bb36465a45e1f",
+    "scripts/test-fast-efficiency.mjs": "060da2ac42c3d3847243d691a56c636752748cb61a520505b42db6f9b370c335",
+    "scripts/benchmark-fast-live.mjs": "4e8d2d0fd3cfe7deb4b234f8485500061cf3d7a92b8e47689293b79489786843",
+    "scripts/fast-live-cases.mjs": "3b4ff19c0e02640bbd1c0e76ed5ec3f650662437b00d8df698a72fabfa86db57",
+    "scripts/audit-fast-live.mjs": "2b888f75da0f2c8f00f507a64c84a94d272791d228fd92723b0247728747c114",
+    "assets/prompt.txt": "09113ad4dd66a6060ce5711c45c5dcc6e0d4576a00ac2c9889f07d9f5ba5936e",
+    "assets/subagent.txt": "6388adc7560233932ac586e34bf60c738cdcdd155905779a619da0f8da4b1cf5",
+    "assets/fast-planner.txt": "b4d2b7b75d4d605124e4f121111524a1285c86efff48ed14113ad04aabf8ba2d"
+  }
+}

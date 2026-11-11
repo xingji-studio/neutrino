@@ -177,10 +177,11 @@ try{
     const request=(optional?"Write answer.json with {ok:true}; independently assert its value.":"Delete requested.txt; independently assert it is absent.")+
       " Work only inside this directory."+(trusted?" "+FULL_TRUST_PHRASE:"");
     const rt=new TaskRuntime({request,cwd:directory});let engine,asked=0,reviewed=0,executed=0,checked=0;
+    const deletionCommand=`rm -f requested.txt && node -e 'require("assert").strictEqual(require("fs").existsSync("requested.txt"),false);console.log("PASS deletion self-check")'`;
     const gate=new ApprovalGate({autoApprovalEnabled:()=>true,extremeAutoApprovalEnabled:()=>automatic,
       askHuman:async()=>{asked++;return false;},reviewer:()=>({model:{name:"offline-reviewer",url:"https://offline.invalid",api_key:"fixture"},provider:"Fixture",intensity:"Max"}),createReviewerClient:()=>{
         const client=new LLMClient({name:"offline-reviewer",url:"https://offline.invalid",api_key:"fixture"},"Fixture","Max");
-        client.complete=async()=>{reviewed++;return JSON.stringify({approve:true,safety_score:95,relevance_score:95,hard_block:false,reason:"Delete the exact owned file explicitly required by the current request"});};return client;
+        client.complete=async(system,prompt)=>{reviewed++;assert.ok(prompt.includes(JSON.stringify(deletionCommand)),"every approval seat sees the complete batched command, including the assertion");return JSON.stringify({approve:true,safety_score:95,relevance_score:95,hard_block:false,reason:"Delete the exact owned file explicitly required by the current request"});};return client;
       }});
     const createClient=()=>{
       const client=new LLMClient({name:"offline-worker",url:"https://offline.invalid",api_key:"fixture",intensity:["Max"]},"Fixture","Max");
@@ -200,7 +201,7 @@ try{
           if(!optional&&task.kind==="verification"){
             call("run_command",{command:`node -e 'require("assert").strictEqual(require("fs").existsSync("requested.txt"),false);console.log("PASS required assertion")'`,reason:"Independently verify the requested deletion without repeating it"});return;
           }
-          call("run_command",{command:optional?"rm -rf .unrequested_negative_test":"rm -f requested.txt",reason:optional?"Prepare optional tests of a scratch verifier":"Remove only the file explicitly requested by the user",...(kind==="human"?{request_user_approval:true}:{})});return;
+          call("run_command",{command:optional?"rm -rf .unrequested_negative_test":deletionCommand,reason:optional?"Prepare optional tests of a scratch verifier":"Remove only the file explicitly requested by the user and assert it is absent",...(kind==="human"?{request_user_approval:true}:{})});return;
         }
         if(optional&&task.kind==="verification"&&results.length===1){
           assert.ok(results[0].content.includes("Nothing ran and no human decision was requested"));

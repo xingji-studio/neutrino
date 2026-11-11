@@ -1,0 +1,1466 @@
+{
+  "kind": "offline_fast_speed_opportunities",
+  "source_benchmark_id": "965a0e5c-6d7f-4be1-a495-f2398f3f3446",
+  "source_model": {
+    "provider": "DeepSeek",
+    "name": "deepseek-flash",
+    "intensity": "Max",
+    "available_inference_slots": 4
+  },
+  "source_engine_sha256": "7c726ea81989f018fae1f6b6775738594d325bc0d39f37e8bac66635f60d5bda",
+  "source_revision_sha256": {
+    "dist/fast/engine.js": "efb71e4961ee06f86f728a4688e74c0b4602a163a6fbba19dc6d8f9de99896bf",
+    "dist/fast/planner.js": "6b9193260f6a559667bd09a68ca148d772c6fb27db2dcfa888cfce135ff318d3",
+    "dist/fast/evidence.js": "fa310df8f82b5838f38231978258f1b5840272372cbff2e0ab45eb952858b57b",
+    "dist/fast/scheduler.js": "a6b42733bf00bc7082831fc982454427a2480338af0949bfd86aa606de28e48a",
+    "dist/fast/worker.js": "3fb93133ac442b5ddcfbdc2ef0d1e9023f671f943f8c521d405e3b16602cc766",
+    "dist/fast/pool.js": "5d61c0627ad8befca70048911a2aae6d7816a29522b7f4dc4b15ff45a38b2bb8",
+    "dist/fast/artifacts.js": "f44591a818ffebb2b7bf84fc4473e450cb0c19deb876e7d1c4d124ba19e0691d",
+    "dist/fast/types.js": "9d867c4dc23fa5fc1fd131d62143daae73e7da110d5582b32b72b2e10b8d773f",
+    "dist/llm/client.js": "6012f4755e89e9111569dcc6efaf2db7d39c60499504e2bdc72d3ae25a333df8",
+    "dist/llm/runtime.js": "4b25fa0ad9551c26763b79f554bd60ac290cf37462b169336c48ea870a09a629",
+    "dist/llm/workspace.js": "c0b1240cde39058c078c715d2bda04ba41bb9d92cb3e98d4773fde1502a5071d",
+    "dist/llm/tools.js": "c8bac53e05aa21bb53a81de4c8d2791651eea98a9b6c647eb47b98c9d95261ff",
+    "dist/llm/approval.js": "f5bd446fd14c94aa984fdf3e503c0a5d7c836e500356cb3c99ca2dd8dc624ada",
+    "dist/llm/risk.js": "5df08dbd78304d93c8550fc1c41bd1e9c75753c325eae01f6148049d3a576a7d",
+    "dist/web/session.js": "5e57f885c99a20cfb389bae1f61daa3af7cdf6152d705755ac20bcd526a215d0",
+    "assets/fast-planner.txt": "b4d2b7b75d4d605124e4f121111524a1285c86efff48ed14113ad04aabf8ba2d",
+    "assets/fast-replanner.txt": "e75eacf168454627e4aaa9c2e93a25d92d10167538fdba7e43ea306dc3cdabd8",
+    "assets/prompt.txt": "09113ad4dd66a6060ce5711c45c5dcc6e0d4576a00ac2c9889f07d9f5ba5936e",
+    "assets/planner.txt": "fc04fa98b5791c673894a6ddee612246011096ba0c64dc0492edf7f345222404",
+    "assets/subagent.txt": "6388adc7560233932ac586e34bf60c738cdcdd155905779a619da0f8da4b1cf5",
+    "scripts/benchmark-fast-live.mjs": "4e8d2d0fd3cfe7deb4b234f8485500061cf3d7a92b8e47689293b79489786843",
+    "scripts/fast-live-cases.mjs": "3b4ff19c0e02640bbd1c0e76ed5ec3f650662437b00d8df698a72fabfa86db57"
+  },
+  "provider_calls": 0,
+  "production_changes": 0,
+  "generated_at_utc": "2026-11-11T03:44:10.530Z",
+  "samples": [
+    {
+      "round": 1,
+      "elapsed_ms": 37966.24101499468,
+      "trace_wall_ms": 37937.653310999274,
+      "tokens": 93239,
+      "logical_requests": 17,
+      "roles": {
+        "planning": {
+          "logical_requests": 1,
+          "provider_attempts": 1,
+          "reported_input_tokens": 1364,
+          "reported_output_tokens": 128,
+          "reported_cached_input_tokens": 896,
+          "cached_usage_attempts": 1,
+          "reported_reasoning_tokens": 117,
+          "reasoning_usage_attempts": 1,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 1911.7940859943628,
+          "payload_bytes_cumulative": 6370
+        },
+        "worker": {
+          "logical_requests": 4,
+          "provider_attempts": 4,
+          "reported_input_tokens": 21126,
+          "reported_output_tokens": 2123,
+          "reported_cached_input_tokens": 17408,
+          "cached_usage_attempts": 4,
+          "reported_reasoning_tokens": 281,
+          "reasoning_usage_attempts": 4,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 12729.28805000335,
+          "payload_bytes_cumulative": 88270
+        },
+        "verification": {
+          "logical_requests": 4,
+          "provider_attempts": 4,
+          "reported_input_tokens": 33216,
+          "reported_output_tokens": 1699,
+          "reported_cached_input_tokens": 26624,
+          "cached_usage_attempts": 4,
+          "reported_reasoning_tokens": 307,
+          "reasoning_usage_attempts": 4,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 10424.530866004527,
+          "payload_bytes_cumulative": 128980
+        },
+        "approval": {
+          "logical_requests": 6,
+          "provider_attempts": 6,
+          "reported_input_tokens": 13615,
+          "reported_output_tokens": 918,
+          "reported_cached_input_tokens": 6528,
+          "cached_usage_attempts": 6,
+          "reported_reasoning_tokens": 425,
+          "reasoning_usage_attempts": 6,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 10245.45526599884,
+          "payload_bytes_cumulative": 53232
+        },
+        "integration": {
+          "logical_requests": 2,
+          "provider_attempts": 2,
+          "reported_input_tokens": 17937,
+          "reported_output_tokens": 1113,
+          "reported_cached_input_tokens": 9856,
+          "cached_usage_attempts": 2,
+          "reported_reasoning_tokens": 177,
+          "reasoning_usage_attempts": 2,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 7066.810465998948,
+          "payload_bytes_cumulative": 64583
+        }
+      },
+      "serial_tail": null,
+      "coordinator_tokens": {
+        "main": 23249,
+        "main.verify": 34915
+      },
+      "evidence_retrievals": [],
+      "persistence_ms": 16.342121981084347,
+      "snapshot_ms": 17.60674698650837,
+      "blocking_snapshot_and_store_ms": 21.68392898887396,
+      "model_queue_ms": 0.6105420291423798,
+      "standalone_list_turns": [],
+      "standalone_listing_model_ms_sum": 0,
+      "standalone_listing_model_ms_union": 0,
+      "input_cache_fraction": 0.7026519058424442,
+      "validity": "Successful Fast sample; balanced trace; tool IDs and scopes matched; token sum equals saved usage.",
+      "scenario": "multi_source_retrieval",
+      "request_reference_probe": {
+        "fragment_before_bytes": 893,
+        "fragment_after_bytes": 109,
+        "fragment_saved_bytes": 784,
+        "exact_round_trip": true,
+        "limit": "A transport-only prototype of goal/criteria fields, with the immutable full request still presented by TaskRuntime. Resolver instructions, provider tokenization, cache behavior and model choices are not simulated."
+      }
+    },
+    {
+      "round": 2,
+      "elapsed_ms": 34420.58339200169,
+      "trace_wall_ms": 34405.05226200074,
+      "tokens": 79322,
+      "logical_requests": 19,
+      "roles": {
+        "planning": {
+          "logical_requests": 1,
+          "provider_attempts": 1,
+          "reported_input_tokens": 1364,
+          "reported_output_tokens": 133,
+          "reported_cached_input_tokens": 896,
+          "cached_usage_attempts": 1,
+          "reported_reasoning_tokens": 122,
+          "reasoning_usage_attempts": 1,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 1582.7661300003529,
+          "payload_bytes_cumulative": 6370
+        },
+        "worker": {
+          "logical_requests": 4,
+          "provider_attempts": 4,
+          "reported_input_tokens": 20798,
+          "reported_output_tokens": 1665,
+          "reported_cached_input_tokens": 17152,
+          "cached_usage_attempts": 4,
+          "reported_reasoning_tokens": 106,
+          "reasoning_usage_attempts": 4,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 9740.025115013123,
+          "payload_bytes_cumulative": 86926
+        },
+        "approval": {
+          "logical_requests": 10,
+          "provider_attempts": 10,
+          "reported_input_tokens": 19395,
+          "reported_output_tokens": 1624,
+          "reported_cached_input_tokens": 11008,
+          "cached_usage_attempts": 10,
+          "reported_reasoning_tokens": 799,
+          "reasoning_usage_attempts": 10,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 15916.05245899409,
+          "payload_bytes_cumulative": 79810
+        },
+        "verification": {
+          "logical_requests": 2,
+          "provider_attempts": 2,
+          "reported_input_tokens": 15221,
+          "reported_output_tokens": 1531,
+          "reported_cached_input_tokens": 9344,
+          "cached_usage_attempts": 2,
+          "reported_reasoning_tokens": 234,
+          "reasoning_usage_attempts": 2,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 8379.724622003734,
+          "payload_bytes_cumulative": 59555
+        },
+        "integration": {
+          "logical_requests": 2,
+          "provider_attempts": 2,
+          "reported_input_tokens": 16669,
+          "reported_output_tokens": 922,
+          "reported_cached_input_tokens": 9216,
+          "cached_usage_attempts": 2,
+          "reported_reasoning_tokens": 85,
+          "reasoning_usage_attempts": 2,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 5520.543209001422,
+          "payload_bytes_cumulative": 60477
+        }
+      },
+      "serial_tail": null,
+      "coordinator_tokens": {
+        "main": 22463,
+        "main.verify": 16752
+      },
+      "evidence_retrievals": [],
+      "persistence_ms": 20.253057025372982,
+      "snapshot_ms": 21.121490992605686,
+      "blocking_snapshot_and_store_ms": 25.18324499577284,
+      "model_queue_ms": 0.4890710189938545,
+      "standalone_list_turns": [],
+      "standalone_listing_model_ms_sum": 0,
+      "standalone_listing_model_ms_union": 0,
+      "input_cache_fraction": 0.6483042193690689,
+      "validity": "Successful Fast sample; balanced trace; tool IDs and scopes matched; token sum equals saved usage.",
+      "scenario": "multi_source_retrieval",
+      "request_reference_probe": {
+        "fragment_before_bytes": 893,
+        "fragment_after_bytes": 109,
+        "fragment_saved_bytes": 784,
+        "exact_round_trip": true,
+        "limit": "A transport-only prototype of goal/criteria fields, with the immutable full request still presented by TaskRuntime. Resolver instructions, provider tokenization, cache behavior and model choices are not simulated."
+      }
+    },
+    {
+      "round": 3,
+      "elapsed_ms": 35481.21904499829,
+      "trace_wall_ms": 35468.50027799606,
+      "tokens": 89645,
+      "logical_requests": 20,
+      "roles": {
+        "planning": {
+          "logical_requests": 1,
+          "provider_attempts": 1,
+          "reported_input_tokens": 1364,
+          "reported_output_tokens": 194,
+          "reported_cached_input_tokens": 896,
+          "cached_usage_attempts": 1,
+          "reported_reasoning_tokens": 183,
+          "reasoning_usage_attempts": 1,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 1767.8794940039515,
+          "payload_bytes_cumulative": 6370
+        },
+        "worker": {
+          "logical_requests": 4,
+          "provider_attempts": 4,
+          "reported_input_tokens": 21502,
+          "reported_output_tokens": 1850,
+          "reported_cached_input_tokens": 17792,
+          "cached_usage_attempts": 4,
+          "reported_reasoning_tokens": 243,
+          "reasoning_usage_attempts": 4,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 11059.437342002988,
+          "payload_bytes_cumulative": 90110
+        },
+        "approval": {
+          "logical_requests": 10,
+          "provider_attempts": 10,
+          "reported_input_tokens": 20125,
+          "reported_output_tokens": 1568,
+          "reported_cached_input_tokens": 8576,
+          "cached_usage_attempts": 10,
+          "reported_reasoning_tokens": 709,
+          "reasoning_usage_attempts": 10,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 14814.922629989684,
+          "payload_bytes_cumulative": 84090
+        },
+        "verification": {
+          "logical_requests": 3,
+          "provider_attempts": 3,
+          "reported_input_tokens": 23903,
+          "reported_output_tokens": 1391,
+          "reported_cached_input_tokens": 17920,
+          "cached_usage_attempts": 3,
+          "reported_reasoning_tokens": 112,
+          "reasoning_usage_attempts": 3,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 8189.834418989718,
+          "payload_bytes_cumulative": 93656
+        },
+        "integration": {
+          "logical_requests": 2,
+          "provider_attempts": 2,
+          "reported_input_tokens": 16937,
+          "reported_output_tokens": 811,
+          "reported_cached_input_tokens": 9472,
+          "cached_usage_attempts": 2,
+          "reported_reasoning_tokens": 158,
+          "reasoning_usage_attempts": 2,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 6072.628075994551,
+          "payload_bytes_cumulative": 62292
+        }
+      },
+      "serial_tail": null,
+      "coordinator_tokens": {
+        "main": 23352,
+        "main.verify": 25294
+      },
+      "evidence_retrievals": [],
+      "persistence_ms": 20.521507032215595,
+      "snapshot_ms": 21.0093509927392,
+      "blocking_snapshot_and_store_ms": 25.045244999229908,
+      "model_queue_ms": 0.5608780235052109,
+      "standalone_list_turns": [],
+      "standalone_listing_model_ms_sum": 0,
+      "standalone_listing_model_ms_union": 0,
+      "input_cache_fraction": 0.6519783850842767,
+      "validity": "Successful Fast sample; balanced trace; tool IDs and scopes matched; token sum equals saved usage.",
+      "scenario": "multi_source_retrieval",
+      "request_reference_probe": {
+        "fragment_before_bytes": 893,
+        "fragment_after_bytes": 109,
+        "fragment_saved_bytes": 784,
+        "exact_round_trip": true,
+        "limit": "A transport-only prototype of goal/criteria fields, with the immutable full request still presented by TaskRuntime. Resolver instructions, provider tokenization, cache behavior and model choices are not simulated."
+      }
+    },
+    {
+      "round": 1,
+      "elapsed_ms": 38664.838422998786,
+      "trace_wall_ms": 38650.59691700339,
+      "tokens": 95300,
+      "logical_requests": 19,
+      "roles": {
+        "planning": {
+          "logical_requests": 1,
+          "provider_attempts": 1,
+          "reported_input_tokens": 1375,
+          "reported_output_tokens": 91,
+          "reported_cached_input_tokens": 896,
+          "cached_usage_attempts": 1,
+          "reported_reasoning_tokens": 80,
+          "reasoning_usage_attempts": 1,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 1224.4695720002055,
+          "payload_bytes_cumulative": 6425
+        },
+        "worker": {
+          "logical_requests": 5,
+          "provider_attempts": 5,
+          "reported_input_tokens": 26931,
+          "reported_output_tokens": 1598,
+          "reported_cached_input_tokens": 22912,
+          "cached_usage_attempts": 5,
+          "reported_reasoning_tokens": 47,
+          "reasoning_usage_attempts": 5,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 10980.97289199382,
+          "payload_bytes_cumulative": 111456
+        },
+        "approval": {
+          "logical_requests": 8,
+          "provider_attempts": 8,
+          "reported_input_tokens": 17014,
+          "reported_output_tokens": 1374,
+          "reported_cached_input_tokens": 6400,
+          "cached_usage_attempts": 8,
+          "reported_reasoning_tokens": 699,
+          "reasoning_usage_attempts": 8,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 13069.587519995868,
+          "payload_bytes_cumulative": 68210
+        },
+        "verification": {
+          "logical_requests": 3,
+          "provider_attempts": 3,
+          "reported_input_tokens": 24872,
+          "reported_output_tokens": 2145,
+          "reported_cached_input_tokens": 18432,
+          "cached_usage_attempts": 3,
+          "reported_reasoning_tokens": 342,
+          "reasoning_usage_attempts": 3,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 12224.931190006435,
+          "payload_bytes_cumulative": 94786
+        },
+        "integration": {
+          "logical_requests": 2,
+          "provider_attempts": 2,
+          "reported_input_tokens": 18820,
+          "reported_output_tokens": 1080,
+          "reported_cached_input_tokens": 10368,
+          "cached_usage_attempts": 2,
+          "reported_reasoning_tokens": 293,
+          "reasoning_usage_attempts": 2,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 5906.005649998784,
+          "payload_bytes_cumulative": 66435
+        }
+      },
+      "serial_tail": null,
+      "coordinator_tokens": {
+        "main": 28529,
+        "main.verify": 27017
+      },
+      "evidence_retrievals": [],
+      "persistence_ms": 14.834562964737415,
+      "snapshot_ms": 19.081585004925728,
+      "blocking_snapshot_and_store_ms": 20.062040001153946,
+      "model_queue_ms": 0.6273369863629341,
+      "standalone_list_turns": [],
+      "standalone_listing_model_ms_sum": 0,
+      "standalone_listing_model_ms_union": 0,
+      "input_cache_fraction": 0.6629218532332719,
+      "validity": "Successful Fast sample; balanced trace; tool IDs and scopes matched; token sum equals saved usage.",
+      "scenario": "multi_module_code",
+      "request_reference_probe": {
+        "fragment_before_bytes": 1033,
+        "fragment_after_bytes": 109,
+        "fragment_saved_bytes": 924,
+        "exact_round_trip": true,
+        "limit": "A transport-only prototype of goal/criteria fields, with the immutable full request still presented by TaskRuntime. Resolver instructions, provider tokenization, cache behavior and model choices are not simulated."
+      }
+    },
+    {
+      "round": 2,
+      "elapsed_ms": 37025.10921599716,
+      "trace_wall_ms": 37001.86326300353,
+      "tokens": 98947,
+      "logical_requests": 20,
+      "roles": {
+        "planning": {
+          "logical_requests": 1,
+          "provider_attempts": 1,
+          "reported_input_tokens": 1375,
+          "reported_output_tokens": 97,
+          "reported_cached_input_tokens": 896,
+          "cached_usage_attempts": 1,
+          "reported_reasoning_tokens": 86,
+          "reasoning_usage_attempts": 1,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 1412.6818300038576,
+          "payload_bytes_cumulative": 6425
+        },
+        "worker": {
+          "logical_requests": 6,
+          "provider_attempts": 6,
+          "reported_input_tokens": 33201,
+          "reported_output_tokens": 1918,
+          "reported_cached_input_tokens": 28928,
+          "cached_usage_attempts": 6,
+          "reported_reasoning_tokens": 177,
+          "reasoning_usage_attempts": 6,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 12517.775378987193,
+          "payload_bytes_cumulative": 137038
+        },
+        "approval": {
+          "logical_requests": 8,
+          "provider_attempts": 8,
+          "reported_input_tokens": 14670,
+          "reported_output_tokens": 1331,
+          "reported_cached_input_tokens": 7552,
+          "cached_usage_attempts": 8,
+          "reported_reasoning_tokens": 629,
+          "reasoning_usage_attempts": 8,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 12594.050383999944,
+          "payload_bytes_cumulative": 61916
+        },
+        "verification": {
+          "logical_requests": 3,
+          "provider_attempts": 3,
+          "reported_input_tokens": 25344,
+          "reported_output_tokens": 1651,
+          "reported_cached_input_tokens": 18816,
+          "cached_usage_attempts": 3,
+          "reported_reasoning_tokens": 134,
+          "reasoning_usage_attempts": 3,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 9298.55330800265,
+          "payload_bytes_cumulative": 95581
+        },
+        "integration": {
+          "logical_requests": 2,
+          "provider_attempts": 2,
+          "reported_input_tokens": 18436,
+          "reported_output_tokens": 924,
+          "reported_cached_input_tokens": 9984,
+          "cached_usage_attempts": 2,
+          "reported_reasoning_tokens": 137,
+          "reasoning_usage_attempts": 2,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 6024.785770997405,
+          "payload_bytes_cumulative": 64455
+        }
+      },
+      "serial_tail": null,
+      "coordinator_tokens": {
+        "main": 35119,
+        "main.verify": 26995
+      },
+      "evidence_retrievals": [],
+      "persistence_ms": 27.802361004054546,
+      "snapshot_ms": 28.674943998456,
+      "blocking_snapshot_and_store_ms": 32.63966300338507,
+      "model_queue_ms": 0.5629509836435318,
+      "standalone_list_turns": [],
+      "standalone_listing_model_ms_sum": 0,
+      "standalone_listing_model_ms_union": 0,
+      "input_cache_fraction": 0.7113710145550707,
+      "validity": "Successful Fast sample; balanced trace; tool IDs and scopes matched; token sum equals saved usage.",
+      "scenario": "multi_module_code",
+      "request_reference_probe": {
+        "fragment_before_bytes": 1033,
+        "fragment_after_bytes": 109,
+        "fragment_saved_bytes": 924,
+        "exact_round_trip": true,
+        "limit": "A transport-only prototype of goal/criteria fields, with the immutable full request still presented by TaskRuntime. Resolver instructions, provider tokenization, cache behavior and model choices are not simulated."
+      }
+    },
+    {
+      "round": 3,
+      "elapsed_ms": 39838.58901400119,
+      "trace_wall_ms": 39799.2891350016,
+      "tokens": 102318,
+      "logical_requests": 20,
+      "roles": {
+        "planning": {
+          "logical_requests": 1,
+          "provider_attempts": 1,
+          "reported_input_tokens": 1375,
+          "reported_output_tokens": 139,
+          "reported_cached_input_tokens": 896,
+          "cached_usage_attempts": 1,
+          "reported_reasoning_tokens": 128,
+          "reasoning_usage_attempts": 1,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 1311.5134130045772,
+          "payload_bytes_cumulative": 6425
+        },
+        "worker": {
+          "logical_requests": 6,
+          "provider_attempts": 6,
+          "reported_input_tokens": 33414,
+          "reported_output_tokens": 2017,
+          "reported_cached_input_tokens": 29184,
+          "cached_usage_attempts": 6,
+          "reported_reasoning_tokens": 221,
+          "reasoning_usage_attempts": 6,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 12798.135752007365,
+          "payload_bytes_cumulative": 138356
+        },
+        "approval": {
+          "logical_requests": 8,
+          "provider_attempts": 8,
+          "reported_input_tokens": 15440,
+          "reported_output_tokens": 1236,
+          "reported_cached_input_tokens": 7040,
+          "cached_usage_attempts": 8,
+          "reported_reasoning_tokens": 554,
+          "reasoning_usage_attempts": 8,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 13839.159455999732,
+          "payload_bytes_cumulative": 63586
+        },
+        "verification": {
+          "logical_requests": 3,
+          "provider_attempts": 3,
+          "reported_input_tokens": 25867,
+          "reported_output_tokens": 2117,
+          "reported_cached_input_tokens": 18944,
+          "cached_usage_attempts": 3,
+          "reported_reasoning_tokens": 200,
+          "reasoning_usage_attempts": 3,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 11319.216139011085,
+          "payload_bytes_cumulative": 97663
+        },
+        "integration": {
+          "logical_requests": 2,
+          "provider_attempts": 2,
+          "reported_input_tokens": 19602,
+          "reported_output_tokens": 1111,
+          "reported_cached_input_tokens": 10624,
+          "cached_usage_attempts": 2,
+          "reported_reasoning_tokens": 253,
+          "reasoning_usage_attempts": 2,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 6225.642944000661,
+          "payload_bytes_cumulative": 68403
+        }
+      },
+      "serial_tail": null,
+      "coordinator_tokens": {
+        "main": 35431,
+        "main.verify": 27984
+      },
+      "evidence_retrievals": [],
+      "persistence_ms": 17.296379007399082,
+      "snapshot_ms": 20.833964996039867,
+      "blocking_snapshot_and_store_ms": 21.870563998818398,
+      "model_queue_ms": 0.4664259999990463,
+      "standalone_list_turns": [],
+      "standalone_listing_model_ms_sum": 0,
+      "standalone_listing_model_ms_union": 0,
+      "input_cache_fraction": 0.6968588685238981,
+      "validity": "Successful Fast sample; balanced trace; tool IDs and scopes matched; token sum equals saved usage.",
+      "scenario": "multi_module_code",
+      "request_reference_probe": {
+        "fragment_before_bytes": 1033,
+        "fragment_after_bytes": 109,
+        "fragment_saved_bytes": 924,
+        "exact_round_trip": true,
+        "limit": "A transport-only prototype of goal/criteria fields, with the immutable full request still presented by TaskRuntime. Resolver instructions, provider tokenization, cache behavior and model choices are not simulated."
+      }
+    },
+    {
+      "round": 1,
+      "elapsed_ms": 54123.43139800429,
+      "trace_wall_ms": 54073.68418700248,
+      "tokens": 145048,
+      "logical_requests": 28,
+      "roles": {
+        "planning": {
+          "logical_requests": 1,
+          "provider_attempts": 1,
+          "reported_input_tokens": 1406,
+          "reported_output_tokens": 92,
+          "reported_cached_input_tokens": 896,
+          "cached_usage_attempts": 1,
+          "reported_reasoning_tokens": 81,
+          "reasoning_usage_attempts": 1,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 1214.7941379994154,
+          "payload_bytes_cumulative": 6578
+        },
+        "worker": {
+          "logical_requests": 9,
+          "provider_attempts": 9,
+          "reported_input_tokens": 52094,
+          "reported_output_tokens": 2337,
+          "reported_cached_input_tokens": 47104,
+          "cached_usage_attempts": 9,
+          "reported_reasoning_tokens": 279,
+          "reasoning_usage_attempts": 9,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 16219.379858016968,
+          "payload_bytes_cumulative": 217287
+        },
+        "approval": {
+          "logical_requests": 12,
+          "provider_attempts": 12,
+          "reported_input_tokens": 22984,
+          "reported_output_tokens": 1770,
+          "reported_cached_input_tokens": 9984,
+          "cached_usage_attempts": 12,
+          "reported_reasoning_tokens": 744,
+          "reasoning_usage_attempts": 12,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 18826.564229995012,
+          "payload_bytes_cumulative": 95982
+        },
+        "verification": {
+          "logical_requests": 4,
+          "provider_attempts": 4,
+          "reported_input_tokens": 39063,
+          "reported_output_tokens": 2854,
+          "reported_cached_input_tokens": 30464,
+          "cached_usage_attempts": 4,
+          "reported_reasoning_tokens": 442,
+          "reasoning_usage_attempts": 4,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 15995.222991012037,
+          "payload_bytes_cumulative": 146532
+        },
+        "integration": {
+          "logical_requests": 2,
+          "provider_attempts": 2,
+          "reported_input_tokens": 20890,
+          "reported_output_tokens": 1558,
+          "reported_cached_input_tokens": 11264,
+          "cached_usage_attempts": 2,
+          "reported_reasoning_tokens": 305,
+          "reasoning_usage_attempts": 2,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 9144.987663000822,
+          "payload_bytes_cumulative": 72806
+        }
+      },
+      "serial_tail": null,
+      "coordinator_tokens": {
+        "main": 54431,
+        "main.verify": 41917
+      },
+      "evidence_retrievals": [],
+      "persistence_ms": 16.76350100338459,
+      "snapshot_ms": 19.536772966384888,
+      "blocking_snapshot_and_store_ms": 23.133993968367577,
+      "model_queue_ms": 0.7393410056829453,
+      "standalone_list_turns": [],
+      "standalone_listing_model_ms_sum": 0,
+      "standalone_listing_model_ms_union": 0,
+      "input_cache_fraction": 0.7308281477898224,
+      "validity": "Successful Fast sample; balanced trace; tool IDs and scopes matched; token sum equals saved usage.",
+      "scenario": "strong_sequential_dependencies",
+      "request_reference_probe": {
+        "fragment_before_bytes": 1261,
+        "fragment_after_bytes": 109,
+        "fragment_saved_bytes": 1152,
+        "exact_round_trip": true,
+        "limit": "A transport-only prototype of goal/criteria fields, with the immutable full request still presented by TaskRuntime. Resolver instructions, provider tokenization, cache behavior and model choices are not simulated."
+      }
+    },
+    {
+      "round": 2,
+      "elapsed_ms": 52151.3145840019,
+      "trace_wall_ms": 52131.78366699815,
+      "tokens": 122787,
+      "logical_requests": 26,
+      "roles": {
+        "planning": {
+          "logical_requests": 1,
+          "provider_attempts": 1,
+          "reported_input_tokens": 1406,
+          "reported_output_tokens": 61,
+          "reported_cached_input_tokens": 896,
+          "cached_usage_attempts": 1,
+          "reported_reasoning_tokens": 50,
+          "reasoning_usage_attempts": 1,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 877.3872570022941,
+          "payload_bytes_cumulative": 6578
+        },
+        "worker": {
+          "logical_requests": 6,
+          "provider_attempts": 6,
+          "reported_input_tokens": 34971,
+          "reported_output_tokens": 2860,
+          "reported_cached_input_tokens": 30592,
+          "cached_usage_attempts": 6,
+          "reported_reasoning_tokens": 465,
+          "reasoning_usage_attempts": 6,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 16584.891407996416,
+          "payload_bytes_cumulative": 145660
+        },
+        "approval": {
+          "logical_requests": 14,
+          "provider_attempts": 14,
+          "reported_input_tokens": 28699,
+          "reported_output_tokens": 2052,
+          "reported_cached_input_tokens": 12416,
+          "cached_usage_attempts": 14,
+          "reported_reasoning_tokens": 859,
+          "reasoning_usage_attempts": 14,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 22604.869167998433,
+          "payload_bytes_cumulative": 116532
+        },
+        "verification": {
+          "logical_requests": 3,
+          "provider_attempts": 3,
+          "reported_input_tokens": 28039,
+          "reported_output_tokens": 2264,
+          "reported_cached_input_tokens": 20480,
+          "cached_usage_attempts": 3,
+          "reported_reasoning_tokens": 368,
+          "reasoning_usage_attempts": 3,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 13326.124152004719,
+          "payload_bytes_cumulative": 105037
+        },
+        "integration": {
+          "logical_requests": 2,
+          "provider_attempts": 2,
+          "reported_input_tokens": 21120,
+          "reported_output_tokens": 1315,
+          "reported_cached_input_tokens": 11648,
+          "cached_usage_attempts": 2,
+          "reported_reasoning_tokens": 269,
+          "reasoning_usage_attempts": 2,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 8063.369635999203,
+          "payload_bytes_cumulative": 73715
+        }
+      },
+      "serial_tail": null,
+      "coordinator_tokens": {
+        "main": 37831,
+        "main.verify": 30303
+      },
+      "evidence_retrievals": [],
+      "persistence_ms": 149.84559796005487,
+      "snapshot_ms": 154.66844298690557,
+      "blocking_snapshot_and_store_ms": 157.94039498269558,
+      "model_queue_ms": 1.0249469950795174,
+      "standalone_list_turns": [],
+      "standalone_listing_model_ms_sum": 0,
+      "standalone_listing_model_ms_union": 0,
+      "input_cache_fraction": 0.6655753490611459,
+      "validity": "Successful Fast sample; balanced trace; tool IDs and scopes matched; token sum equals saved usage.",
+      "scenario": "strong_sequential_dependencies",
+      "request_reference_probe": {
+        "fragment_before_bytes": 1261,
+        "fragment_after_bytes": 109,
+        "fragment_saved_bytes": 1152,
+        "exact_round_trip": true,
+        "limit": "A transport-only prototype of goal/criteria fields, with the immutable full request still presented by TaskRuntime. Resolver instructions, provider tokenization, cache behavior and model choices are not simulated."
+      }
+    },
+    {
+      "round": 3,
+      "elapsed_ms": 49908.54911600053,
+      "trace_wall_ms": 49884.26372800022,
+      "tokens": 113995,
+      "logical_requests": 26,
+      "roles": {
+        "planning": {
+          "logical_requests": 1,
+          "provider_attempts": 1,
+          "reported_input_tokens": 1406,
+          "reported_output_tokens": 118,
+          "reported_cached_input_tokens": 896,
+          "cached_usage_attempts": 1,
+          "reported_reasoning_tokens": 107,
+          "reasoning_usage_attempts": 1,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 1487.364482998848,
+          "payload_bytes_cumulative": 6578
+        },
+        "worker": {
+          "logical_requests": 7,
+          "provider_attempts": 7,
+          "reported_input_tokens": 40673,
+          "reported_output_tokens": 2546,
+          "reported_cached_input_tokens": 36224,
+          "cached_usage_attempts": 7,
+          "reported_reasoning_tokens": 245,
+          "reasoning_usage_attempts": 7,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 16401.954379998147,
+          "payload_bytes_cumulative": 169378
+        },
+        "approval": {
+          "logical_requests": 14,
+          "provider_attempts": 14,
+          "reported_input_tokens": 26395,
+          "reported_output_tokens": 2293,
+          "reported_cached_input_tokens": 12544,
+          "cached_usage_attempts": 14,
+          "reported_reasoning_tokens": 1110,
+          "reasoning_usage_attempts": 14,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 25163.778921984136,
+          "payload_bytes_cumulative": 110486
+        },
+        "verification": {
+          "logical_requests": 2,
+          "provider_attempts": 2,
+          "reported_input_tokens": 17927,
+          "reported_output_tokens": 1628,
+          "reported_cached_input_tokens": 10752,
+          "cached_usage_attempts": 2,
+          "reported_reasoning_tokens": 170,
+          "reasoning_usage_attempts": 2,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 9211.28272099793,
+          "payload_bytes_cumulative": 67369
+        },
+        "integration": {
+          "logical_requests": 2,
+          "provider_attempts": 2,
+          "reported_input_tokens": 19753,
+          "reported_output_tokens": 1256,
+          "reported_cached_input_tokens": 10880,
+          "cached_usage_attempts": 2,
+          "reported_reasoning_tokens": 353,
+          "reasoning_usage_attempts": 2,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 8406.98918300122,
+          "payload_bytes_cumulative": 69790
+        }
+      },
+      "serial_tail": null,
+      "coordinator_tokens": {
+        "main": 43219,
+        "main.verify": 19555
+      },
+      "evidence_retrievals": [],
+      "persistence_ms": 21.135084994137287,
+      "snapshot_ms": 22.70389699935913,
+      "blocking_snapshot_and_store_ms": 26.66458500176668,
+      "model_queue_ms": 0.6442259848117828,
+      "standalone_list_turns": [],
+      "standalone_listing_model_ms_sum": 0,
+      "standalone_listing_model_ms_union": 0,
+      "input_cache_fraction": 0.6716280121333158,
+      "validity": "Successful Fast sample; balanced trace; tool IDs and scopes matched; token sum equals saved usage.",
+      "scenario": "strong_sequential_dependencies",
+      "request_reference_probe": {
+        "fragment_before_bytes": 1261,
+        "fragment_after_bytes": 109,
+        "fragment_saved_bytes": 1152,
+        "exact_round_trip": true,
+        "limit": "A transport-only prototype of goal/criteria fields, with the immutable full request still presented by TaskRuntime. Resolver instructions, provider tokenization, cache behavior and model choices are not simulated."
+      }
+    },
+    {
+      "round": 1,
+      "elapsed_ms": 98079.66067000479,
+      "trace_wall_ms": 98037.41872499883,
+      "tokens": 311015,
+      "logical_requests": 40,
+      "roles": {
+        "planning": {
+          "logical_requests": 1,
+          "provider_attempts": 1,
+          "reported_input_tokens": 1465,
+          "reported_output_tokens": 2394,
+          "reported_cached_input_tokens": 1024,
+          "cached_usage_attempts": 1,
+          "reported_reasoning_tokens": 1850,
+          "reasoning_usage_attempts": 1,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 14383.722548998892,
+          "payload_bytes_cumulative": 6930
+        },
+        "worker": {
+          "logical_requests": 14,
+          "provider_attempts": 14,
+          "reported_input_tokens": 111381,
+          "reported_output_tokens": 8353,
+          "reported_cached_input_tokens": 84224,
+          "cached_usage_attempts": 14,
+          "reported_reasoning_tokens": 2722,
+          "reasoning_usage_attempts": 14,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 49616.03956802189,
+          "payload_bytes_cumulative": 421747
+        },
+        "verification": {
+          "logical_requests": 13,
+          "provider_attempts": 13,
+          "reported_input_tokens": 106841,
+          "reported_output_tokens": 11554,
+          "reported_cached_input_tokens": 83200,
+          "cached_usage_attempts": 13,
+          "reported_reasoning_tokens": 3638,
+          "reasoning_usage_attempts": 13,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 64450.56381500512,
+          "payload_bytes_cumulative": 406423
+        },
+        "approval": {
+          "logical_requests": 10,
+          "provider_attempts": 10,
+          "reported_input_tokens": 29149,
+          "reported_output_tokens": 1703,
+          "reported_cached_input_tokens": 9472,
+          "cached_usage_attempts": 10,
+          "reported_reasoning_tokens": 838,
+          "reasoning_usage_attempts": 10,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 18602.323072992265,
+          "payload_bytes_cumulative": 112612
+        },
+        "integration": {
+          "logical_requests": 2,
+          "provider_attempts": 2,
+          "reported_input_tokens": 36226,
+          "reported_output_tokens": 1949,
+          "reported_cached_input_tokens": 19200,
+          "cached_usage_attempts": 2,
+          "reported_reasoning_tokens": 219,
+          "reasoning_usage_attempts": 2,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 11398.562993995845,
+          "payload_bytes_cumulative": 123114
+        }
+      },
+      "serial_tail": {
+        "coordinator_task": "integrate",
+        "parallel_prefix_ms": 35987.16177599877,
+        "work_ms": 24136.38606300205,
+        "independent_verification_ms": 24558.319613993168,
+        "global_review_ms": 13350.272634997964,
+        "tail_ms": 62050.25694900006,
+        "wall_fraction": 0.6329242217510332,
+        "approval_model_union_ms": 10108.500032000244,
+        "transition_ms": 5.278637006878853
+      },
+      "coordinator_tokens": {
+        "integrate": 72783,
+        "integrate.verify": 56675
+      },
+      "evidence_retrievals": [
+        {
+          "id": "4006f4af-7931-40d0-a408-544ba717f41e",
+          "task_id": "integrate.verify",
+          "ids": [
+            "artifact:inspect_north@1",
+            "artifact:inspect_south@1",
+            "artifact:inspect_east@1",
+            "artifact:inspect_west@1"
+          ],
+          "reason": "Confirm the inspectors' own reported figures rather than trusting the integrator's summary of them.",
+          "result_bytes": 7205
+        }
+      ],
+      "persistence_ms": 63.71425797790289,
+      "snapshot_ms": 63.46076400578022,
+      "blocking_snapshot_and_store_ms": 81.04036802053452,
+      "model_queue_ms": 694.844422981143,
+      "standalone_list_turns": [
+        {
+          "scope_run_id": "51b4e311-b096-4a93-9ee7-129ffc988e96",
+          "request_id": "request-32",
+          "task_id": "inspect_south",
+          "role": "worker",
+          "request_ms": 1519.341172002256,
+          "interval": [
+            13700.197485998273,
+            15219.538658000529
+          ],
+          "source_paths": [
+            "south.json"
+          ],
+          "listing_evidence_ids": [
+            "6817c935-b423-4038-936d-e7fdffa225a6"
+          ],
+          "read_evidence_ids": [
+            "fcaf8730-68e3-4104-82af-918f74ad3992"
+          ],
+          "reported_tokens": 4120
+        },
+        {
+          "scope_run_id": "9512b399-7dd6-4f84-bcb9-7578ec9b8881",
+          "request_id": "request-36",
+          "task_id": "inspect_west",
+          "role": "worker",
+          "request_ms": 1319.3369400054216,
+          "interval": [
+            14394.528099998832,
+            15713.865040004253
+          ],
+          "source_paths": [
+            "/tmp/neutrino-fast-live-b4eG5i/parallel_analysis/fast_dag/0/west.json"
+          ],
+          "listing_evidence_ids": [
+            "6ab4580a-9507-4832-bc51-0d4eecc75aac"
+          ],
+          "read_evidence_ids": [
+            "46da8aa1-3a89-4d20-8dd7-32208a0ecd14"
+          ],
+          "reported_tokens": 4144
+        }
+      ],
+      "standalone_listing_model_ms_sum": 2838.6781120076776,
+      "standalone_listing_model_ms_union": 2013.6675540059805,
+      "input_cache_fraction": 0.6914986915127236,
+      "validity": "Successful Fast sample; balanced trace; tool IDs and scopes matched; token sum equals saved usage.",
+      "scenario": "parallel_analysis"
+    },
+    {
+      "round": 2,
+      "elapsed_ms": 96028.73488600552,
+      "trace_wall_ms": 96015.51378300041,
+      "tokens": 346885,
+      "logical_requests": 40,
+      "roles": {
+        "planning": {
+          "logical_requests": 1,
+          "provider_attempts": 1,
+          "reported_input_tokens": 1465,
+          "reported_output_tokens": 2755,
+          "reported_cached_input_tokens": 1024,
+          "cached_usage_attempts": 1,
+          "reported_reasoning_tokens": 2138,
+          "reasoning_usage_attempts": 1,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 15978.824822999537,
+          "payload_bytes_cumulative": 6930
+        },
+        "worker": {
+          "logical_requests": 16,
+          "provider_attempts": 16,
+          "reported_input_tokens": 146497,
+          "reported_output_tokens": 10169,
+          "reported_cached_input_tokens": 118912,
+          "cached_usage_attempts": 16,
+          "reported_reasoning_tokens": 3042,
+          "reasoning_usage_attempts": 16,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 56926.29482000321,
+          "payload_bytes_cumulative": 550267
+        },
+        "verification": {
+          "logical_requests": 13,
+          "provider_attempts": 13,
+          "reported_input_tokens": 108214,
+          "reported_output_tokens": 11111,
+          "reported_cached_input_tokens": 84224,
+          "cached_usage_attempts": 13,
+          "reported_reasoning_tokens": 3972,
+          "reasoning_usage_attempts": 13,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 61999.49939700216,
+          "payload_bytes_cumulative": 413396
+        },
+        "approval": {
+          "logical_requests": 8,
+          "provider_attempts": 8,
+          "reported_input_tokens": 22378,
+          "reported_output_tokens": 1787,
+          "reported_cached_input_tokens": 8192,
+          "cached_usage_attempts": 8,
+          "reported_reasoning_tokens": 1055,
+          "reasoning_usage_attempts": 8,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 15613.699491009116,
+          "payload_bytes_cumulative": 87236
+        },
+        "integration": {
+          "logical_requests": 2,
+          "provider_attempts": 2,
+          "reported_input_tokens": 40936,
+          "reported_output_tokens": 1573,
+          "reported_cached_input_tokens": 21504,
+          "cached_usage_attempts": 2,
+          "reported_reasoning_tokens": 191,
+          "reasoning_usage_attempts": 2,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 8600.342110998929,
+          "payload_bytes_cumulative": 138904
+        }
+      },
+      "serial_tail": {
+        "coordinator_task": "integrate",
+        "parallel_prefix_ms": 39020.026372000575,
+        "work_ms": 25172.955029003322,
+        "independent_verification_ms": 21035.358594998717,
+        "global_review_ms": 10780.697505995631,
+        "tail_ms": 56995.487410999835,
+        "wall_fraction": 0.5936070658311773,
+        "approval_model_union_ms": 9498.754076011479,
+        "transition_ms": 6.476281002163887
+      },
+      "coordinator_tokens": {
+        "integrate": 101617,
+        "integrate.verify": 55386
+      },
+      "evidence_retrievals": [
+        {
+          "id": "35fad04d-c7ac-4934-a008-22dd8fbd2282",
+          "task_id": "inspect_east.verify",
+          "ids": [
+            "artifact:inspect_east@1"
+          ],
+          "reason": "Audit whether the inspector's run contained any tool call other than the two cited read-only reads, to verify the read-only scope criterion.",
+          "result_bytes": 1805
+        },
+        {
+          "id": "2d0489b4-8db9-4e0e-b3a5-790166f2448d",
+          "task_id": "integrate.verify",
+          "ids": [
+            "7ff20cf5-7efe-41be-bfe4-b084942a35f2",
+            "a74246b2-f1b0-413c-8a62-c7225da2c20a",
+            "4a44ff45-499d-4a78-af3b-8499ec971d74",
+            "df7c67e3-ca22-4af4-ba29-8edf01ef0d2d"
+          ],
+          "reason": "Confirm the raw arrays each inspector actually read equal the current source files, so every record they summed is accounted for.",
+          "result_bytes": 3065
+        }
+      ],
+      "persistence_ms": 58.44766102731228,
+      "snapshot_ms": 61.238633029162884,
+      "blocking_snapshot_and_store_ms": 78.06708504259586,
+      "model_queue_ms": 736.9567019939423,
+      "standalone_list_turns": [
+        {
+          "scope_run_id": "619c5afa-e96d-47ef-af9d-df05be561d2b",
+          "request_id": "request-34",
+          "task_id": "inspect_east",
+          "role": "worker",
+          "request_ms": 1005.6168019995093,
+          "interval": [
+            15253.805653996766,
+            16259.422455996275
+          ],
+          "source_paths": [
+            "/tmp/neutrino-fast-live-b4eG5i/parallel_analysis/fast_dag/1/east.json"
+          ],
+          "listing_evidence_ids": [
+            "f477f783-85df-42af-8081-22eb56626109"
+          ],
+          "read_evidence_ids": [
+            "4a44ff45-499d-4a78-af3b-8499ec971d74"
+          ],
+          "reported_tokens": 4189
+        },
+        {
+          "scope_run_id": "8885d075-2690-46b9-af45-63db646369f1",
+          "request_id": "request-36",
+          "task_id": "inspect_west",
+          "role": "worker",
+          "request_ms": 976.1436249986291,
+          "interval": [
+            15989.986772999167,
+            16966.130397997797
+          ],
+          "source_paths": [
+            "west.json"
+          ],
+          "listing_evidence_ids": [
+            "09b12a50-1080-4be5-9bbc-a4f7c3f9aa6a"
+          ],
+          "read_evidence_ids": [
+            "df7c67e3-ca22-4af4-ba29-8edf01ef0d2d"
+          ],
+          "reported_tokens": 4164
+        }
+      ],
+      "standalone_listing_model_ms_sum": 1981.7604269981384,
+      "standalone_listing_model_ms_union": 1712.324744001031,
+      "input_cache_fraction": 0.7319665717236846,
+      "validity": "Successful Fast sample; balanced trace; tool IDs and scopes matched; token sum equals saved usage.",
+      "scenario": "parallel_analysis"
+    },
+    {
+      "round": 3,
+      "elapsed_ms": 103047.2193320021,
+      "trace_wall_ms": 103033.84742100537,
+      "tokens": 365423,
+      "logical_requests": 47,
+      "roles": {
+        "planning": {
+          "logical_requests": 1,
+          "provider_attempts": 1,
+          "reported_input_tokens": 1465,
+          "reported_output_tokens": 1427,
+          "reported_cached_input_tokens": 1024,
+          "cached_usage_attempts": 1,
+          "reported_reasoning_tokens": 807,
+          "reasoning_usage_attempts": 1,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 8332.02790300548,
+          "payload_bytes_cumulative": 6930
+        },
+        "worker": {
+          "logical_requests": 15,
+          "provider_attempts": 15,
+          "reported_input_tokens": 119900,
+          "reported_output_tokens": 8460,
+          "reported_cached_input_tokens": 94080,
+          "cached_usage_attempts": 15,
+          "reported_reasoning_tokens": 2154,
+          "reasoning_usage_attempts": 15,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 48706.728889003396,
+          "payload_bytes_cumulative": 455099
+        },
+        "verification": {
+          "logical_requests": 12,
+          "provider_attempts": 12,
+          "reported_input_tokens": 114512,
+          "reported_output_tokens": 11979,
+          "reported_cached_input_tokens": 87296,
+          "cached_usage_attempts": 12,
+          "reported_reasoning_tokens": 3850,
+          "reasoning_usage_attempts": 12,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 64414.91176299751,
+          "payload_bytes_cumulative": 427119
+        },
+        "approval": {
+          "logical_requests": 16,
+          "provider_attempts": 16,
+          "reported_input_tokens": 42748,
+          "reported_output_tokens": 2986,
+          "reported_cached_input_tokens": 14208,
+          "cached_usage_attempts": 16,
+          "reported_reasoning_tokens": 1561,
+          "reasoning_usage_attempts": 16,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 30933.085844025016,
+          "payload_bytes_cumulative": 169908
+        },
+        "integration": {
+          "logical_requests": 3,
+          "provider_attempts": 3,
+          "reported_input_tokens": 59660,
+          "reported_output_tokens": 2286,
+          "reported_cached_input_tokens": 41088,
+          "cached_usage_attempts": 3,
+          "reported_reasoning_tokens": 461,
+          "reasoning_usage_attempts": 3,
+          "missing_usage_attempts": 0,
+          "request_ms_cumulative": 14337.455233000219,
+          "payload_bytes_cumulative": 203293
+        }
+      },
+      "serial_tail": {
+        "coordinator_task": "coordinator",
+        "parallel_prefix_ms": 31488.24481999874,
+        "work_ms": 22884.144143000245,
+        "independent_verification_ms": 29047.288591004908,
+        "global_review_ms": 19607.766827002168,
+        "tail_ms": 71545.60260100663,
+        "wall_fraction": 0.6943893137239163,
+        "approval_model_union_ms": 17185.323382019997,
+        "transition_ms": 6.403039999306202
+      },
+      "coordinator_tokens": {
+        "coordinator": 75010,
+        "coordinator.verify": 69143
+      },
+      "evidence_retrievals": [
+        {
+          "id": "e43f523c-754c-4d7c-9380-4b6a96ca3b76",
+          "task_id": "coordinator.verify",
+          "ids": [
+            "artifact:north@1",
+            "artifact:south@1",
+            "artifact:east@1",
+            "artifact:west@1"
+          ],
+          "reason": "Read the four inspector reports' actual stated count/units/weighted values so reconciliation can be checked against the reports rather than the coordinator's summary.",
+          "result_bytes": 9666
+        }
+      ],
+      "persistence_ms": 61.488181956112385,
+      "snapshot_ms": 72.69125797599554,
+      "blocking_snapshot_and_store_ms": 88.46033994853497,
+      "model_queue_ms": 1060.5505219995975,
+      "standalone_list_turns": [
+        {
+          "scope_run_id": "11a195a5-2614-457a-bb20-a3932965a721",
+          "request_id": "request-32",
+          "task_id": "south",
+          "role": "worker",
+          "request_ms": 1481.159956999123,
+          "interval": [
+            7284.878591001034,
+            8766.038548000157
+          ],
+          "source_paths": [
+            "/tmp/neutrino-fast-live-b4eG5i/parallel_analysis/fast_dag/2/south.json"
+          ],
+          "listing_evidence_ids": [
+            "257f2f13-3cf3-4296-bbc8-66f46025f0c0"
+          ],
+          "read_evidence_ids": [
+            "20906367-3c88-48b4-9824-c52824619230"
+          ],
+          "reported_tokens": 4194
+        },
+        {
+          "scope_run_id": "680ae8f4-d139-45f9-aadf-e61eedd81a3e",
+          "request_id": "request-34",
+          "task_id": "east",
+          "role": "worker",
+          "request_ms": 2154.071324005723,
+          "interval": [
+            7284.90201099962,
+            9438.973335005343
+          ],
+          "source_paths": [
+            "/tmp/neutrino-fast-live-b4eG5i/parallel_analysis/fast_dag/2/east.json"
+          ],
+          "listing_evidence_ids": [
+            "b093aac0-f64f-4de5-a201-d2c61c4aea5c"
+          ],
+          "read_evidence_ids": [
+            "8dad432d-8438-41cd-b4da-7ed05f0d9c7e"
+          ],
+          "reported_tokens": 4304
+        },
+        {
+          "scope_run_id": "f5b38998-5188-4a70-9e98-3e605d4f86a4",
+          "request_id": "request-36",
+          "task_id": "west",
+          "role": "worker",
+          "request_ms": 1620.2277479991317,
+          "interval": [
+            8343.451984003186,
+            9963.679732002318
+          ],
+          "source_paths": [
+            "west.json"
+          ],
+          "listing_evidence_ids": [
+            "fe49d732-a467-4150-8746-23eff018499a"
+          ],
+          "read_evidence_ids": [
+            "193ede59-b182-49bd-a42a-bf9dfa299b7b"
+          ],
+          "reported_tokens": 4275
+        }
+      ],
+      "standalone_listing_model_ms_sum": 5255.459029003978,
+      "standalone_listing_model_ms_union": 2678.801141001284,
+      "input_cache_fraction": 0.7026501322849077,
+      "validity": "Successful Fast sample; balanced trace; tool IDs and scopes matched; token sum equals saved usage.",
+      "scenario": "parallel_analysis"
+    }
+  ],
+  "dag_summary": {
+    "samples": 3,
+    "wall_ms_median": 98079.66067000479,
+    "serial_tail_fraction_median": 0.6329242217510332,
+    "serial_tail_fraction_min": 0.5936070658311773,
+    "serial_tail_fraction_max": 0.6943893137239163,
+    "work_ms_median": 24136.38606300205,
+    "verification_ms_median": 24558.319613993168,
+    "final_review_ms_median": 13350.272634997964,
+    "approval_union_ms_median": 10108.500032000244,
+    "model_queue_ms_median": 736.9567019939423,
+    "persistence_ms_median": 61.488181956112385,
+    "blocking_snapshot_store_ms_median": 81.04036802053452,
+    "standalone_listing_turns": 7,
+    "listing_rounds_by_trial": [
+      {
+        "round": 1,
+        "count": 2,
+        "reported_tokens": 8264,
+        "model_ms_sum": 2838.6781120076776,
+        "model_ms_union": 2013.6675540059805
+      },
+      {
+        "round": 2,
+        "count": 2,
+        "reported_tokens": 8353,
+        "model_ms_sum": 1981.7604269981384,
+        "model_ms_union": 1712.324744001031
+      },
+      {
+        "round": 3,
+        "count": 3,
+        "reported_tokens": 12773,
+        "model_ms_sum": 5255.459029003978,
+        "model_ms_union": 2678.801141001284
+      }
+    ],
+    "cached_input_fraction_median": 0.7026501322849077
+  },
+  "constraints": [
+    "Keep the same model/intensity/output allowance and complete original brief.",
+    "Retain all required independent checks and the mandatory global review.",
+    "Retain ordinary approval votes and all extreme-risk rounds.",
+    "Do not hard-cache arbitrary commands or infer current files from old artifacts."
+  ],
+  "limitations": [
+    "Candidate listing turns may be batched with known-path reads; observed duration/token totals are not a causal speed or cost saving estimate.",
+    "No paid A/B experiment was performed. Provider cache hits already exist and are still counted as input tokens.",
+    "Phase medians come from the same three DAG samples; independent medians must not be summed into a measured run.",
+    "The reference probe preserves literal field content by exact round-trip only; it does not establish model comprehension or end-to-end performance."
+  ],
+  "analysis_revision_sha256": {
+    "scripts/analyze-fast-opportunities.mjs": "dd3e4c38e7d96821e8e7772802cfd943bfc24795605a420d12f5c5b6f79c6e65",
+    "scripts/fast-timeline-analysis.mjs": "96cafc4eb4f66582f2bcf1cb3239c3714b404b33459ecddf787d6400339d0701"
+  }
+}

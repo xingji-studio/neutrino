@@ -14,7 +14,7 @@ import { assessToolCall } from "../llm/risk.js";
 import { diagnosticHash } from "../llm/diagnostics.js";
 import { ArtifactStore } from "./artifacts.js";
 import { ResourcePool } from "./pool.js";
-import { runFastWorker } from "./worker.js";
+import { FAST_COMMAND_POLICY, FAST_INSPECTION_POLICY, runFastWorker } from "./worker.js";
 import { expandPlannerTask, expandPlannerGroup, expandSingleRequest } from "./planner.js";
 import { TaskEvidenceView, EVIDENCE_TOOL, READ_TASK_EVIDENCE, artifactBrief, verificationBrief } from "./evidence.js";
 import { DynamicScheduler, FastTaskError, withinLease } from "./scheduler.js";
@@ -315,14 +315,16 @@ ${verification ? "This is already an independent verification node; do not creat
       artifacts: artifacts.filter(a => !this.scheduler.tasks.get(a.task_id)?.verifies).map(artifactBrief),
       independent_checks: artifacts.filter(a => this.scheduler.tasks.get(a.task_id)?.verifies).map(verificationBrief),
       dependency_evidence: this.evidenceContext(evidence) };
-    // The coordinator has Standard's unrestricted round count, rather than a child's round budget.
-    const messages: Messages = [{ role: "system", content: `${this.options.system}\n${this.options.runtime.instructions()}` },
-      ...this.historyForPrompt(),
-      { role: "user", content: `Perform the mandatory global review and integration of the entire original user request.
+    // The review role belongs beside the generic agent policy, not inside untrusted DAG data.
+    const reviewPolicy = `Fast Mode global reviewer role: audit the complete original request and current versioned acceptance evidence.
 Check global constraints, source evidence, task acceptance criteria, cross-task conflicts and necessary tests.
 Resolve conflicts through full reasoning and tools. Never call incomplete or failed work complete.
 Do not invent new acceptance obligations: scratch helpers and verifier scripts are not deliverables unless the user asked for them. Do not fault-inject, test the tests, reproduce an already verified pipeline in scratch directories, or add cleanliness/byte-forensics checks unless explicitly required or a concrete contradictory result needs resolution. All original tests and independent verification remain mandatory.
-Reuse the source evidence and passed checks in verified, unchanged artifacts. Repeat a read or test only when needed for a conflict, changed input, missing coverage or a cross-task integration check; do not repeat checks solely to restate already verified evidence.
+Reuse the source evidence and passed checks in verified, unchanged artifacts. Repeat a read or test only when needed for a conflict, changed input, missing coverage or a cross-task integration check; do not repeat checks solely to restate already verified evidence.`;
+    // The coordinator has Standard's unrestricted round count, rather than a child's round budget.
+    const messages: Messages = [{ role: "system", content: `${this.options.system}\n${this.options.runtime.instructions()}\n\n${reviewPolicy}\n${FAST_INSPECTION_POLICY}${FAST_COMMAND_POLICY}` },
+      ...this.historyForPrompt(),
+      { role: "user", content: `Perform the mandatory global review and integration of the entire original user request.
 Return the final user-facing answer in the user's language using finish_fast_review. Explicitly report unresolved tasks.
 Review every current verified planned artifact, including independent verification tasks, and cite it as artifact:task_id@version in evidence_ids.
 The exact required artifact evidence_ids are: ${JSON.stringify(requiredReferences)}.

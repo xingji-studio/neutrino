@@ -1,0 +1,2 @@
+parallel_analysis [1/1] standard: 116.9s tokens=177921 success=true fixture_correct=true
+parallel_analysis [1/1] fast_dag: 85.7s tokens=259438 success=true fixture_correct=true

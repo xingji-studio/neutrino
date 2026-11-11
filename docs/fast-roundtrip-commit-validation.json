@@ -1,0 +1,63 @@
+{
+  "kind": "isolated_staged_fast_roundtrip_validation",
+  "isolated_checkout": "/tmp/neutrino-fast-roundtrip-commit-_06ltzmi/tree",
+  "tested_index_tree_before_validation_metadata": "17d112e8c2ba324ba0589f4350061156e9db051b",
+  "tested_change_files": 35,
+  "checks": [
+    {
+      "command": [
+        "npm",
+        "run",
+        "test:fast"
+      ],
+      "exit_code": 0,
+      "elapsed_ms": 23759.5
+    },
+    {
+      "command": [
+        "node",
+        "scripts/test-approval-review.mjs"
+      ],
+      "exit_code": 0,
+      "elapsed_ms": 1337.8
+    },
+    {
+      "command": [
+        "node",
+        "scripts/test-approval-extreme.mjs"
+      ],
+      "exit_code": 0,
+      "elapsed_ms": 1303.6
+    },
+    {
+      "command": [
+        "node",
+        "scripts/test-fast-opportunities.mjs"
+      ],
+      "exit_code": 0,
+      "elapsed_ms": 304.3
+    }
+  ],
+  "passed": true,
+  "elapsed_ms": 26842.9,
+  "measured_fingerprints_checked": 22,
+  "mismatched_measured_fingerprints": [],
+  "unrelated_workspace_files_preserved": true,
+  "unrelated_paths_checked": 71,
+  "provider_calls": 0,
+  "post_format_verification": {
+    "change": "Removed one extra EOF newline from the offline analyzer; regenerated both offline analysis reports with the current analyzer hash. No production-code changes.",
+    "command": [
+      "node",
+      "scripts/test-fast-opportunities.mjs"
+    ],
+    "exit_code": 0,
+    "analyzer_sha256": "dd3e4c38e7d96821e8e7772802cfd943bfc24795605a420d12f5c5b6f79c6e65",
+    "report_files_regenerated": [
+      "docs/fast-speed-opportunities.json",
+      "docs/fast-roundtrip-analysis.json"
+    ],
+    "saved_fast_samples_replayed": 12,
+    "provider_calls": 0
+  }
+}
