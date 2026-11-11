@@ -1,6 +1,7 @@
 // Optional real-browser check. Set NEUTRINO_PLAYWRIGHT_MODULE to an installed playwright module.
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { fastDataOutput } from "./fast-data-paths.mjs";
 import os from "node:os";
 import path from "node:path";
 const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "neutrino-fast-browser-fixture-"));
@@ -54,13 +55,12 @@ try {
   }
   const desktopBox = await fast.boundingBox();
   assert.ok(desktopBox.x >= 0 && desktopBox.x + desktopBox.width <= 1360);
-  fs.mkdirSync("docs/screenshots", { recursive: true });
-  await page.screenshot({ path: "docs/screenshots/fast-mode-desktop.png" });
+  await page.screenshot({ path: fastDataOutput("screenshots/fast-mode-desktop.png") });
   await page.setViewportSize({ width: 390, height: 844 });
   const mobileBox = await fast.boundingBox();
   assert.ok(mobileBox && mobileBox.x >= 0 && mobileBox.x + mobileBox.width <= 390 && mobileBox.y >= 0);
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "mobile has no horizontal overflow");
-  await page.screenshot({ path: "docs/screenshots/fast-mode-mobile.png" });
+  await page.screenshot({ path: fastDataOutput("screenshots/fast-mode-mobile.png") });
   assert.deepEqual(errors, []);
   console.log("PASS Chromium desktop/mobile: five modes, actual selection request, selected style, refresh persistence, Home/End/arrows/Escape, responsive bounds, no console errors");
 } finally {

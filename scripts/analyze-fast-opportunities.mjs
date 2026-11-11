@@ -1,5 +1,6 @@
 // Analyze saved live calls only. No model requests, tool replay or runtime policy changes.
 import fs from "node:fs";
+import { fastDataInput, fastDataOutput, fastDataRoot } from "./fast-data-paths.mjs";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -197,15 +198,17 @@ export function resolveSavedFile(savedPath, repositoryDirectory) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const arg = (key, fallback) => { const index = process.argv.indexOf(key); return index < 0 ? fallback : process.argv[index + 1]; };
-  const input = arg("--input", "docs/fast-efficiency-v3-benchmark.json"), output = arg("--output", "docs/fast-speed-opportunities.json");
-  const raw = JSON.parse(fs.readFileSync(input, "utf8")), repositoryDirectory = process.cwd();
+  const input = arg("--input", fastDataInput("fast-efficiency-v3-benchmark.json")), output = arg("--output", fastDataOutput("fast-speed-opportunities.json"));
+  const raw = JSON.parse(fs.readFileSync(input, "utf8")), repositoryDirectory = fastDataRoot();
   for (const file of ["scripts/fast-live-cases.mjs", "scripts/benchmark-fast-live.mjs"]) {
-    assert.equal(hash(fs.readFileSync(file)), raw.revision_sha256[file], "Fixture/request construction must match the saved trial");
+    const captured = [path.resolve(file), path.join(fastDataRoot(), file)]
+      .find(candidate => fs.existsSync(candidate) && hash(fs.readFileSync(candidate)) === raw.revision_sha256[file]);
+    assert.ok(captured, "Fixture/request construction must match the saved trial; provide its archived source snapshot");
   }
   const report = runAnalysis(raw,
     sample => fs.readFileSync(resolveSavedFile(sample.trace_file, repositoryDirectory), "utf8").trim().split("\n").map(line => JSON.parse(line)),
     sample => JSON.parse(fs.readFileSync(resolveSavedFile(path.join(sample.artifacts.directory, "tool-evidence.json"), repositoryDirectory), "utf8")));
-  report.analysis_revision_sha256 = Object.fromEntries(["scripts/analyze-fast-opportunities.mjs", "scripts/fast-timeline-analysis.mjs"]
+  report.analysis_revision_sha256 = Object.fromEntries(["scripts/analyze-fast-opportunities.mjs", "scripts/fast-timeline-analysis.mjs", "scripts/fast-data-paths.mjs"]
     .map(file => [file, hash(fs.readFileSync(file))]));
   fs.writeFileSync(output, JSON.stringify(report, null, 2) + "\n");
   console.log(JSON.stringify({ source_benchmark_id: report.source_benchmark_id, successful_samples: report.samples.length,

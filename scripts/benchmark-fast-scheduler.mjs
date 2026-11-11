@@ -1,5 +1,6 @@
 // Measures scheduling only. No model is called and no synthetic token counts are reported.
 import fs from "node:fs";
+import { fastDataOutput } from "./fast-data-paths.mjs";
 import { performance } from "node:perf_hooks";
 import { DynamicScheduler, FastTaskError } from "../dist/fast/scheduler.js";
 import { ArtifactStore } from "../dist/fast/artifacts.js";
@@ -14,7 +15,9 @@ const scenarios = [
   { name: "iterative_correction", dependencies: [[], [], [], [], ["t0", "t1", "t2", "t3"]], retry: true },
   { name: "strong_sequential_dependencies", dependencies: [[], ["t0"], ["t1"], ["t2"], ["t3"]] },
 ];
-const samples = Number(process.argv[2] || 7);
+const sampleAt = process.argv.indexOf("--samples");
+const samples = Number((sampleAt >= 0 ? process.argv[sampleAt + 1] : process.argv[2]?.startsWith("--") ? undefined : process.argv[2]) || 7);
+if (!Number.isSafeInteger(samples) || samples < 1) throw new Error("samples must be a positive integer");
 const quantile = (values, q) => [...values].sort((a, b) => a - b)[Math.max(0, Math.ceil(values.length * q) - 1)];
 async function run(scenario, concurrency) {
   const started = performance.now(); let toolWait = 0, completed = 0;
@@ -59,5 +62,4 @@ for (const scenario of scenarios) {
   report.scenarios.push({ name: scenario.name, serial, concurrent, time_saved_fraction: 1 - concurrent.mean_ms / serial.mean_ms, samples: modes });
   console.log(`${scenario.name}: serial=${serial.mean_ms.toFixed(1)}ms concurrent=${concurrent.mean_ms.toFixed(1)}ms saved=${((1 - concurrent.mean_ms / serial.mean_ms) * 100).toFixed(1)}% (scheduler fixture only)`);
 }
-fs.mkdirSync("docs", { recursive: true });
-fs.writeFileSync("docs/fast-scheduling-benchmark.json", JSON.stringify(report, null, 2) + "\n");
+fs.writeFileSync(fastDataOutput("fast-scheduling-benchmark.json"), JSON.stringify(report, null, 2) + "\n");

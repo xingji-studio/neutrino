@@ -2,6 +2,7 @@
 // Provider latency, provider token counts and answer quality are deliberately NOT measured here.
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { fastDataInput, fastDataOutput } from "./fast-data-paths.mjs";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -9,7 +10,7 @@ import { getEventListeners } from "node:events";
 import { performance } from "node:perf_hooks";
 
 const argument = name => { const i = process.argv.indexOf(name); return i < 0 ? undefined : process.argv[i + 1]; };
-const outputPath = path.resolve(argument("--output") || "docs/fast-diagnostics.json");
+const outputPath = path.resolve(argument("--output") || fastDataOutput("fast-diagnostics.json"));
 const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "neutrino-fast-diagnostics-"));
 const previous = { home: os.homedir, fetch: globalThis.fetch,
   environment: { NEUTRINO_HOME: process.env.NEUTRINO_HOME, NEUTRINO_PLUGIN_HOME: process.env.NEUTRINO_PLUGIN_HOME } };
@@ -37,8 +38,8 @@ try {
   const { loadAgentPrompt, loadSubAgentPrompt } = await import("../dist/config.js");
   report.engine_sha256 = createHash("sha256").update(["engine", "scheduler", "worker", "pool", "artifacts", "types", "planner"]
     .map(name => fs.readFileSync(new URL(`../dist/fast/${name}.js`, import.meta.url), "utf8")).join("\n")).digest("hex");
-  const live = JSON.parse(fs.readFileSync(new URL("../docs/fast-live-benchmark.json", import.meta.url), "utf8"));
-  const measured = JSON.parse(fs.readFileSync(new URL("../docs/fast-live-metrics.json", import.meta.url), "utf8"));
+  const live = JSON.parse(fs.readFileSync(fastDataInput("fast-live-benchmark.json"), "utf8"));
+  const measured = JSON.parse(fs.readFileSync(fastDataInput("fast-live-metrics.json"), "utf8"));
   assert.equal(live.benchmark_id, measured.benchmark_id);
   const valid = live.scenarios.filter(row => row.valid_successful_comparison);
   const sum = (items, key) => items.reduce((total, item) => total + item[key], 0);

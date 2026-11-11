@@ -1,9 +1,0 @@
-Pipeline completed and verified end to end in /tmp/neutrino-fast-live-Kjebr5/strong_sequential_dependencies/fast_dag/1.
-
-Final on-disk state (re-read now in this review): seed.txt=3, stage1.txt=5, stage2.txt=25, stage3.txt=21, answer.json={"stage1":5,"stage2":25,"stage3":21}.
-
-Strict order was enforced, not just observed: three separate node commands, each guarded with an existence check plus a finite-numeric check on its input file, so a downstream stage cannot run before its upstream file exists. Stage 1 read seed.txt (3) → stage1.txt=5 (04616855); stage 2 read the persisted stage1.txt → stage2.txt=25 (265f6f40); stage 3 read the persisted stage2.txt → stage3.txt=21 (4c26ac45). Directory listings in those same records show each stage file appearing only after its own step.
-
-Verification: verify.js (9cee992d) re-read all four files and passed seed+2===stage1 (5), stage1²===stage2 (25), stage2−4===stage3 (21), exit=0, and wrote answer.json from the file values. A second, independent check (487185f3) confirmed keys exactly stage1,stage2,stage3, all values typeof number and finite, values equal to the numbers parsed from the saved stage files, matches saved stage files=true, exit=0. The independent verifier recomputed the rules from the saved files as well (76b53cb1, 9258ec44), reporting 8 PASS rows, independent verdict=PASS, strict JSON parse ok (50 bytes), and verify.js rerun exit=0 — the rerun rewrote answer.json with byte-identical content, so the artifact is unchanged.
-
-Global constraints: all work stayed inside the fixture (pwd confirmed in c28c7d5e/76b53cb1); every computation and test used node v18.19.1, no Python; no credentials, network or external services were touched. verify.js is the only helper left behind and was intentionally kept (tidying is not a requirement). No conflicts between the work artifact and the independent verification were found, and no requirement is unresolved.

@@ -1,6 +1,7 @@
 import fs from "node:fs";
-const data=JSON.parse(fs.readFileSync("docs/fast-timeline-diagnostics.json","utf8"));
-const pilot=fs.existsSync("docs/fast-live-timeline-pilot.json")?JSON.parse(fs.readFileSync("docs/fast-live-timeline-pilot.json","utf8")):null;
+import { fastDataInput, fastDataOutput } from "./fast-data-paths.mjs";
+const data=JSON.parse(fs.readFileSync(fastDataInput("fast-timeline-diagnostics.json"),"utf8"));
+const pilot=fs.existsSync(fastDataInput("fast-live-timeline-pilot.json"))?JSON.parse(fs.readFileSync(fastDataInput("fast-live-timeline-pilot.json"),"utf8")):null;
 const median=values=>{const v=[...values].sort((a,b)=>a-b);return v.length%2?v[(v.length-1)/2]:(v[v.length/2-1]+v[v.length/2])/2;};
 const number=x=>Number.isFinite(x)?x.toFixed(2):"未测";
 const profile=name=>data.profiles.find(p=>p.name===name);
@@ -71,5 +72,5 @@ text+="## 后续修改依据与未完成事项\n\n1. 优先明确验收覆盖并
 text+=`离线配置与完整原始时间线索引：\`fast-timeline-diagnostics.json\`；活动标识 \`${data.campaign_id}\`；捕获构建指纹 \`${data.source_hash}\`。`;
 if(data.analysis_revision)text+=`最终日志重分析指纹 \`${data.analysis_revision.analyzer_hash}\`，分析复用了既有日志，没有重放请求。`;
 text+="运行 `npm run diagnose:fast:timeline` 复现离线实验，`npm run test:fast:diagnostics` 检查观测和预算护栏。\n";
-fs.writeFileSync("docs/fast-timeline-diagnosis.md",text);
+fs.writeFileSync(fastDataOutput("fast-timeline-diagnosis.md"),text);
 console.log(`Wrote detailed diagnosis: profiles=${data.profiles.length}, traces=${traced.length}, pilot=${pilot?.state??"not_run"}`);

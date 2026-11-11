@@ -1,6 +1,7 @@
 // Regenerate the campaign summary from saved evidence; never calls a model.
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { fastDataInput, relocateFastCaptures } from "./fast-data-paths.mjs";
 import path from "node:path";
 import {createHash} from "node:crypto";
 import {summarizeStability} from "./fast-stability-analysis.mjs";
@@ -9,7 +10,7 @@ const argument=name=>{const i=process.argv.indexOf(name);return i<0?undefined:pr
 const input=argument("--input"),qualityFile=argument("--quality"),planFile=argument("--plan"),output=argument("--output"),markdown=argument("--markdown");
 assert.ok(input&&qualityFile&&planFile&&output&&markdown,"Use --input, --quality, --plan, --output and --markdown");
 const read=file=>JSON.parse(fs.readFileSync(file,"utf8"));
-const raw=read(input),quality=read(qualityFile),plan=read(planFile);
+const raw=relocateFastCaptures(read(input)),quality=read(qualityFile),plan=read(planFile);
 assert.equal(raw.state,"completed");assert.equal(raw.benchmark_id,quality.benchmark_id);assert.equal(quality.pending_manual_checks,0);
 assert.equal(raw.model.provider,plan.provider);assert.equal(raw.model.name,plan.model);assert.equal(raw.model.intensity,plan.intensity);
 const summary=summarizeStability(raw,quality),all=raw.scenarios.flatMap(row=>Object.entries(row.samples).flatMap(([mode,samples])=>samples.map(s=>({scenario:row.name,mode,...s}))));
@@ -83,7 +84,7 @@ lines.push("", "前三类 Fast 使用单节点规划时规划明显缩短，但�
   "本轮 build、预算护栏回归及新增测量/验收回归已通过；最终复核命令因真实不合格样本返回 1，这是结果状态。此前规划优化的 82 脚本全量测试属于上一轮，本轮未声称执行新的 83 脚本全量测试。活动结束后才补充证据哈希绑定与统计展示代码；活动内运行时及测量脚本指纹保持一致。", "",
   "无需模型调用的复核命令：", "", "```sh",
   "node scripts/test-fast-stability.mjs",
-  `node scripts/audit-fast-live.mjs --input ${input} --reviews docs/fast-stability-protocol-review.json --output ${qualityFile}`,
+  `node scripts/audit-fast-live.mjs --input ${input} --reviews ${fastDataInput("fast-stability-protocol-review.json")} --output ${qualityFile}`,
   `node scripts/report-fast-stability.mjs --input ${input} --quality ${qualityFile} --plan ${planFile} --output ${output} --markdown ${markdown}`,
   "```", "",
   "原始结果：`fast-stability-benchmark.json`；完整质量：`fast-stability-quality.json`；协议证据复核：`fast-stability-protocol-review.json`；统计：`fast-stability-summary.json`；前置约定：`fast-stability-plan.json`、`fast-stability-method.md`；各轮原始时间线及产物：`fast-stability-traces/`、`fast-stability-artifacts/`。", "");

@@ -1,6 +1,7 @@
 // Actual end-to-end Standard vs Fast Agent Engine benchmark, using an explicitly chosen existing catalogue.
 // Credentials are read in memory, never printed or included in the report. No user project files are modified.
 import fs from "node:fs";
+import { fastDataOutput } from "./fast-data-paths.mjs";
 import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
@@ -20,7 +21,7 @@ const campaignUsage = { settled_tokens_including_unknown_reservations: 0, held_t
 if (!Number.isSafeInteger(repetitions) || repetitions < 1 || !Number.isSafeInteger(requestedTimeout) || requestedTimeout < 1) throw new Error("runs and timeout-ms must be positive integers");
 const filter = argument("--cases")?.split(",");
 const baseline = argument("--reuse-standard") ? JSON.parse(fs.readFileSync(path.resolve(argument("--reuse-standard")), "utf8")) : null;
-const target = path.resolve(argument("--output") || "docs/fast-live-benchmark.json");
+const target = path.resolve(argument("--output") || fastDataOutput("fast-live-benchmark.json"));
 const artifactDirectory = argument("--artifact-dir") ? path.resolve(argument("--artifact-dir")) : null;
 const approvalDirectory = argument("--approval-dir") ? path.resolve(argument("--approval-dir")) : null;
 if (approvalDirectory) fs.mkdirSync(approvalDirectory, { recursive: true });
@@ -51,7 +52,7 @@ let interrupted = false;
 const stop = () => { interrupted = true; for (const session of sessions) session.livePause(); };
 process.on("SIGINT", stop); process.on("SIGTERM", stop);
 const cases = fastLiveCases();
-const revisionFiles = ["dist/fast/engine.js", "dist/fast/planner.js", "dist/fast/evidence.js", "dist/fast/scheduler.js", "dist/fast/worker.js", "dist/fast/pool.js", "dist/fast/artifacts.js", "dist/fast/types.js", "dist/llm/client.js", "dist/llm/runtime.js", "dist/llm/workspace.js", "dist/llm/tools.js", "dist/llm/approval.js", "dist/llm/risk.js", "dist/web/session.js", "assets/fast-planner.txt", "assets/fast-replanner.txt", "assets/prompt.txt", "assets/planner.txt", "assets/subagent.txt", "scripts/benchmark-fast-live.mjs", "scripts/fast-live-cases.mjs"];
+const revisionFiles = ["dist/fast/engine.js", "dist/fast/planner.js", "dist/fast/evidence.js", "dist/fast/scheduler.js", "dist/fast/worker.js", "dist/fast/pool.js", "dist/fast/artifacts.js", "dist/fast/types.js", "dist/llm/client.js", "dist/llm/runtime.js", "dist/llm/workspace.js", "dist/llm/tools.js", "dist/llm/approval.js", "dist/llm/risk.js", "dist/web/session.js", "assets/fast-planner.txt", "assets/fast-replanner.txt", "assets/prompt.txt", "assets/planner.txt", "assets/subagent.txt", "scripts/benchmark-fast-live.mjs", "scripts/fast-live-cases.mjs", "scripts/fast-data-paths.mjs"];
 const revision = () => Object.fromEntries(revisionFiles.map(name => [name, createHash("sha256").update(fs.readFileSync(new URL(`../${name}`, import.meta.url))).digest("hex")]));
 report.revision_sha256 = revision();
 const assertRevision = () => { if (JSON.stringify(revision()) !== JSON.stringify(report.revision_sha256)) throw new Error("Benchmark runtime revision changed during the campaign"); };

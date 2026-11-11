@@ -57,7 +57,7 @@ neutrino
 
 在开始界面输入消息并按 `Enter` 开始新对话。浏览器界面会同时挂载在 <http://127.0.0.1:8765>；关于 `--port`、`--lan` 和 `--no-web`，请参阅下方的 [Web 界面](#web-界面)。
 
-输入框模式菜单新增 **极速模式**（`fast_dag`），使用流式规划、动态 DAG、并发 Worker 与独立验证，保留全部原有模式。配置及边界见[架构说明](docs/fast-mode.md)，实际耗时与 Token 见[性能报告](docs/fast-performance.md)；目前尚不能宣称一般任务达到 50% 提速。
+输入框模式菜单新增 **极速模式**（`fast_dag`），使用流式规划、动态 DAG、并发 Worker 与独立验证，保留全部原有模式。配置及边界见[架构说明](docs/fast-mode.md)，实际耗时与 Token 见[性能报告](docs/fast-current-report.md)；目前尚不能宣称一般任务达到 50% 提速。
 
 ### 快捷键
 

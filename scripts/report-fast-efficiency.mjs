@@ -1,13 +1,15 @@
 // Saved-data analysis only. No model calls or source changes.
 import fs from "node:fs";
+import { fastDataInput, fastDataOutput, relocateFastCaptures } from "./fast-data-paths.mjs";
 import assert from "node:assert/strict";
 import path from "node:path";
 import {createHash} from "node:crypto";
 import {summarizeStability} from "./fast-stability-analysis.mjs";
 const arg=(key,fallback)=>{const i=process.argv.indexOf(key);return i<0?fallback:process.argv[i+1];};
-const stem=arg("--stem","docs/fast-efficiency"),read=file=>JSON.parse(fs.readFileSync(file,"utf8"));
-const raw=read(stem+"-benchmark.json"),quality=read(stem+"-quality.json"),plan=read(stem+"-plan.json");
-const before=read(arg("--before","docs/fast-stability-benchmark.json")),beforeQuality=read(arg("--before-quality","docs/fast-stability-quality.json"));
+const stem=arg("--stem",fastDataInput("fast-efficiency-benchmark.json").replace(/-benchmark\.json$/,"")),read=file=>JSON.parse(fs.readFileSync(file,"utf8"));
+const outputStem=arg("--output-stem",fastDataOutput(path.basename(stem)));
+const raw=relocateFastCaptures(read(stem+"-benchmark.json")),quality=read(stem+"-quality.json"),plan=read(stem+"-plan.json");
+const before=read(arg("--before",fastDataInput("fast-stability-benchmark.json"))),beforeQuality=read(arg("--before-quality",fastDataInput("fast-stability-quality.json")));
 assert.equal(raw.benchmark_id,quality.benchmark_id);assert.equal(quality.pending_manual_checks,0);
 for(const key of ["provider","name","intensity"])assert.equal(raw.model[key],before.model[key]);
 const hash=file=>createHash("sha256").update(fs.readFileSync(file)).digest("hex");
@@ -110,5 +112,5 @@ lines.push("", "## 验证和用量口径", "",
   "每场景三轮不足以给出可靠 P95 或证明总体质量等价。所有 12 对合格时才计算等权跨场景几何平均时间比；其余情况下保持 null。主要结论按场景和有效分母报告。", "",
   `复核与数据：${["plan.json","benchmark.json","quality.json","protocol-review.json","summary.json","artifacts/","traces/"].map(file=>"\x60"+path.basename(stem)+"-"+file+"\x60").join("、")}。算法说明见 fast-efficiency-optimization.md。`, "",
   "```sh",`node scripts/audit-fast-live.mjs --input ${stem}-benchmark.json --reviews ${stem}-protocol-review.json --output ${stem}-quality.json`,`node scripts/report-fast-efficiency.mjs --stem ${stem}${archived?" --archived --revision-proof "+proofFile:""}`,"```","");
-fs.writeFileSync(stem+"-summary.json",JSON.stringify(summary,null,2)+"\n");fs.writeFileSync(stem+"-comparison.md",lines.join("\n"));
+fs.writeFileSync(outputStem+"-summary.json",JSON.stringify(summary,null,2)+"\n");fs.writeFileSync(outputStem+"-comparison.md",lines.join("\n"));
 console.log(JSON.stringify({runs:samples.length,finished,quality_passed:full,qualified_pairs:qualified.length,faster,lower_tokens:lower,blocked:summary.blocked_samples.length,scope_violations:summary.scope_failures.length,known_tokens:summary.reported_task_tokens,unknown_usage:summary.unknown_usage_attempts}));

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { fastDataRoot } from "./fast-data-paths.mjs";
 import os from "node:os";
 import path from "node:path";
 import { analyzeSample, reportedRequestTokens, requestReferenceProbe, resolveSavedFile,
@@ -66,6 +67,12 @@ const missingUsage = structuredClone(metadata);
 delete missingUsage.find(event => event.event === "provider_attempt_end").data.input_tokens;
 assert.throws(() => analyzeSample(sample, missingUsage, evidence), /usage is missing/);
 assert.throws(() => analyzeSample(sample, metadata.filter(event => event.event !== "model_stream_end"), evidence), /missing_events|unbalanced/);
+const toolMetadata = structuredClone(metadata);
+toolMetadata.splice(5, 0,
+  { ...metadata[0], event: "tool_started", at_ms: 3.2, data: { tool_id: "scope-probe", tool_name: "read_file" } },
+  { ...metadata[0], event: "tool_finished", at_ms: 3.3, data: { tool_id: "scope-probe", tool_name: "read_file", status: "completed" } });
+toolMetadata.forEach((event, index) => { event.seq = index + 1; });
+assert.throws(() => analyzeSample(sample, toolMetadata, { scopes: [], tools: [{ id: "scope-probe", runId: "wrong-scope" }] }), /same scope/);
 const empty = runAnalysis({ scenarios: [] }, () => assert.fail("No logs should load"), () => assert.fail("No tools should load"));
 assert.equal(empty.dag_summary.serial_tail_fraction_min, null);
 assert.equal(empty.dag_summary.wall_ms_median, null);
@@ -84,14 +91,19 @@ try {
   fs.rmSync(fixture, { recursive: true, force: true });
 }
 
-// Reconstruct every saved successful trial, with networking disabled, without replaying any tool.
+console.log("PASS offline opportunity units: overlap/clipping, scopes, retries/unknown usage, literal requests, invalid traces and portable paths");
+const inputAt = process.argv.indexOf("--input");
+if (inputAt >= 0) {
+  const input = process.argv[inputAt + 1];
+  assert.ok(input && !input.startsWith("--"), "--input requires an archived benchmark file");
+// Optional replay is explicit; a supplied missing or invalid archive still fails.
 const savedFetch = globalThis.fetch;
 globalThis.fetch = () => assert.fail("Offline analysis must not call a provider");
 try {
-  const raw = JSON.parse(fs.readFileSync("docs/fast-efficiency-v3-benchmark.json", "utf8"));
+  const raw = JSON.parse(fs.readFileSync(input, "utf8"));
   const report = runAnalysis(raw,
-    item => fs.readFileSync(resolveSavedFile(item.trace_file, process.cwd()), "utf8").trim().split("\n").map(line => JSON.parse(line)),
-    item => JSON.parse(fs.readFileSync(resolveSavedFile(path.join(item.artifacts.directory, "tool-evidence.json"), process.cwd()), "utf8")));
+    item => fs.readFileSync(resolveSavedFile(item.trace_file, fastDataRoot()), "utf8").trim().split("\n").map(line => JSON.parse(line)),
+    item => JSON.parse(fs.readFileSync(resolveSavedFile(path.join(item.artifacts.directory, "tool-evidence.json"), fastDataRoot()), "utf8")));
   assert.equal(report.samples.length, 12);
   assert.equal(report.dag_summary.samples, 3);
   assert.equal(report.dag_summary.standalone_listing_turns, 7);
@@ -107,11 +119,15 @@ try {
   }
   assert.equal(report.provider_calls, 0);
   const captured = raw.scenarios[0].samples.fast_dag[0];
-  const capturedEvents = fs.readFileSync(resolveSavedFile(captured.trace_file, process.cwd()), "utf8").trim().split("\n").map(line => JSON.parse(line));
-  const capturedEvidence = JSON.parse(fs.readFileSync(resolveSavedFile(path.join(captured.artifacts.directory, "tool-evidence.json"), process.cwd()), "utf8"));
+  const capturedEvents = fs.readFileSync(resolveSavedFile(captured.trace_file, fastDataRoot()), "utf8").trim().split("\n").map(line => JSON.parse(line));
+  const capturedEvidence = JSON.parse(fs.readFileSync(resolveSavedFile(path.join(captured.artifacts.directory, "tool-evidence.json"), fastDataRoot()), "utf8"));
   capturedEvidence.tools.find(item => capturedEvents.some(event => event.event === "tool_started" && event.data.tool_id === item.id)).runId = "wrong-scope";
   assert.throws(() => analyzeSample(captured, capturedEvents, capturedEvidence), /same scope/);
   console.log("PASS offline opportunities: overlap/clipping, scope-safe list/read detection, retries and unknown usage, literal request preservation, invalid trace rejection, portable paths; 12 saved Fast trials reproduced");
 } finally {
   globalThis.fetch = savedFetch;
+}
+
+} else {
+  console.log("Archived live replay is separate: pass --input <benchmark.json> --data-dir <archive root>.");
 }

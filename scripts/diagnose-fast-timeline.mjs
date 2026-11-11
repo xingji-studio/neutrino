@@ -1,6 +1,7 @@
 // Controlled local transport experiments. No external provider, prices, quality scores or speedup claims.
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { fastDataOutput } from "./fast-data-paths.mjs";
 import os from "node:os";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -11,8 +12,8 @@ import { analyzeTimeline } from "./fast-timeline-analysis.mjs";
 const argument = key => { const i = process.argv.indexOf(key); return i < 0 ? undefined : process.argv[i + 1]; };
 const runs = Number(argument("--runs") || 3), only = argument("--cases")?.split(",");
 assert.ok(Number.isSafeInteger(runs) && runs > 0);
-const output = path.resolve(argument("--output") || "docs/fast-timeline-diagnostics.json");
-const campaign = randomUUID(), traces = path.resolve(argument("--trace-dir") || `docs/fast-timeline-traces/${campaign}`);
+const output = path.resolve(argument("--output") || fastDataOutput("fast-timeline-diagnostics.json"));
+const campaign = randomUUID(), traces = path.resolve(argument("--trace-dir") || fastDataOutput("fast-timeline-traces/" + campaign));
 const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "neutrino-fast-timeline-"));
 const previous = { home: os.homedir, fetch: globalThis.fetch,
   environment: Object.fromEntries(["NEUTRINO_HOME", "NEUTRINO_PLUGIN_HOME", "NEUTRINO_DIAGNOSTICS_DIR"].map(key => [key, process.env[key]])) };

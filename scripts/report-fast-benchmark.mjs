@@ -1,9 +1,10 @@
 import fs from "node:fs";
+import { fastDataInput, fastDataOutput } from "./fast-data-paths.mjs";
 import { createHash } from "node:crypto";
-const live = JSON.parse(fs.readFileSync("docs/fast-live-benchmark.json", "utf8"));
-const fixture = JSON.parse(fs.readFileSync("docs/fast-scheduling-benchmark.json", "utf8"));
-const capturedMetrics = fs.existsSync("docs/fast-live-metrics.json")
-  ? JSON.parse(fs.readFileSync("docs/fast-live-metrics.json", "utf8")) : null;
+const live = JSON.parse(fs.readFileSync(fastDataInput("fast-live-benchmark.json"), "utf8"));
+const fixture = JSON.parse(fs.readFileSync(fastDataInput("fast-scheduling-benchmark.json"), "utf8"));
+const capturedMetrics = fs.existsSync(fastDataInput("fast-live-metrics.json"))
+  ? JSON.parse(fs.readFileSync(fastDataInput("fast-live-metrics.json"), "utf8")) : null;
 const names = { multi_source_retrieval: "多来源资料检索", multi_dimension_comparison: "多维度比较", complex_logic: "逻辑推理",
   multi_module_code: "多模块代码", multi_agent_collaboration: "多智能体协作", long_tool_sequence: "长步骤工具调用",
   iterative_correction: "反复纠错", strong_sequential_dependencies: "强顺序依赖", parallel_analysis: "四路并行资料分析" };
@@ -106,8 +107,8 @@ text += "实现已采用的优化包括：流式启动、依赖满足后立即�
 text += "## 受控调度测试（不是模型性能）\n\n| 场景 | 串行调度均值毫秒 | 并发调度均值毫秒 | 时间节省 |\n| --- | ---: | ---: | ---: |\n";
 for (const row of fixture.scenarios) text += `| ${names[row.name] || row.name} | ${number(row.serial.mean_ms)} | ${number(row.concurrent.mean_ms)} | ${pct(row.time_saved_fraction)} |\n`;
 text += `\n每类每模式 ${fixture.samples_per_mode} 次。这些数据只测真实异步定时器和调度器，未调用模型，Token 和模型质量均未测；不能将这些百分比当作 Fast Agent 的端到端加速率。\n\n`;
-if (fs.existsSync("docs/fast-live-retest.json")) {
-  const retest = JSON.parse(fs.readFileSync("docs/fast-live-retest.json", "utf8"));
+if (fs.existsSync(fastDataInput("fast-live-retest.json"))) {
+  const retest = JSON.parse(fs.readFileSync(fastDataInput("fast-live-retest.json"), "utf8"));
   text += `## 交付构建复测\n\n复测状态：\`${retest.state}\`；构建：\`${retest.engine_sha256}\`。复测没有删除或替换上面的失败样本。\n\n`;
   text += "| 复测场景 | Standard 秒 | Fast 秒 | 时间节省 | Fast 验收/产物正确 |\n| --- | ---: | ---: | ---: | --- |\n";
   for (const row of retest.scenarios) text += `| ${names[row.name] || row.name} | ${number(row.standard?.mean_ms / 1000)} | ${number(row.fast_dag?.mean_ms / 1000)} | ${pct(row.time_saved_fraction)} | ${success(samples(row, "fast_dag"))} / ${correct(samples(row, "fast_dag"))} |\n`;
@@ -120,5 +121,5 @@ const currentHash = createHash("sha256").update(["engine", "scheduler", "worker"
 text += `测量构建指纹：\`${live.engine_sha256}\`。交付构建指纹：\`${currentHash}\`。`;
 if (currentHash !== live.engine_sha256) text += "实测后补充了模型错误透传，以及遇到余额/鉴权等永久错误时停止新请求和重规划的处理，避免将供应商错误误报为规划 JSON 解析错误。这些变更经过回归；上面的付费数据属于测量构建，未冒充交付构建的逐位相同测量。账户余额不足，新增错误分支没有再次付费复测。";
 text += "原始数据：`fast-live-benchmark.json`、`fast-live-metrics.json`、`fast-scheduling-benchmark.json`。\n";
-fs.writeFileSync("docs/fast-performance.md", text);
+fs.writeFileSync(fastDataOutput("fast-performance.md"), text);
 console.log(`Wrote performance report: state=${live.state}, valid comparisons=${valid.length}`);

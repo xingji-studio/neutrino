@@ -1,6 +1,7 @@
 // Independent post-run checks on owned benchmark artifacts. No model calls.
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { relocateFastCaptures } from "./fast-data-paths.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
@@ -121,7 +122,7 @@ export function applyProtocolReviews(quality,raw,protocol){
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   const argument=name=>{const i=process.argv.indexOf(name);return i<0?undefined:process.argv[i+1];};
   if(!argument("--input")||!argument("--output"))throw new Error("Use --input <live report> --output <quality report>");
-  const raw=JSON.parse(fs.readFileSync(argument("--input"),"utf8")),quality=auditFastLive(raw);
+  const raw=relocateFastCaptures(JSON.parse(fs.readFileSync(argument("--input"),"utf8"))),quality=auditFastLive(raw);
   if(argument("--reviews"))applyProtocolReviews(quality,raw,JSON.parse(fs.readFileSync(argument("--reviews"),"utf8")));
   fs.mkdirSync(path.dirname(path.resolve(argument("--output"))),{recursive:true});fs.writeFileSync(argument("--output"),JSON.stringify(quality,null,2)+"\n");
   console.log(JSON.stringify({scenarios:quality.scenarios.length,samples:quality.observed_samples,functional_passed:quality.all_functional_passed,quality_passed:quality.all_quality_passed,pending_manual_checks:quality.pending_manual_checks}));
