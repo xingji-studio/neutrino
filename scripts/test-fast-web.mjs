@@ -109,7 +109,7 @@ try {
   // Exercise the actual browser mode control and next-message payload in a minimal DOM.
   const source = fs.readFileSync(new URL("../web/app.js", import.meta.url), "utf8");
   const html = fs.readFileSync(new URL("../web/index.html", import.meta.url), "utf8");
-  assert.ok(html.includes('data-agent-mode="fast_dag"')); assert.ok(html.includes('class="fast-mode-icon"'));
+  assert.ok(html.includes('data-agent-mode="fast_dag"')); assert.ok(!html.includes('class="fast-mode-icon"'));
   for (const mode of ["standard", "ptc", "fast", "pro"]) assert.ok(html.includes(`data-agent-mode="${mode}"`));
   const buttons = ["standard", "ptc", "fast", "fast_dag", "pro"].map(mode => ({ dataset: { agentMode: mode }, attrs: {}, setAttribute(k, v) { this.attrs[k] = v; } }));
   const picker = { classList: { toggle() {} }, querySelectorAll: () => buttons, open: true };

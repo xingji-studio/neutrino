@@ -42,7 +42,7 @@ npm install -g @xingjisoft/neutrino
 
 - Web 控制台配合 Tailscale 等软件，可以直接实现外网安全远控！而且无需下载，打开即用！
 - 支持后台常驻（默认关闭）：在 Web 控制台或终端设置中切换后立即生效，开启时关闭终端也不会中断已开始的浏览器任务。也可以用 `neutrino background start|stop|status|open` 管理后台控制台。
-- Web 端支持切换 标准模式 / PTC模式 / 快速模式 / 极速模式 / 专业模式~
+- Web 端支持切换 标准模式 / PTC模式 / 快速模式 / 极速模式 / 专业模式
 - 新增极速模式使用流式规划、动态 DAG、并发 Worker 和独立验证。实际性能、配置与限制见[极速模式说明](docs/fast-mode.md)和[实测报告](docs/fast-current-report.md)。
 
 ---
