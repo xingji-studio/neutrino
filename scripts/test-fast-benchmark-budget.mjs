@@ -56,6 +56,11 @@ try{
   for(const name of [...exported.files.map(file=>file.name),"final-answer.md"]){
     assert.equal(fs.readFileSync(path.join(exported.directory,name),"utf8").includes("owned-offline-fixture-key"),false,"artifact export must not include model credentials");
   }
+  const fastFirst = await run("cap-fast-first",17000,["--first-mode","fast_dag","--artifact-dir",artifactRoot]);
+  assert.equal(requests,3,"Fast-first order still dispatches only the connectivity probe after the cap is exhausted");
+  assert.equal(fastFirst.first_mode,"fast_dag");assert.equal(fastFirst.execution_order[0].mode,"fast_dag");
+  assert.equal(fastFirst.campaign_usage.held_tokens,0);
+  assert.ok(fastFirst.revision_sha256["dist/fast/prefetch.js"]&&fastFirst.revision_sha256["dist/fast/context.js"]);
   console.log("PASS live diagnostic safeguards: pre-probe cap, HTTP 402 stop, per-attempt reservation, zero task dispatch after budget exhaustion and credential cleanup");
 }finally{
   await new Promise(resolve=>server.close(resolve));fs.rmSync(fixture,{recursive:true,force:true});

@@ -213,7 +213,7 @@ try {
   const merged = await runEngine("merged", { merged: true });
   const explicit = await runEngine("explicit", { explicit: true });
   for (const run of [legacy, merged, explicit]) {
-    assert.equal(run.result.status, "completed"); assert.equal(run.result.snapshot.review.at(-1).accepted, true);
+    assert.equal(run.result.status, "completed", JSON.stringify({error:run.result.snapshot.error,evidence:run.runtime.evidence.map(e=>({name:e.name,status:e.status,result:e.result})),tasks:run.result.snapshot.tasks.map(t=>({task_id:t.task_id,status:t.status,error:t.error}))})); assert.equal(run.result.snapshot.review.at(-1).accepted, true);
     assert.equal(run.result.snapshot.metrics.total.requests, run.calls.length);
     assert.equal(run.executed.filter(e => e.name === "write_file").length, 1);
     const independent = run.runtime.evidence.filter(e => e.name === "run_command" && /shape add multiply|add multiply/.test(e.arguments.command));

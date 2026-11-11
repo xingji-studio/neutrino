@@ -13,6 +13,8 @@ import { fastLiveCases } from "./fast-live-cases.mjs";
 const argument = name => { const at = process.argv.indexOf(name); return at >= 0 ? process.argv[at + 1] : undefined; };
 const sourceHome = argument("--home") || os.homedir();
 const repetitions = Number(argument("--runs") || 1);
+const firstMode = argument("--first-mode") || "standard";
+if (!["standard", "fast_dag"].includes(firstMode)) throw new Error("first-mode must be standard or fast_dag");
 const requestedTimeout = Number(argument("--timeout-ms") || 30 * 60_000);
 const campaignTokenCap = argument("--token-cap") ? Number(argument("--token-cap")) : Infinity;
 if (campaignTokenCap !== Infinity && (!Number.isSafeInteger(campaignTokenCap) || campaignTokenCap < 1)) throw new Error("token-cap must be a positive integer");
@@ -35,13 +37,14 @@ const report = { kind: "live_model_end_to_end", state: "running", repetitions, s
   note: "Identical model, intensity, fixture requirements and verification for both modes. Correctness uses exact fixture oracles; broader answer quality requires human review. One sample does not establish population P95.",
   scenarios: [], untested: ["Human-reviewed open-ended answer quality", "Provider cache billing (not exposed by current client)"] };
 report.benchmark_id = randomUUID();
-report.engine_sha256 = createHash("sha256").update(["engine", "scheduler", "worker", "pool", "artifacts", "types", "planner"]
+report.engine_sha256 = createHash("sha256").update(["engine", "scheduler", "worker", "pool", "artifacts", "types", "planner", "evidence", "context", "prefetch"]
   .map(name => fs.readFileSync(new URL(`../dist/fast/${name}.js`, import.meta.url), "utf8")).join("\n")).digest("hex");
 let originalStream, originalTool, originalRequest, originalFinish, TaskRuntime, TaskControlError, currentTask, LLMClient, sessions = [];
 const finishedTurns = new WeakMap();
 const sampledRuntimes = [];
 const sampleScopes = new WeakMap();
 report.execution_order = [];
+report.first_mode = firstMode;
 const awaitTurnFinish = runtime => {
   if (!runtime) return Promise.resolve();
   let completion = finishedTurns.get(runtime);
@@ -52,7 +55,7 @@ let interrupted = false;
 const stop = () => { interrupted = true; for (const session of sessions) session.livePause(); };
 process.on("SIGINT", stop); process.on("SIGTERM", stop);
 const cases = fastLiveCases();
-const revisionFiles = ["dist/fast/engine.js", "dist/fast/planner.js", "dist/fast/evidence.js", "dist/fast/scheduler.js", "dist/fast/worker.js", "dist/fast/pool.js", "dist/fast/artifacts.js", "dist/fast/types.js", "dist/llm/client.js", "dist/llm/runtime.js", "dist/llm/workspace.js", "dist/llm/tools.js", "dist/llm/approval.js", "dist/llm/risk.js", "dist/web/session.js", "assets/fast-planner.txt", "assets/fast-replanner.txt", "assets/prompt.txt", "assets/planner.txt", "assets/subagent.txt", "scripts/benchmark-fast-live.mjs", "scripts/fast-live-cases.mjs", "scripts/fast-data-paths.mjs"];
+const revisionFiles = ["dist/fast/engine.js", "dist/fast/planner.js", "dist/fast/evidence.js", "dist/fast/context.js", "dist/fast/prefetch.js", "dist/fast/scheduler.js", "dist/fast/worker.js", "dist/fast/pool.js", "dist/fast/artifacts.js", "dist/fast/types.js", "dist/llm/client.js", "dist/llm/runtime.js", "dist/llm/workspace.js", "dist/llm/tools.js", "dist/llm/approval.js", "dist/llm/risk.js", "dist/web/session.js", "assets/fast-planner.txt", "assets/fast-replanner.txt", "assets/prompt.txt", "assets/planner.txt", "assets/subagent.txt", "scripts/benchmark-fast-live.mjs", "scripts/fast-live-cases.mjs", "scripts/fast-data-paths.mjs"];
 const revision = () => Object.fromEntries(revisionFiles.map(name => [name, createHash("sha256").update(fs.readFileSync(new URL(`../${name}`, import.meta.url))).digest("hex")]));
 report.revision_sha256 = revision();
 const assertRevision = () => { if (JSON.stringify(revision()) !== JSON.stringify(report.revision_sha256)) throw new Error("Benchmark runtime revision changed during the campaign"); };
@@ -149,14 +152,7 @@ try {
   };
   if (probe.outcome?.status !== "completed" || !probe.usage) throw new Error("Model unavailable: configured API did not return a successful response and usage within the connectivity check. All live cases remain untested.");
   let retryCount = 0, toolWait = 0, actualUsage = { prompt: 0, completion: 0, missing: 0, notDispatched: 0 };
-  originalTool = TaskRuntime.prototype.tool;
-  TaskRuntime.prototype.tool = async function (name, args, callback) {
-    const start = performance.now();
-    try { return await originalTool.call(this, name, args, callback); }
-    finally { if (!["delegate", "call_pro_agent"].includes(name)) toolWait += performance.now() - start; }
-  };
-  originalStream = LLMClient.prototype.streamTurn;
-  LLMClient.prototype.streamTurn = async function* (messages, tools, options = {}) {
+  const captureScope = () => {
     const scope = currentTask();
     if (artifactDirectory && scope) {
       let scopes = sampleScopes.get(scope.runtime);
@@ -165,6 +161,17 @@ try {
       scopes.set(scope.runId, { run_id: scope.runId, parent_run_id: scope.parentRunId, role: scope.role,
         diagnostic_role: context?.role, task_id: context?.task_id, read_only: scope.policy.readOnly, workspace_only: scope.runtime.workspaceOnly });
     }
+  };
+  originalTool = TaskRuntime.prototype.tool;
+  TaskRuntime.prototype.tool = async function (name, args, callback) {
+    captureScope();
+    const start = performance.now();
+    try { return await originalTool.call(this, name, args, callback); }
+    finally { if (!["delegate", "call_pro_agent"].includes(name)) toolWait += performance.now() - start; }
+  };
+  originalStream = LLMClient.prototype.streamTurn;
+  LLMClient.prototype.streamTurn = async function* (messages, tools, options = {}) {
+    captureScope();
     try { yield* originalStream.call(this, messages, tools, { ...options, onRetry: notice => { retryCount++; options.onRetry?.(notice); } }); }
     finally {
       if (this.usage) { actualUsage.prompt += this.usage.prompt; actualUsage.completion += this.usage.completion; }
@@ -175,7 +182,7 @@ try {
   for (const [scenarioIndex, scenario] of cases.filter(c => !filter || filter.includes(c.name)).entries()) {
     const row = { name: scenario.name, samples: { standard: [], fast_dag: [] } }; report.scenarios.push(row);
     for (let run = 0; run < repetitions; run++) {
-      for (const mode of (run + scenarioIndex) % 2 ? ["fast_dag", "standard"] : ["standard", "fast_dag"]) {
+      for (const mode of (run + scenarioIndex + (firstMode === "fast_dag" ? 1 : 0)) % 2 ? ["fast_dag", "standard"] : ["standard", "fast_dag"]) {
         const prior = mode === "standard" ? baseline?.scenarios.find(row => row.name === scenario.name)?.samples.standard[run] : null;
         if (prior?.success && prior.fixture_correct && prior.elapsed_ms < baseline.conditions.task_timeout_ms) {
           row.samples.standard.push({ ...structuredClone(prior), reused_from: path.basename(argument("--reuse-standard")) });
@@ -254,7 +261,7 @@ try {
           agent_runs: snapshot.task?.counts.agentRuns ?? null, tool_calls: snapshot.task?.counts.toolCalls ?? null,
           ...(session.taskRuntime?.diagnostics ? { trace_file: session.taskRuntime.diagnostics.file,
             trace_analysis: analyzeTimeline(fs.readFileSync(session.taskRuntime.diagnostics.file, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line))) } : {}),
-          ...(snapshot.fast ? { fast_tasks: snapshot.fast.tasks.map(t => ({ task_id: t.task_id, kind: t.kind, verifies: t.verifies, dependencies: t.dependencies, read_only: t.read_only, exclusive: t.exclusive, write_paths: t.write_paths, acceptance_criteria: t.acceptance_criteria, output_contract: t.output_contract, status: t.status, error: t.error })),
+          ...(snapshot.fast ? { fast_tasks: snapshot.fast.tasks.map(t => ({ task_id: t.task_id, task_goal: t.task_goal, required_context: t.required_context, input_versions: t.input_versions, kind: t.kind, verifies: t.verifies, dependencies: t.dependencies, read_only: t.read_only, exclusive: t.exclusive, write_paths: t.write_paths, acceptance_criteria: t.acceptance_criteria, output_contract: t.output_contract, status: t.status, error: t.error })),
             review: snapshot.fast.review, fast_metrics: structuredClone(snapshot.fast.metrics),
             ...(snapshot.fast.planning_errors?.length ? { fast_planning_errors: snapshot.fast.planning_errors.map(error => error.replaceAll(model.api_key, "[redacted]")) } : {}) } : {}),
           ...(snapshot.fast?.error ? { fast_error: snapshot.fast.error.replaceAll(model.api_key, "[redacted]") } : {}) };

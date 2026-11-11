@@ -35,6 +35,8 @@ export interface FastOutput {
   /** A failed attempt which touched external state must never be retried automatically. */
   side_effects: boolean;
   verification_passed?: boolean;
+  /** Runtime-owned producer scope; never accepted from model output. */
+  source_run_id?: string;
 }
 export interface FastArtifact extends FastOutput {
   task_id: string;

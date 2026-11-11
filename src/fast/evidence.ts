@@ -29,9 +29,10 @@ export class TaskEvidenceView {
       ...(typeof record.arguments.reason === "string" ? { stated_reason: record.arguments.reason } : {}),
       arguments_sha256: digest(record.arguments), result_bytes: Buffer.byteLength(record.result) }] : []);
   }
-  artifactIndex(): unknown[] {
+  artifactIndex(inlineReports: ReadonlySet<string> = new Set()): Record<string, unknown>[] {
     return [...this.records].flatMap(([reference, record]) => "runId" in record ? [] : [{ reference,
-      task_id: record.task_id, version: record.version, input_versions: record.input_versions, verification: record.verification }]);
+      task_id: record.task_id, version: record.version, input_versions: record.input_versions, verification: record.verification,
+      ...(inlineReports.has(reference) ? { inline_report: true } : {}) }]);
   }
   inlineTools(maxBytes = 16_000): ToolEvidence[] | undefined {
     const tools = [...this.records.values()].filter((record): record is ToolEvidence => "runId" in record);
