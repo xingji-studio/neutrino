@@ -2227,11 +2227,14 @@ function activateComposer() {
 async function sendMessage() {
   // Internal plugin requests pin their originating selection and can preserve the user draft.
   const pluginRequest = arguments[0] ?? null;
+  // The keydown handler passes the text it saw: sendMessage awaits the agent-mode
+  // preference before touching the textarea, so reading it here is too late.
+  const submittedText = arguments[1] ?? null;
   try { await agentModePending; } catch (error) { el.sub.textContent = error.message; return; }
   if (pluginRequest && state.selection !== pluginRequest.selection) throw new Error("Conversation changed before the plugin message was sent");
   const selection = state.selection;
   if (!selection) return;
-  const text = pluginRequest?.text ?? el.input.value;
+  const text = pluginRequest?.text ?? submittedText ?? el.input.value;
   if (!text.trim()) return;
   try {
     if (PRO_MODE) await proUI?.flush();
@@ -2747,6 +2750,46 @@ async function loadFolder(path) {
     el.folderFeedback.textContent = tr("Could not open this folder: {error}", { error: error.message });
     el.folderUse.disabled = !state.folder.path;
   }
+}
+
+/**
+ * Ask the server to open the operating system's folder window.
+ *
+ * The browser's own picker never reveals an absolute path, so a working
+ * directory has to be chosen on the machine that runs the agent. Resolves to the
+ * chosen path, "" when the user closed the window, or null when this browser
+ * cannot use a system window: another device, or no desktop behind the server.
+ */
+async function pickFolderInSystemWindow(start, feedback) {
+  if (feedback) feedback.textContent = tr("Waiting for the folder window on your desktop…");
+  try {
+    const response = await apiFetch("/api/fs/pick", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ start, title: tr("Select a working directory") }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) return null;
+    return typeof data.path === "string" ? data.path : "";
+  } catch {
+    // A window that could not open is a reason to fall back, never an error.
+    return null;
+  } finally {
+    if (feedback) feedback.textContent = "";
+  }
+}
+
+/**
+ * Choose a working directory: the system folder window first, the in-page
+ * folder browser when no window can open here.
+ */
+async function chooseFolder({ start = "", onPick = null, feedback = null } = {}) {
+  const picked = await pickFolderInSystemWindow(start, feedback);
+  if (picked === null) {
+    openFolderDialog({ start, onPick });
+    return;
+  }
+  if (picked && typeof onPick === "function") onPick(picked);
 }
 
 function openFolderDialog({ start = "", onPick = null } = {}) {
@@ -3456,9 +3499,12 @@ el.back.addEventListener("click", () => setConversationView(false));
 el.send.addEventListener("click", activateComposer);
 el.input.addEventListener("input", autosize);
 el.input.addEventListener("keydown", (event) => {
+  // An Enter that picks an IME candidate belongs to the input method, not to us:
+  // preventDefault would cancel the commit and send the uncommitted composition.
+  if (event.isComposing || event.keyCode === 229) return;
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
-    sendMessage();
+    sendMessage(null, el.input.value);
   }
 });
 
@@ -3472,8 +3518,20 @@ el.workspaceAll.addEventListener("click", () => {
   showHome();
 });
 el.workspaceAdd.addEventListener("click", () => {
-  el.workspaceDialog.close();
-  openFolderDialog({ start: state.workspace?.path || state.workspaces?.cwd || "", onPick: (path) => openWorkspace(path) });
+  // The window opens on the desktop of the machine running the console, so this
+  // sheet stays open with a line saying where to look, and closes once a folder
+  // has been chosen (or when the in-page browser takes over).
+  const start = state.workspace?.path || state.workspaces?.cwd || "";
+  void pickFolderInSystemWindow(start, el.workspaceFeedback).then((picked) => {
+    if (picked === null) {
+      el.workspaceDialog.close();
+      openFolderDialog({ start, onPick: (path) => openWorkspace(path) });
+      return;
+    }
+    if (!picked) return;
+    el.workspaceDialog.close();
+    openWorkspace(picked);
+  });
 });
 el.agentsOpen.addEventListener("click", () => openAgentsDialog());
 el.agentMigrate.addEventListener("click", () => migrateSelectedAgentSession());
@@ -3495,8 +3553,9 @@ el.newChatForm.addEventListener("submit", (event) => {
   submitNewChat();
 });
 el.newChatBrowse.addEventListener("click", () => {
-  openFolderDialog({
+  void chooseFolder({
     start: el.newChatCwd.value.trim() || state.workspace?.path || "",
+    feedback: el.newChatFeedback,
     onPick: (path) => {
       el.newChatCwd.value = path;
       renderNewChatRecents();

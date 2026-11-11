@@ -56,7 +56,7 @@ python3 examples/local-api.py --cwd /path/to/project \
 | 活动会话控制 | `POST /live/:key/pause`、`resume`、`clear`、`close` |
 | 会话配置 | `POST /live/:key/model`、`agent-mode`、`approval-mode`；Pro 使用 `pro-preset` |
 | 历史记录 | `GET /session/:id`、`POST /session/:id/continue`、`POST /session/:id/delete` |
-| 工作目录 | `GET/POST /workspaces`、`GET /fs?path=...`、`POST /fs/mkdir` |
+| 工作目录 | `GET/POST /workspaces`、`GET /fs?path=...`、`POST /fs/mkdir`、`POST /fs/pick` |
 | 其他 Agent 会话 | `GET /agents/:agent/sessions?cwd=...`、`GET /agents/:agent/sessions/:id`、`POST /agents/:agent/sessions/:id/migrate` |
 | 插件 | `GET /plugins`、`GET /plugins/catalog`、`GET /plugins/asset`、`POST /plugins`；参见[插件文档](../docs/plugins/README.md) |
 | 更新状态与操作 | `GET /update/events`、`POST /update/check`、`POST /update` |

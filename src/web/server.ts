@@ -27,6 +27,7 @@ import { getWebSettings, updateWebSettings } from "./settings.js";
 import { fastSettings } from "../fast/types.js";
 import { isSeenIdentity, loadSeen, updateSeen, SEEN_LIMIT } from "./clientState.js";
 import { WebAuth } from "./auth.js";
+import { pickFolder, type FolderPick } from "./folderPicker.js";
 import { normalizeCwd, sameCwd } from "../cwd.js";
 import { hub, type LiveEntrySummary, type LiveSnapshot } from "./hub.js";
 import { writeCrashLog } from "../terminal/restore.js";
@@ -81,6 +82,11 @@ export interface WebServerOptions {
   };
   /** Keep service discovery in sync after a live LAN switch. */
   onAddressChange?: () => void;
+  /**
+   * Opens the operating system's folder window and reports the chosen folder.
+   * Only replaced by tests, which run where no window can be drawn.
+   */
+  folderPicker?: FolderPicker;
   /** Local API port. Zero selects an available port. */
   apiPort?: number;
   /** Publish connection information in the user data directory. */
@@ -88,6 +94,12 @@ export interface WebServerOptions {
   /** Run only the local API, with no Web listener. */
   apiOnly?: boolean;
 }
+
+/**
+ * Draws the operating system's folder window on the desktop of this machine.
+ * The console opens one window at a time (see `startWebServer`).
+ */
+export type FolderPicker = (request: { start?: string; title?: string }) => Promise<FolderPick>;
 
 export interface WebServerHandle {
   /** Loopback URL. Always usable from this machine. */
@@ -617,6 +629,15 @@ function isSameOrigin(req: http.IncomingMessage): boolean {
   }
 }
 
+/**
+ * True when the request came from this machine. The system folder window is a
+ * desktop window of the server, so only a browser beside it may ask for one.
+ */
+function isLoopbackRequest(req: http.IncomingMessage): boolean {
+  const address = String(req.socket?.remoteAddress ?? "").replace(/^::ffff:/i, "");
+  return address === "::1" || address.startsWith("127.");
+}
+
 /** Constant-time comparison of the service's management token. */
 function hasServiceToken(req: http.IncomingMessage, token: string): boolean {
   const header = String(req.headers.authorization ?? "");
@@ -807,6 +828,7 @@ async function handleApi(
   pathname: string,
   binding: WebBinding,
   updates: UpdateStreams,
+  picker: FolderPicker,
 ): Promise<boolean> {
   if (!pathname.startsWith("/api/")) return false;
 
@@ -1126,6 +1148,49 @@ async function handleApi(
       const body = await readJsonBody(req);
       const created = createFolder((body as { path?: unknown } | null)?.path);
       sendJson(res, 200, { ok: true, path: created });
+    } catch (err) {
+      sendApiError(res, err);
+    }
+    return true;
+  }
+
+  // The working directory has to be chosen where the agent runs: a browser's
+  // own picker only exposes a folder's contents, never its absolute path. The
+  // page asks for the operating system's window instead, drawn here on the
+  // desktop. A browser on another device gets no window at all — it would open
+  // on the wrong desk — and keeps the in-page folder browser.
+  if (pathname === "/api/fs/pick") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "method not allowed" });
+      return true;
+    }
+    if (!isSameOrigin(req)) {
+      sendJson(res, 403, { error: "cross-origin request rejected" });
+      return true;
+    }
+    if (!isLoopbackRequest(req)) {
+      sendJson(res, 501, { error: "the system folder window opens on this machine only", code: "native picker unavailable" });
+      return true;
+    }
+    let body: unknown;
+    try {
+      body = await readJsonBody(req, 4096);
+    } catch (err) {
+      sendApiError(res, err);
+      return true;
+    }
+    const request = (body ?? {}) as { start?: unknown; title?: unknown };
+    if (typeof request !== "object" || Array.isArray(request)
+      || (request.start !== undefined && typeof request.start !== "string")
+      || (request.title !== undefined && typeof request.title !== "string")) {
+      sendJson(res, 400, { error: "invalid request" });
+      return true;
+    }
+    try {
+      const outcome = await picker({ start: request.start, title: request.title });
+      if ("picked" in outcome) sendJson(res, 200, { path: outcome.picked });
+      else if ("cancelled" in outcome) sendJson(res, 200, { path: null });
+      else sendJson(res, 501, { error: outcome.unavailable, code: "native picker unavailable" });
     } catch (err) {
       sendApiError(res, err);
     }
@@ -1567,6 +1632,7 @@ async function handleRequest(
   auth: WebAuth,
   binding: WebBinding,
   updates: UpdateStreams,
+  picker: FolderPicker,
 ): Promise<void> {
   let url: URL;
   try {
@@ -1602,7 +1668,7 @@ async function handleRequest(
     apiPathname = pathname.slice("/pro".length);
   }
 
-  if (await handleApi(req, res, url, auth, mode, apiPathname, binding, updates)) return;
+  if (await handleApi(req, res, url, auth, mode, apiPathname, binding, updates, picker)) return;
   if (mode === "pro") {
     // Nothing else lives under /pro but the page and its API.
     sendText(res, 404, "Not found");
@@ -1635,13 +1701,24 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
     updateSettings: (body, mode) => updateSettings(body, mode),
   };
 
+  // One system folder window per console: a second browser asking while it is
+  // open waits for the same window instead of stacking another on the desk.
+  let folderWindow: Promise<FolderPick> | null = null;
+  const openFolderWindow: FolderPicker = (request) => {
+    if (!folderWindow) {
+      const open = options.folderPicker ?? pickFolder;
+      folderWindow = open(request).finally(() => { folderWindow = null; });
+    }
+    return folderWindow;
+  };
+
   // Every window watching for an update belongs to this console, not the module,
   // so a second embedded server (a test, an embedding) keeps its own set.
   const updates = createUpdateStreams();
   let localApi: LocalApiHandle | null = null;
 
   const server = http.createServer((req, res) => {
-    handleRequest(req, res, auth, binding, updates).catch((err) => {
+    handleRequest(req, res, auth, binding, updates, openFolderWindow).catch((err) => {
       if (!res.headersSent) {
         sendJson(res, 500, { error: err instanceof Error ? err.message : "internal error" });
       } else {
@@ -1802,7 +1879,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
     }
     const localAuth = new WebAuth(false);
     localApi = await startLocalApi(apiPort, async (req, res, url, mode, pathname) => {
-      if (!await handleApi(req, res, url, localAuth, mode, pathname, binding, updates)) {
+      if (!await handleApi(req, res, url, localAuth, mode, pathname, binding, updates, openFolderWindow)) {
         sendJson(res, 404, { error: "not found" });
       }
     }, options.publishApi ?? options.port !== 0);

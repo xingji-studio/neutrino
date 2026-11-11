@@ -11,8 +11,8 @@ A small, dependency-free single page app that is served by the Neutrino CLI at
   (the turn being answered is open, and a pause is not a fold);
 - read replies as rendered markdown: headings, nested/task lists, tables, block
   quotes, code fences, emphasis, safe links and images; raw HTML is escaped;
-- start a new conversation in a working directory you choose, including a folder
-  created from the built-in folder picker;
+- start a new conversation in a working directory you choose, in the operating
+  system's folder window (or the in-page picker, which can also create a folder);
 - switch the workspace between every known folder and **All directories**;
 - switch the provider, model and intensity for the next turn;
 - select Standard, PTC, the original Fast mode, the new **Fast Mode** (`fast_dag`), or Pro from the composer menu; the choice is saved per conversation and frozen when a message is submitted. See [Fast Mode](../docs/fast-mode.md) for configuration and measured limitations;
@@ -261,10 +261,23 @@ working directory plus provider, model, thinking level and approval mode. The
 conversation is browser-owned from that moment: it appears in the sidebar under
 its folder and is written to its own session file once the first message exists.
 
-**Browse…** opens the server-side folder picker. It lists folders only, offers
+**Browse…** opens the operating system's own folder window — the Explorer
+dialog on Windows, `choose folder` on macOS, zenity or kdialog on Linux —
+drawn by the console process, so the folder is picked the way it is picked in
+any other application. A browser can only ever see the *contents* of a folder
+it was allowed to read, never the absolute path, which is why the window comes
+from the server and not from the page.
+
+The window is raised above the browser and flashed when it opens: it belongs to
+a process that has no window of its own, so Windows would otherwise leave it
+behind the page, with nothing in the taskbar to find it by.
+
+The in-page folder picker stays as the fallback: it lists folders only, offers
 the existing drive roots (on Windows) or `/`, moves up through the directory
-tree, and can create a folder in place. **Use this folder** fills the working
-directory of the new conversation.
+tree, and can create a folder in place. It opens when no system window can be
+drawn — a phone or another device on the LAN, a headless server, a desktop
+without zenity or kdialog — and **Use this folder** fills the working directory
+in that case too.
 
 **Working directories** (the folder button under New conversation) shows every
 folder the console has opened or that already holds conversations. Choosing one
@@ -403,6 +416,7 @@ For other local programs, use the independently authenticated, loopback-only [pr
 | POST | `/api/workspaces` | Validate and remember `{ "path": "…" }` |
 | GET | `/api/fs?path=…` | Folder listing for the picker (folders only, roots, parent) |
 | POST | `/api/fs/mkdir` | Create `{ "path": "…" }` and return the new path |
+| POST | `/api/fs/pick` | Open the operating system's folder window on this machine and return `{ "path": … }` — `null` when it was closed; loopback clients only |
 | POST | `/api/conversations` | Start `{ cwd, selection?, approval_mode? }`, returns `{ key, snapshot }` |
 | GET | `/api/settings` | Model catalog (each model lists its supported intensities), languages, public settings, the live bind address (`web_host`, `web_urls`) and the background state (`background`, `background_running`, `background_url`, one-time `background_prompt`); no credentials |
 | POST | `/api/settings` | Save validated `{ selection?, settings? }`, including `language`, `plan_first`, `approval_mode`, `web_lan`, `background` and `web_password` |

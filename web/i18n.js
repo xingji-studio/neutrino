@@ -193,6 +193,8 @@ const ZH = {
   "Open folder…": "打开文件夹…",
   "Open working directory": "打开工作目录",
   "Choose a folder to open as the working directory.": "选择一个文件夹作为工作目录。",
+  "Select a working directory": "选择工作目录",
+  "Waiting for the folder window on your desktop…": "正在等待桌面上的文件夹窗口…",
   "This folder no longer exists.": "此文件夹已不存在。",
   "{n} conversations": "{n} 个对话",
   "Recent folders": "最近文件夹",

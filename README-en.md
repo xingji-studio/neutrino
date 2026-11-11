@@ -351,9 +351,12 @@ only safe link/image schemes become clickable.
 
 **New conversation** in the sidebar starts a chat that has no transcript yet.
 Its dialog chooses the working directory and the provider, model and thinking
-level for the first turn. **Browse…** opens the server's folder picker, where you
-can walk the filesystem, create a folder, and use it as the conversation's
-working directory. Opened folders are remembered under **Working directories**
+level for the first turn. **Browse…** opens the operating system's own folder
+window on the machine running the console; when no window can be drawn there
+(a phone on the LAN, a headless server) it falls back to the in-page picker,
+where you can walk the filesystem and create a folder. Either way the chosen
+folder becomes the conversation's working directory. Opened folders are
+remembered under **Working directories**
 (the folder button above the list), which scopes the sidebar to that project and
 lets you start a new chat there; you can always return to **All directories**.
 
@@ -647,6 +650,7 @@ node scripts/test-web-settings-http.mjs # verify authenticated settings and mode
 node scripts/test-web-markdown.mjs # verify the browser markdown renderer and its XSS boundaries
 node scripts/test-web-i18n.mjs   # verify every console label has a Chinese translation and placeholders survive
 node scripts/test-web-workspaces.mjs # verify folder browsing/creation, new conversations, clear/delete and other-agent history
+node scripts/test-web-folder-picker.mjs # verify the system folder window per platform and its loopback-only route
 node scripts/test-web-pro.mjs    # verify /pro routing, isolated history/live sessions/settings, shared password & approval policy
 ```
 
