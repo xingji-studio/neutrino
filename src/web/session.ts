@@ -280,6 +280,9 @@ export class WebSession implements LiveAgent {
   private lastTask: TaskSnapshot | undefined;
   private taskOutcome: AgentStatus = "completed";
   private turnToken = 0;
+  /** Set by a resume click: the next turn clears its tool calls without asking. */
+  private autoApproveNextTurn = false;
+  private autoApproveToken: number | null = null;
   private agentMode: AgentMode = "standard";
   private activeAgentMode: AgentMode = "standard";
   private fastState?: FastSnapshot;
@@ -483,7 +486,16 @@ export class WebSession implements LiveAgent {
     if (!this.paused) return;
     this.paused = false;
     this.publishLive();
-    this.maybeFlushQueue();
+    if (this.busy) return;
+    // Continue answers the approval the pause threw away: the turn that follows
+    // runs its tool calls through the gate instead of asking the human again.
+    const restart = !this.queued && lastRequestText(this.messages) !== "";
+    if (!this.queued && !restart) return;
+    this.autoApproveNextTurn = true;
+    // A queued message starts the next turn on its own; otherwise the paused turn
+    // is restarted from the transcript the pause kept, partial answer included.
+    if (this.queued) this.maybeFlushQueue();
+    else this.startTurn();
   }
 
   liveSend(text: string): void {
@@ -612,6 +624,8 @@ export class WebSession implements LiveAgent {
     this.turnAbort?.abort();
     this.turnAbort = new AbortController();
     const token = ++this.turnToken;
+    this.autoApproveToken = this.autoApproveNextTurn ? token : null;
+    this.autoApproveNextTurn = false;
     this.streamingContent = "";
     this.publishLive();
     void (async () => {
@@ -1150,6 +1164,7 @@ export class WebSession implements LiveAgent {
     this.retrying = null;
     this.busy = false;
     this.paused = false;
+    this.autoApproveToken = null;
     this.streamingContent = null;
     this.save();
     this.publishLive();
@@ -1200,7 +1215,7 @@ export class WebSession implements LiveAgent {
         reviewerSystemPrompt: () => loadProPrompt("confirm_model"),
       } : {}),
       cancelled: () => approvalToken !== this.turnToken || this.paused || this.disposed || signal?.aborted === true,
-      autoApprovalEnabled: () => this.approvalMode === "auto",
+      autoApprovalEnabled: () => this.approvalMode === "auto" || approvalToken === this.autoApproveToken,
       extremeAutoApprovalEnabled: () => loadConfig(this.mode).auto_approve_extreme_risk === true,
       onReview: (info) => {
         if (approvalToken !== this.turnToken || this.paused || this.disposed || signal?.aborted === true) return;
