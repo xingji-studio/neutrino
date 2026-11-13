@@ -35,7 +35,7 @@ LLMClient.prototype.streamTurn = async function* (messages) {
     yield JSON.stringify({ result: "inspected", verification_passed: true, unresolved: [] });
   } else {
     if (messages.some(m => m.content?.includes("Perform the mandatory global review"))) {
-      this.toolCalls = [{ id: "final", name: "finish_fast_review", arguments: JSON.stringify({ status: "completed", report: "Verified final answer", unresolved: [], evidence_ids: ["artifact:inspect@1"] }) }];
+      this.toolCalls = [{ id: "final", name: "finish_fast_review", arguments: JSON.stringify({ status: "completed", report: "Verified final answer", unresolved: [], evidence_ids: ["artifact:inspect@1", "artifact:inspect.verify@1"] }) }];
     }
     yield "Verified final answer";
   }

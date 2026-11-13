@@ -41,6 +41,7 @@ export function auditFastLive(raw){
       check("exact_answer",()=>assert.deepEqual(canonical(json("answer.json")),canonical(scenario.expected)));
       if(sample.artifacts?.tool_evidence)check("execution_evidence",()=>{evidence=json(sample.artifacts.tool_evidence);assert.ok(Array.isArray(evidence.tools)&&Array.isArray(evidence.scopes));});
       if(row.name==="multi_module_code"){
+        manual.push({name:"required_original_test_execution",reason:"Verify in the task tool ledger that node test.mjs actually ran and passed during the task."});
         check("original_four_assertions",()=>{const p=spawnSync(process.execPath,["test.mjs"],{cwd,encoding:"utf8",timeout:10000});assert.equal(p.status,0,p.stderr);assert.equal(p.stdout.trim(),"PASS");});
         check("sixteen_formula_cases_and_exports",()=>{const p=spawnSync(process.execPath,["--input-type=module","-e",additional],{cwd,encoding:"utf8",timeout:10000});assert.equal(p.status,0,p.stderr);assert.equal(JSON.parse(p.stdout).passed,true);});
         check("independent_modules",()=>{for(const file of ["tax.mjs","shipping.mjs"]){const other=file==="tax.mjs"?"shipping.mjs":"tax.mjs";for(const spec of ts.preProcessFile(read(file),true,true).importedFiles.map(x=>x.fileName))assert.ok(!(spec.startsWith(".")||path.isAbsolute(spec))||path.resolve(cwd,spec)!==path.resolve(cwd,other));}});

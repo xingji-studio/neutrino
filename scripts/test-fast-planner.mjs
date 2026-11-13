@@ -14,7 +14,7 @@ const {FastAgentEngine}=await import("../dist/fast/engine.js");
 const {TaskRuntime}=await import("../dist/llm/runtime.js");
 const {LLMClient}=await import("../dist/llm/client.js");
 const {fastSettings}=await import("../dist/fast/types.js");
-const request='创建 tax.mjs 与 shipping.mjs；保留 "原样文本"。\n执行 node test.mjs，不改测试；从实现生成 answer.json 并检查全部边界条件。';
+const request='创建 tax.mjs 与 shipping.mjs；保留 "原样文本"。\n执行 node test.mjs，不改测试；从实现生成 answer.json 并检查全部边界条件。' + ' Preserve all public APIs, existing assertions and independent verification of both modules.';
 const earlier=["Keep every existing public interface.","Do not modify the original tests or discard edge cases."];
 const compactTask={task_id:"a",task_goal:"Inspect original sources",acceptance_criteria:["Check every original source"],output_contract:"Factual evidence",access:"read_only"};
 const header={type:"constraints",goal:request,constraints:["All original requirements apply"]};
@@ -39,7 +39,7 @@ async function run({planner,history,verify=true,replans=0}={}){
         yield line({type:"single",access:"exclusive"});return;
       }
       if(messages.some(m=>m.content?.includes("Perform the mandatory global review"))){
-        const refs=engine.snapshot().tasks.filter(t=>!t.verifies).map(t=>`artifact:${t.task_id}@${engine.store.latest(t.task_id)?.version??1}`);
+        const refs=engine.snapshot().tasks.map(t=>`artifact:${t.task_id}@${engine.store.latest(t.task_id)?.version??1}`);
         this.toolCalls=[{id:"final",name:"finish_fast_review",arguments:JSON.stringify({status:"completed",report:"Actual requested outputs checked",unresolved:[],evidence_ids:refs})}];return;
       }
       const task=JSON.parse(messages.find(m=>m.role==="user").content.match(/Task: (\{[^\n]*\})/)[1]);
@@ -61,8 +61,13 @@ try{
   const single=await run();assert.equal(single.result.status,"completed");assert.equal(single.calls.length,4);
   assert.equal(single.definitions.length,2);assert.equal(single.result.snapshot.tasks.length,2);
   for(const task of single.definitions){
-    assert.equal(task.task_goal===request||task.task_goal===`Verify: ${request}`,true);
-    assert.equal(task.acceptance_criteria[0],request);
+    const ref = { $ref: "inherited.request" };
+    assert.deepEqual(task.task_goal, task.verifies ? { verify: ref } : ref);
+    assert.deepEqual(task.acceptance_criteria[0], ref);
+    const stored = single.result.snapshot.tasks.find(t => t.task_id === task.task_id);
+    assert.equal(stored.acceptance_criteria[0], request);
+    assert.equal(stored.task_goal, task.verifies ? `Verify: ${request}` : request);
+    assert.ok(single.calls.every(messages => messages[0].content.includes(JSON.stringify(request))));
     for(const constraint of earlier)assert.ok(task.acceptance_criteria[1].includes(constraint));
     assert.equal(task.read_only,false);assert.equal(task.exclusive,true);
     assert.ok(task.required_context.includes("history"));

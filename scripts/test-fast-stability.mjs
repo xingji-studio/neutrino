@@ -5,7 +5,7 @@ import path from "node:path";
 import {createHash} from "node:crypto";
 import {fastLiveCases} from "./fast-live-cases.mjs";
 import {auditFastLive,applyProtocolReviews} from "./audit-fast-live.mjs";
-import {summarizeStability} from "./fast-stability-analysis.mjs";
+import {pairedTokenLimit, summarizeStability} from "./fast-stability-analysis.mjs";
 const root=fs.mkdtempSync(path.join(os.tmpdir(),"neutrino-stability-oracle-")),hash=x=>createHash("sha256").update(x).digest("hex");
 const names=["multi_source_retrieval","multi_module_code","strong_sequential_dependencies","parallel_analysis"];
 const raw={benchmark_id:"synthetic-unit-only",state:"completed",repetitions:3,requested_cases:names,scenarios:[]};
@@ -34,10 +34,10 @@ try{
     }
   }
   const audited=auditFastLive(raw);assert.equal(audited.observed_samples,24);assert.equal(audited.all_functional_passed,true);
-  assert.equal(audited.pending_manual_checks,18,"protocol provenance must not silently pass based on final values");
+  assert.equal(audited.pending_manual_checks,24,"protocol provenance must not silently pass based on final values");
   const reviewedSample=raw.scenarios.find(r=>r.name==="parallel_analysis").samples.standard[0];
   const protocol={benchmark_id:raw.benchmark_id,reviewer:"synthetic unit test",reviews:[{scenario:"parallel_analysis",mode:"standard",round:1,tool_evidence_sha256:hash(fs.readFileSync(path.join(reviewedSample.artifacts.directory,"tool-evidence.json"))),checks:[{name:"coordinator_verified_inspector_reports",status:"passed",evidence_ids:["synthetic-tool-4"],reason:"Synthetic review gate test only."}]}]};
-  const reviewed=applyProtocolReviews(structuredClone(audited),raw,protocol);assert.equal(reviewed.pending_manual_checks,17);assert.equal(reviewed.scenarios.find(r=>r.name==="parallel_analysis").samples.standard[0].passed,true);
+  const reviewed=applyProtocolReviews(structuredClone(audited),raw,protocol);assert.equal(reviewed.pending_manual_checks,23);assert.equal(reviewed.scenarios.find(r=>r.name==="parallel_analysis").samples.standard[0].passed,true);
   const stale=structuredClone(protocol);stale.reviews[0].tool_evidence_sha256="stale";assert.throws(()=>applyProtocolReviews(structuredClone(audited),raw,stale),/stale tool evidence/);
   const unknownTool=structuredClone(protocol);unknownTool.reviews[0].checks[0].evidence_ids=["not-executed"];assert.throws(()=>applyProtocolReviews(structuredClone(audited),raw,unknownTool),/unknown review tool/);
   const absent=structuredClone(protocol);absent.reviews[0].checks[0]={name:"coordinator_verified_inspector_reports",status:"failed",evidence_ids:[],reason:"No tool ran, so required coordinator verification is absent."};
@@ -51,6 +51,12 @@ try{
   const quality=accept(audited),summary=summarizeStability(raw,quality);
   assert.equal(summary.qualified_pairs,12);assert.equal(summary.all_scenarios_observed_consistent_speedup,true);assert.equal(summary.all_scenarios_observed_consistent_token_reduction,true);assert.ok(Math.abs(summary.geometric_mean_time_saved-0.2)<1e-9);assert.equal(summary.p95,null);
   assert.equal(summary.scenarios[0].token_change.coefficient_of_variation,null,"signed change fractions are not a ratio scale for CV");
+  for (const [elapsed, tokens, qualified, known, expected] of [
+    [80,200,true,true,"passed"], [80,201,true,true,"exceeded"],
+    [101,105,true,true,"passed"], [100,106,true,true,"exceeded"],
+    [80,50,false,true,"unqualified"], [80,50,true,false,"unknown"],
+    [NaN,50,true,true,"unknown"], [0,50,true,true,"unknown"],
+  ]) assert.equal(pairedTokenLimit({elapsed_ms:100,tokens:100},{elapsed_ms:elapsed,tokens},qualified,known).status,expected);
   const changed=structuredClone(raw);changed.scenarios[0].samples.fast_dag[1].elapsed_ms=150;
   const mixed=summarizeStability(changed,quality);assert.equal(mixed.scenarios[0].observed_consistent_speedup,false);assert.equal(mixed.scenarios[0].fast_faster_pairs,2);
   const failed=structuredClone(raw);failed.scenarios[0].samples.fast_dag[0].success=false;

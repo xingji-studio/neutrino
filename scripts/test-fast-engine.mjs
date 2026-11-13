@@ -39,7 +39,7 @@ function harness(custom = {}) {
           planning = false;
         } else if (messages.at(-1).content.includes("Perform the mandatory global review")) {
           this.toolCalls = [{ id: "final", name: "finish_fast_review", arguments: JSON.stringify({ status: "completed",
-            report: "All three dimensions checked against original evidence.", unresolved: [], evidence_ids: ["artifact:a@1", "artifact:b@1", "artifact:c@1"] }) }];
+            report: "All three dimensions checked against original evidence.", unresolved: [], evidence_ids: ["artifact:a@1", "artifact:a.verify@1", "artifact:b@1", "artifact:b.verify@1", "artifact:c@1", "artifact:c.verify@1"] }) }];
           yield "Global review completed";
         } else {
           if (planning) overlapped = true;
@@ -118,7 +118,7 @@ try {
         this.toolCalls = [{ id: `read-${reviewRounds}`, name: "read_file", arguments: JSON.stringify({ path: "fixture.txt", reason: "Check original evidence" }) }];
         yield "Reviewing another necessary source";
       } else {
-        this.toolCalls = [{ id: "final", name: "finish_fast_review", arguments: JSON.stringify({ status: "completed", report: "All necessary sources verified.", unresolved: [], evidence_ids: ["artifact:only@1"] }) }];
+        this.toolCalls = [{ id: "final", name: "finish_fast_review", arguments: JSON.stringify({ status: "completed", report: "All necessary sources verified.", unresolved: [], evidence_ids: ["artifact:only@1", "artifact:only.verify@1"] }) }];
         yield "All necessary sources verified.";
       }
     } else yield JSON.stringify({ result: "only", verification_passed: true, unresolved: [] });
@@ -135,7 +135,7 @@ try {
         if (++plans === 1) { yield "{ malformed plan\n"; return; }
         yield line(header) + line({ type: "task", task: task("recovered") }) + line({ type: "done" });
       } else if (messages.some(m => m.content?.includes("Perform the mandatory global review"))) {
-        this.toolCalls = [{ id: "final", name: "finish_fast_review", arguments: JSON.stringify({ status: "completed", report: "Recovered with evidence", unresolved: [], evidence_ids: ["artifact:recovered@1"] }) }];
+        this.toolCalls = [{ id: "final", name: "finish_fast_review", arguments: JSON.stringify({ status: "completed", report: "Recovered with evidence", unresolved: [], evidence_ids: ["artifact:recovered@1", "artifact:recovered.verify@1"] }) }];
         yield "Reviewed";
       } else yield JSON.stringify({ result: "Recovered", verification_passed: true, unresolved: [] });
     } });
@@ -149,7 +149,7 @@ try {
       if (messages[0].content.includes("You plan tasks")) {
         yield line(header) + line({ type: "task", task: { ...task("corrected"), read_only: false, exclusive: true } }) + line({ type: "done" });
       } else if (messages.some(m => m.content?.includes("Perform the mandatory global review"))) {
-        this.toolCalls = [{ id: "final", name: "finish_fast_review", arguments: JSON.stringify({ status: "completed", report: "Corrected and independently tested", unresolved: [], evidence_ids: ["artifact:corrected@1"] }) }];
+        this.toolCalls = [{ id: "final", name: "finish_fast_review", arguments: JSON.stringify({ status: "completed", report: "Corrected and independently tested", unresolved: [], evidence_ids: ["artifact:corrected@1", "artifact:corrected.verify@1"] }) }];
         yield "Reviewed";
       } else {
         const definition = JSON.parse(messages.find(m => m.role === "user").content.match(/Task: (\{[^\n]*\})/)[1]);
@@ -167,7 +167,7 @@ try {
   const forged = harness({ stream: async function* (messages) {
     if (messages[0].content.includes("You plan tasks")) yield line(header) + line({ type: "task", task: task("only") }) + line({ type: "done" });
     else if (messages.some(m => m.content?.includes("Perform the mandatory global review"))) {
-      this.toolCalls = [{ id: "fake", name: "finish_fast_review", arguments: JSON.stringify({ status: "completed", report: "Claimed done", unresolved: [], evidence_ids: ["artifact:only@999"] }) }];
+      this.toolCalls = [{ id: "fake", name: "finish_fast_review", arguments: JSON.stringify({ status: "completed", report: "Claimed done", unresolved: [], evidence_ids: messages.some(m => m.content?.includes("Acceptance rejected.")) ? ["artifact:only@1"] : ["artifact:only@999"] }) }];
       yield "Claimed done";
     } else yield JSON.stringify({ result: "only", verification_passed: true, unresolved: [] });
   } });
@@ -180,7 +180,7 @@ try {
   const format = harness({ options: { execute: async () => { writes++; return "Created fixture output"; } }, stream: async function* (messages) {
     if (messages[0].content.includes("You plan tasks")) yield line(header) + line({ type: "task", task: { ...task("formatted"), read_only: false, exclusive: true } }) + line({ type: "done" });
     else if (messages.some(m => m.content?.includes("Perform the mandatory global review"))) {
-      this.toolCalls = [{ id: "final", name: "finish_fast_review", arguments: JSON.stringify({ status: "completed", report: "Verified output", unresolved: [], evidence_ids: ["artifact:formatted@1"] }) }];
+      this.toolCalls = [{ id: "final", name: "finish_fast_review", arguments: JSON.stringify({ status: "completed", report: "Verified output", unresolved: [], evidence_ids: ["artifact:formatted@1", "artifact:formatted.verify@1"] }) }];
       yield "Reviewed";
     } else {
       const definition = JSON.parse(messages.find(m => m.role === "user").content.match(/Task: (\{[^\n]*\})/)[1]);
@@ -215,7 +215,7 @@ try {
     if (messages[0].content.includes("You plan tasks")) yield line(header) + line({ type: "task", task: task("a") }) + line({ type: "task", task: task("b") }) + line({ type: "done" });
     else if (messages[0].content === "APPROVAL_FIXTURE") { await sleep(20); yield '{"approve":true}'; }
     else if (messages.some(m => m.content?.includes("Perform the mandatory global review"))) {
-      this.toolCalls = [{ id: "final", name: "finish_fast_review", arguments: JSON.stringify({ status: "completed", report: "Approved and verified", unresolved: [], evidence_ids: ["artifact:a@1", "artifact:b@1"] }) }];
+      this.toolCalls = [{ id: "final", name: "finish_fast_review", arguments: JSON.stringify({ status: "completed", report: "Approved and verified", unresolved: [], evidence_ids: ["artifact:a@1", "artifact:a.verify@1", "artifact:b@1", "artifact:b.verify@1"] }) }];
       yield "Reviewed";
     } else {
       const definition = JSON.parse(messages.find(m => m.role === "user").content.match(/Task: (\{[^\n]*\})/)[1]);
@@ -256,7 +256,7 @@ try {
     if (messages[0].content.includes("You plan tasks")) yield line(header) + line({ type: "task", task: task("constructor") }) +
       line({ type: "task", task: task("__proto__") }) + line({ type: "task", task: task("after", ["__proto__"]) }) + line({ type: "done" });
     else if (messages.some(m => m.content?.includes("Perform the mandatory global review"))) {
-      this.toolCalls = [{ id: "final", name: "finish_fast_review", arguments: JSON.stringify({ status: "completed", report: "All special identifiers verified", unresolved: [], evidence_ids: ["artifact:constructor@1", "artifact:__proto__@1", "artifact:after@1"] }) }];
+      this.toolCalls = [{ id: "final", name: "finish_fast_review", arguments: JSON.stringify({ status: "completed", report: "All special identifiers verified", unresolved: [], evidence_ids: ["artifact:constructor@1", "artifact:constructor.verify@1", "artifact:__proto__@1", "artifact:__proto__.verify@1", "artifact:after@1", "artifact:after.verify@1"] }) }];
       yield "Reviewed";
     } else yield JSON.stringify({ result: "Checked", verification_passed: true, unresolved: [] });
   } });

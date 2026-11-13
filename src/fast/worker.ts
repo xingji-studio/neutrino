@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import type { LLMClient } from "../llm/client.js";
 import { outputAllowance, prepareContext } from "../llm/context.js";
 import { currentTask, TaskControlError, type TaskRuntime, type ToolEvidence } from "../llm/runtime.js";
@@ -9,9 +10,23 @@ import type { FastOutput } from "./types.js";
 
 // Fast-only guidance; batching never changes tool availability, ordering or approval.
 export const FAST_INSPECTION_POLICY = "Read known required paths directly without a separate directory-listing round. If a listing is needed, request it together with independent reads whose paths are already known. Discover unknown paths before reading them. ";
-export const FAST_COMMAND_POLICY = "When commands are available and necessary, combine related reads, computation, writes and read-back assertions for THIS task in one command when the full sequence is known. Preserve prerequisite order and stop on failed assertions. Split calls when later actions require diagnosis or a separate safety decision. The full command body still requires normal approval. Keep independent verification in its separate agent scope. ";
+export const FAST_COMMAND_POLICY = "When commands are available and necessary, combine related reads, computation, writes and read-back assertions for THIS task in one command when the full sequence is known. For a file pipeline, execute the ordered writes and fresh reads of saved predecessors in one approved program when possible. When reconciliation must precede output, compare independently recomputed values with the supplied reports and stop on mismatch BEFORE writing the deliverable. Split calls when later actions require diagnosis or a separate safety decision. The full command body still requires normal approval. Keep independent verification in its separate agent scope. ";
 
 const FINISH = "finish_task";
+
+const VERIFICATION_POLICY = "Independently verify the sources, requested outputs and tests. Compare parsed data, types and values for structured output; use byte-level checks only for an explicit requirement or a concrete discrepancy. " +
+  "Audit required actions and their order in the producer's actual commands and helper bodies. Later success cannot establish an omitted prerequisite. " +
+  "Group independent source reads, recomputation and assertions in one check when possible. Once your own evidence covers the original criteria and execution order, call finish_task immediately. " +
+  "For any further tool, explain in its reason which original criterion still lacks evidence or which observed contradiction it will resolve. A scratch helper only needs testing if it is a requested deliverable. ";
+
+function verificationReadback(read: ToolEvidence, writes: readonly ToolEvidence[], cwd: string): string {
+  if (read.name !== "read_file" || read.status !== "completed" || typeof read.arguments.path !== "string" ||
+      read.result.length < 256 || read.result.endsWith("\n...[truncated]")) return read.result;
+  const target = path.resolve(cwd, read.arguments.path);
+  const match = writes.find(w => typeof w.arguments.path === "string" && path.resolve(cwd, w.arguments.path) === target &&
+    w.arguments.content === read.result);
+  return match ? `Fresh read returned exactly the text in arguments.content of inline write_file evidence ${match.id}. The full record is available via read_task_evidence.` : read.result;
+}
 const list = (value: unknown): string[] => Array.isArray(value) ? value.filter((s): s is string => typeof s === "string") : [];
 function finishTool(verification: boolean): ToolDefinition {
   return { type: "function", function: {
@@ -39,6 +54,9 @@ export async function runFastWorker(options: {
   prefetchReads?: readonly Record<string, unknown>[];
   system: string;
   verification: boolean;
+  unreadProducerActions?: ReadonlySet<string>;
+  /** Completed writes from this producer whose exact contents are already in the task brief. */
+  inlineProducerWrites?: readonly ToolEvidence[];
   readOnly: boolean;
   writePaths?: readonly string[];
   tools: ToolDefinition[];
@@ -57,12 +75,12 @@ export async function runFastWorker(options: {
     const controlRejected = (reason_code: string) => runtime.diagnostics?.emit("control_rejected", { reason_code }, currentTask());
     const sideEffects = () => records().some(e => !["read_file", "list_files", "web_search", "delegate", "read_task_evidence"].includes(e.name) && e.status !== "denied");
     const messages: Parameters<LLMClient["streamTurn"]>[0] = [{ role: "system", content:
-      `${options.system}\n\n${runtime.instructions()}\n\nUse finish_task to conclude. ` +
+      `${options.system}\n\n${runtime.instructions()}\n\nUse finish_task to conclude. A task field {$ref:"inherited.request"} means the exact original user request above. ` +
       "Your scope is this DAG task, not the entire global request. Preserve every global constraint. Status and unresolved refer only to THIS task's acceptance criteria, not to remaining DAG tasks. Use unresolved: [] when this task has no blockers; out-of-scope future work belongs in assumptions, not unresolved. " +
       (options.verification
-        ? "Perform the independent acceptance checks for this task against original sources and requested outputs. A scratch helper or verifier script is not a deliverable unless the user requested it. Do not test the tests, inject faults into scratch copies, replay an already evidenced pipeline in a new directory, or add cleanliness/byte-forensics checks unless the original request explicitly requires that coverage or an actual contradictory result requires diagnosis. Required negative/edge tests for the delivered product remain mandatory. Reuse actual execution evidence to audit recorded actions. All necessary source and correctness checks remain mandatory. "
+        ? VERIFICATION_POLICY
         : "Produce the task output and necessary self-checks. The separate verifier owns independent acceptance checks; do not repeat a full independent/global audit in this worker. Prefer read_file/list_files for inspection, and run_command for necessary computation or tests. ") +
-      FAST_INSPECTION_POLICY + (scope.policy.readOnly ? "" : FAST_COMMAND_POLICY) +
+      FAST_INSPECTION_POLICY + (options.verification || scope.policy.readOnly ? "" : FAST_COMMAND_POLICY) +
       "Keep the report factual and concise; include requested findings and cite actual evidence IDs. Do not reproduce raw records, command bodies or long checklists already preserved in the ledger unless the output contract requires them. conclusions/evidence/assumptions are optional when they add no new facts; all actual tool evidence is attached automatically. This does not reduce reasoning or verification requirements. " +
       (options.verification ? "Your result MUST include top-level verification_passed (boolean), unresolved (string[]), and a factual report. Merely writing PASS or verification_passed=true inside prose is insufficient. " : "") +
       "Correct tool/input mistakes in this conversation, preserving actual failed and successful evidence. Do not repeat a denied call unchanged. Never claim that missing checks passed." },
@@ -78,6 +96,7 @@ export async function runFastWorker(options: {
       if (options.verification && (typeof value.verification_passed !== "boolean" || !Array.isArray(value.unresolved) || value.unresolved.some(v => typeof v !== "string"))) return undefined;
       if (options.verification && value.verification_passed === true && (status !== "completed" || list(value.unresolved).length)) return undefined;
       if (denied || status === "blocked" || status === "failed") throw new FastTaskError(`${status}: ${result}`, sideEffects());
+      if (value.verification_passed === true && options.unreadProducerActions?.size) return undefined;
       const pending = list(value.unresolved);
       if (status === "partial" && !pending.length) pending.push("Worker explicitly reported partial work; independent verification must resolve it.");
       const output: FastOutput = { result, conclusions: list(value.conclusions),
@@ -89,6 +108,9 @@ export async function runFastWorker(options: {
         evidenceIds: records().map(e => e.id), artifacts: records().filter(e => e.name === "write_file" && e.status === "completed").map(e => String(e.arguments.path)), blockers: pending });
       return output;
     };
+    const evidenceReminder = () => options.unreadProducerActions?.size
+      ? ` Inspect the outstanding producer action records using read_task_evidence before a passing verdict: ${JSON.stringify([...options.unreadProducerActions])}.`
+      : "";
     // Model-requested and prefetched operations share the same checks, approvals, budgets and evidence path.
     const runTool = async (name: string, args: Record<string, unknown>, reportOnly = false): Promise<string> => {
       let result: string;
@@ -112,6 +134,9 @@ export async function runFastWorker(options: {
         }
       }
       const evidence: ToolEvidence | undefined = records().at(-1);
+      if (options.verification && evidence && options.inlineProducerWrites?.length && names.has("read_task_evidence")) {
+        result = verificationReadback(evidence, options.inlineProducerWrites, runtime.cwd);
+      }
       return result + (evidence ? `\n[Evidence ${evidence.id}; status=${evidence.status}]` : "");
     };
     try {
@@ -125,6 +150,7 @@ export async function runFastWorker(options: {
           messages.push({ role: "tool", tool_call_id: id, content: result });
         }
       }
+      let reviewedRecords = 0;
       for (let round = 1; round <= options.maxRounds; round++) {
         if (signal.aborted) throw new FastTaskError(String(signal.reason), sideEffects());
         // Like ordinary children, the last round is for reporting, with no filesystem/network tools.
@@ -133,7 +159,21 @@ export async function runFastWorker(options: {
         await prepareContext({ messages, tools: available, capacity: options.contextWindow, lastPromptTokens,
           createClient: options.createClient, stream: { signal }, preserveBrief: true });
         const client = options.createClient(); let text = "";
-        for await (const chunk of client.streamTurn(messages, available, { signal, maxOutputTokens: outputAllowance(options.contextWindow), final: round === options.maxRounds })) text += chunk;
+        let turnMessages = messages;
+        const tail = messages.at(-1);
+        if (options.verification && tail?.role === "tool" && round < options.maxRounds) {
+          const own = records(), batch = own.slice(reviewedRecords);
+          reviewedRecords = own.length;
+          if (batch.length) {
+            const decision = batch.some(e => e.status !== "completed")
+              ? "An operation failed or was denied. Identify the affected original criterion. Resolve an actual evidence gap within policy or report it unresolved. If an auxiliary check was unnecessary, assess coverage from the other evidence."
+              : "Assess the original criteria against the actual evidence now. If covered, send finish_task alone. Otherwise perform only the outstanding required check, naming the gap in its reason.";
+            // One decision per settled batch. Keep both the raw ledger and retained
+            // conversation untouched; a successful exit is never a semantic verdict.
+            turnMessages = [...messages.slice(0, -1), { ...tail, content: tail.content + "\n[Verifier decision] " + decision + evidenceReminder() }];
+          }
+        }
+        for await (const chunk of client.streamTurn(turnMessages, available, { signal, maxOutputTokens: outputAllowance(options.contextWindow), final: round === options.maxRounds })) text += chunk;
         lastPromptTokens = client.usage?.prompt ?? 0;
         if (signal.aborted || client.outcome?.status === "cancelled") throw new FastTaskError(String(signal.reason ?? "Cancelled"), sideEffects());
         if (client.outcome?.status === "failed") throw new FastTaskError(client.outcome.error?.message ?? "Worker request failed", sideEffects());
@@ -153,7 +193,7 @@ export async function runFastWorker(options: {
           }
           controlRejected("missing_control_fields");
           messages.push({ role: "user", content: "The final result is missing required machine-readable fields. Conclude with finish_task using status, report, conclusions, evidence, assumptions, unresolved" +
-            (options.verification ? ", and top-level verification_passed: true/false. Keep all original evidence; do not rerun completed writes to fix output formatting." : ". Do not rerun completed writes to fix output formatting.") });
+            (options.verification ? ", and top-level verification_passed: true/false. Keep all original evidence; do not rerun completed writes to fix output formatting." : ". Do not rerun completed writes to fix output formatting.") + evidenceReminder() });
           continue;
         }
         for (const call of calls) {
@@ -172,7 +212,7 @@ export async function runFastWorker(options: {
             }
             const output = accept(args); if (output) return output;
             controlRejected("contradictory_control_result");
-            messages.push({ role: "tool", tool_call_id: call.id, content: "Invalid or contradictory final result. Include a nonempty report, unresolved array and, for verification, a top-level boolean verification_passed. Status and unresolved concern only THIS task's acceptance criteria. If those passed, use completed/true and unresolved: []; put out-of-scope work in assumptions. If a criterion remains unmet, state it and use false. Clarify using existing evidence without replaying writes or omitting necessary checks." });
+            messages.push({ role: "tool", tool_call_id: call.id, content: "Invalid or contradictory final result. Include a nonempty report, unresolved array and, for verification, a top-level boolean verification_passed. Status and unresolved concern only THIS task's acceptance criteria. If those passed, use completed/true and unresolved: []; put out-of-scope work in assumptions. If a criterion remains unmet, state it and use false. Clarify using existing evidence without replaying writes or omitting necessary checks." + evidenceReminder() });
             continue;
           }
           const result = await runTool(call.name, args, round === options.maxRounds);

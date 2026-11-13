@@ -15,6 +15,7 @@ const { ContextVersionTable, expandContextVersions } = await import("../dist/fas
 const { verificationSourceReads, MAX_PREFETCH_SOURCE_BYTES } = await import("../dist/fast/prefetch.js");
 const { FastAgentEngine } = await import("../dist/fast/engine.js");
 const { runFastWorker } = await import("../dist/fast/worker.js");
+const { EVIDENCE_TOOL } = await import("../dist/fast/evidence.js");
 const { fastSettings } = await import("../dist/fast/types.js");
 const { TaskRuntime, currentTask } = await import("../dist/llm/runtime.js");
 const { LLMClient } = await import("../dist/llm/client.js");
@@ -97,7 +98,7 @@ try {
         if (messages.some(m => m.content?.includes("Perform the mandatory global review"))) {
           const complete = engine.scheduler.successful;
           call(this, "finish_fast_review", { status: complete ? "completed" : "partial", report: "Actual checks audited", unresolved: complete ? [] : ["Changed original source"],
-            evidence_ids: complete ? ["artifact:source@1", "artifact:integrate@1"] : [] }); return;
+            evidence_ids: complete ? ["artifact:source@1", "artifact:source.verify@1", "artifact:integrate@1", "artifact:integrate.verify@1"] : [] }); return;
         }
         const text = messages.find(m => m.role === "user").content;
         const task = JSON.parse(text.match(/Task: (\{[^\n]*\})/)[1]), results = messages.filter(m => m.role === "tool");
@@ -157,6 +158,49 @@ try {
     return result;
   }
   await engineFixture(); await engineFixture(true);
+
+  // A fresh verifier can finish on covered criteria and still resolve a real gap after a failed read.
+  for (const variant of ["match", "changed", "missing", "unindexed", "worker"]) {
+    const dir = path.join(root, "decision-" + variant); fs.mkdirSync(dir);
+    const original = "producer body\n".repeat(70), current = variant === "changed" ? original + "changed" : original;
+    fs.writeFileSync(path.join(dir, "program.txt"), current);
+    const write = { id: "producer-write", runId: "producer", name: "write_file", arguments: {path: "program.txt", content: original}, result: "Written", status: "completed" };
+    const rt = new TaskRuntime({ request: "Read the program independently and compare against the original.", cwd: dir });
+    const verification = variant !== "worker"; let turns = 0;
+    const createClient = () => {
+      const c = new LLMClient(model, "Fixture", "Max");
+      c.streamTurn = async function* (messages) {
+        turns++; this.toolCalls = []; this.usage = {prompt: 10, completion: 1, total: 11}; this.outcome = {status: "completed"};
+        const last = messages.at(-1).content, evidence = messages.filter(m => m.role === "tool");
+        assert.equal(messages[0].content.includes("execute the ordered writes"), !verification);
+        if (!evidence.length) {
+          call(this, "read_file", {path: variant === "missing" ? "absent.txt" : path.join(dir,"program.txt"), reason:"Read the required file"}); return;
+        }
+        if (variant === "missing" && evidence.length === 1) {
+          assert.match(last, /An operation failed or was denied/);
+          call(this,"read_file",{path:"program.txt",reason:"The required program has not yet been read"}); return;
+        }
+        assert.equal(last.includes("[Verifier decision]"),verification);
+        assert.ok(evidence.slice(0,-1).every(m=>!m.content.includes("[Verifier decision]")));
+        if (verification && variant !== "changed" && variant !== "unindexed") {
+          assert.match(last, /arguments.content of inline write_file evidence producer-write/);
+          assert.ok(!last.includes(original));
+        } else assert.ok(last.includes(current));
+        const passed = variant !== "changed";
+        call(this,"finish_task",{status: passed ? "completed" : "partial", report: passed ? "Original checked" : "Program changed",
+          unresolved: passed ? [] : ["Contents differ"], ...(verification ? {verification_passed:passed} : {})});
+      };return c;
+    };
+    const out = await rt.run(()=>runFastWorker({runtime:rt,signal:rt.signal,system:"Fixture", task:JSON.stringify(write),
+      verification, readOnly: false, inlineProducerWrites: [write],
+      tools: variant === "unindexed" ? getToolDefinitions() : [...getToolDefinitions(), EVIDENCE_TOOL],
+      maxRounds:6,contextWindow:1000000,createClient,approve:async()=>({approved:true,source:"prompt",reason:"Fixture"}),
+      execute:(n,a,s)=>executeTool(n,a,dir,s)}));
+    assert.equal(turns,variant==="missing"?3:2);
+    assert.equal(out.verification_passed, verification ? variant!=="changed" : undefined);
+    assert.equal(rt.evidence.at(-1).result,current,"exact fresh output remains in the durable evidence path");
+    rt.finish(variant==="changed"?"partial":"completed"); await rt.drain();
+  }
 
   // Even an eager read cannot bypass normal approval, cancellation, inherited read-only scope or tool budgets.
   async function guardedRead(kind) {

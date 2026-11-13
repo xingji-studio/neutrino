@@ -50,3 +50,16 @@ export function expandContextVersions(record: object, definitions: Record<string
   }
   return copy;
 }
+
+/** Wire-only references resolve to the exact request in TaskRuntime.instructions(). */
+export function taskForPrompt(task: Record<string, unknown>, request: string): Record<string, unknown> {
+  if (request.length < 128) return task;
+  const original = { $ref: "inherited.request" };
+  const copy = { ...task };
+  if (task.task_goal === request) copy.task_goal = original;
+  if (task.verifies && task.task_goal === `Verify: ${request}`) copy.task_goal = { verify: original };
+  if (Array.isArray(task.acceptance_criteria)) {
+    copy.acceptance_criteria = task.acceptance_criteria.map(item => item === request ? original : item);
+  }
+  return copy;
+}

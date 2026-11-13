@@ -70,7 +70,7 @@ for (const check of process.argv.slice(2)) { checks[check](); console.log("PASS 
       }
       if (messages.some(m => m.content?.includes("Perform the mandatory global review"))) {
         calls.push("global_review");
-        const ids = plan.filter(t => !omitCheckReference || t.task_id !== check.task_id).map(t => `artifact:${t.task_id}@1`);
+        const ids = plan.filter(t => !omitCheckReference || t.task_id !== check.task_id).flatMap(t => t.kind === "verification" ? [`artifact:${t.task_id}@1`] : [`artifact:${t.task_id}@1`, `artifact:${t.task_id}.verify@1`]);
         this.toolCalls = [{ id: "final", name: "finish_fast_review", arguments: JSON.stringify({ status: "completed",
           report: "All independent checks passed", unresolved: [], evidence_ids: ids }) }];
         return;

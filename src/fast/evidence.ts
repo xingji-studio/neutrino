@@ -23,8 +23,8 @@ export class TaskEvidenceView {
     for (const tool of tools) this.records.set(tool.id, structuredClone(tool));
   }
   get size(): number { return this.records.size; }
-  toolIndex(): unknown[] {
-    return [...this.records].flatMap(([id, record]) => "runId" in record ? [{ id, tool: record.name, status: record.status,
+  toolIndex(inlineIds: ReadonlySet<string> = new Set()): unknown[] {
+    return [...this.records].flatMap(([id, record]) => "runId" in record && !inlineIds.has(id) ? [{ id, tool: record.name, status: record.status,
       ...(typeof record.arguments.path === "string" ? { path: record.arguments.path } : {}),
       ...(typeof record.arguments.reason === "string" ? { stated_reason: record.arguments.reason } : {}),
       arguments_sha256: digest(record.arguments), result_bytes: Buffer.byteLength(record.result) }] : []);

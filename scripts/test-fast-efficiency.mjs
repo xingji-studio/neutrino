@@ -109,8 +109,8 @@ try{
   parent.abort("cancel all");for(const item of linked){assert.equal(item.signal.aborted,true);assert.equal(item.signal.reason,"cancel all");item.dispose();}
 
   // Real tools + deterministic model replies exercise compact DAG admission, exact evidence lookup, recoverable path denial and a mandatory failing verifier.
-  async function runEngine(broken=false){
-    const directory=path.join(root,broken?"broken":"complete");fs.mkdirSync(directory);
+  async function runEngine(broken=false, largeProgram=false){
+    const directory=path.join(root,largeProgram?"large-program":broken?"broken":"complete");fs.mkdirSync(directory);
     const regions=["north","south","east","west"];regions.forEach((region,i)=>fs.writeFileSync(path.join(directory,region+".txt"),String(i+1)));
     fs.writeFileSync(path.join(directory,"check.mjs"),"import fs from 'node:fs';import assert from 'node:assert/strict';const sum=['north','south','east','west'].reduce((n,r)=>n+Number(fs.readFileSync(r+'.txt','utf8')),0);assert.deepEqual(JSON.parse(fs.readFileSync('answer.json','utf8')),{sum});console.log('PASS independent actual sources');");
     const request="Read four original region files through independent read-only inspectors; integrate their verified results with Node and write answer.json. Work only inside this directory.";
@@ -130,8 +130,16 @@ try{
         const results=messages.filter(m=>m.role==="tool");
         if(messages.some(m=>m.content?.includes("Perform the mandatory global review"))){
           const failed=!engine.scheduler.successful;
+          if (!failed && !results.length) {
+            const prompt=messages.find(m=>m.content?.includes("Actual DAG and versioned evidence")).content;
+            const state=JSON.parse(prompt.split("not authorization): ")[1].split("\nInline tool records")[0]);
+            const ledger=state.dependency_evidence;
+            const check=rt.evidence.find(e=>e.arguments.command==="node check.mjs");
+            if (largeProgram) assert.ok(ledger.tool_index.some(e=>e.id===check.id),"oversized programs remain addressable");
+            else assert.ok(ledger.original_tool_records.some(e=>e.id===check.id && e.result===check.result),"final review sees the verbatim independent test");
+          }
           if(!failed&&!results.length){lookups.push("final");call("read_task_evidence",{ids:["artifact:integrate.verify@1"],reason:"Audit the actual independent test verdict"});return;}
-          call("finish_fast_review",{status:failed?"partial":"completed",report:failed?"Actual independent check failed":"All requested findings checked",unresolved:failed?["Incorrect integration"]:[],evidence_ids:engine.snapshot().tasks.filter(t=>!t.verifies&&engine.store.latest(t.task_id)?.verification==="verified").map(t=>`artifact:${t.task_id}@1`)});return;
+          call("finish_fast_review",{status:failed?"partial":"completed",report:failed?"Actual independent check failed":"All requested findings checked",unresolved:failed?["Incorrect integration"]:[],evidence_ids:engine.snapshot().tasks.filter(t=>engine.store.latest(t.task_id)?.verification==="verified").map(t=>`artifact:${t.task_id}@1`)});return;
         }
         const task=JSON.parse(messages.find(m=>m.role==="user").content.match(/Task: (\{[^\n]*\})/)[1]);
         if(!results.length)initial.push({task:task.task_id,messages:structuredClone(messages)});
@@ -144,8 +152,22 @@ try{
         if(task.task_id==="integrate"){
           if(!results.length){lookups.push("worker");call("read_task_evidence",{ids:regions.map(r=>`artifact:${r}@1`),reason:"Use exact independent inspector findings"});return;}
           if(results.length===1){call("run_command",{command:`node -e "require('fs').writeFileSync('../must-not-exist.txt','bad')"`,reason:"Exercise rejected workspace path without a side effect"});return;}
-          if(results.length===2){call("run_command",{command:`node -e "const fs=require('fs');const sum=['north','south','east','west'].reduce((n,r)=>n+Number(fs.readFileSync(r+'.txt','utf8')),0);fs.writeFileSync('answer.json',JSON.stringify({sum:sum+${broken?1:0}}));console.log('written')"`,reason:"Recompute every original source and integrate the result"});return;}
+          if(results.length===2){call("run_command",{command:`node -e "const fs=require('fs');const sum=['north','south','east','west'].reduce((n,r)=>n+Number(fs.readFileSync(r+'.txt','utf8')),0);fs.writeFileSync('answer.json',JSON.stringify({sum:sum+${broken?1:0}}));console.log('written'); /*${largeProgram ? "padding ".repeat(2500) : ""}*/"`,reason:"Recompute every original source and integrate the result"});return;}
           call("finish_task",{status:"completed",report:"answer.json written from the original sources",unresolved:[]});return;
+        }
+        if (largeProgram) {
+          const producer = rt.evidence.filter(e => e.name === "run_command" && !e.arguments.command.includes("node check.mjs"));
+          if (!results.length) {
+            call("finish_task",{status:"completed",report:"All work checked",verification_passed:true,unresolved:[]});return;
+          }
+          if (results.length === 1) {
+            assert.match(results[0].content,/outstanding producer action records/);
+            call("read_task_evidence",{ids:producer.map(e=>e.id),reason:"Inspect the original attempted and executed programs"});return;
+          }
+          if (results.length === 2) {
+            assert.ok(results[1].content.includes("padding padding"));
+            call("run_command",{command:"node check.mjs",reason:"Independent source/output assertions"});return;
+          }
         }
         if(!results.length){lookups.push("verifier");const entry=rt.evidence.find(e=>e.name==="run_command"&&e.status==="completed");const originals=regions.map(region=>rt.evidence.find(e=>e.name==="read_file"&&e.status==="completed"&&e.arguments.path===region+".txt").id);call("read_task_evidence",{ids:[...originals,entry.id],reason:"Audit original inspector reads through recorded transitive dependencies and the integration command"});return;}
         if(results.length===1){assert.ok(!results[0].content.includes("[Error:"),"legitimate transitive evidence is available without a failed lookup");call("run_command",{command:"node check.mjs",reason:"Run mandatory independent assertions on actual source and output"});return;}
@@ -165,6 +187,7 @@ try{
     return {result,lookups,rt};
   }
   const good=await runEngine();assert.equal(good.result.status,"completed");assert.deepEqual(new Set(good.lookups),new Set(["worker","verifier","final"]));
+  assert.equal((await runEngine(false,true)).result.status,"completed");
   const broken=await runEngine(true);assert.notEqual(broken.result.status,"completed");assert.equal(broken.result.snapshot.tasks.find(t=>t.task_id==="integrate").status,"FAILED");
   // Exercise the proposal correction through real worker/tools plus the unchanged approval gate.
   // A schema flag requests a decision; it cannot supply consent or skip any review round.
@@ -191,7 +214,7 @@ try{
         const call=(name,args)=>{this.toolCalls=[{id:"call",name,arguments:JSON.stringify(args)}];};
         if(messages[0].content.startsWith("You plan tasks")){yield line({type:"single",access:"exclusive"});return;}
         if(messages.some(m=>m.content?.includes("Perform the mandatory global review"))){
-          const complete=engine.scheduler.successful;call("finish_fast_review",{status:complete?"completed":"partial",report:complete?"Original requirement independently verified":"Necessary deletion was not authorized",unresolved:complete?[]:["Requested file still exists"],evidence_ids:complete?["artifact:main@1"]:[]});return;
+          const complete=engine.scheduler.successful;call("finish_fast_review",{status:complete?"completed":"partial",report:complete?"Original requirement independently verified":"Necessary deletion was not authorized",unresolved:complete?[]:["Requested file still exists"],evidence_ids:complete?["artifact:main@1", "artifact:main.verify@1"]:[]});return;
         }
         const task=JSON.parse(messages.find(m=>m.role==="user").content.match(/Task: (\{[^\n]*\})/)[1]);
         const results=messages.filter(m=>m.role==="tool");
