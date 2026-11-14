@@ -1,3 +1,4 @@
+import type { StandardSnapshot } from "./standard.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -93,6 +94,7 @@ export interface TaskSnapshot {
   pluginPrompt?: { role:string; sections:unknown };
   rootRunId: string;
   state: "running" | "cancelling" | AgentStatus;
+  standard?: StandardSnapshot;
   counts: { agentRuns: number; modelRequests: number; toolCalls: number; tokens: number };
   limits: TaskLimits;
   budgetScope?: TaskBudgetScope;
@@ -128,7 +130,7 @@ export function linkSignals(...values: Array<AbortSignal | undefined>): { signal
   });
   return { signal: controller.signal, dispose: () => listeners.forEach(remove => remove()) };
 }
-const READ_TOOLS = new Set(["read_file", "list_files", "web_search", "plugin_fetch", "delegate", "call_pro_agent", "finish_step", "finish_task", "read_task_evidence"]);
+const READ_TOOLS = new Set(["read_file", "list_files", "web_search", "plugin_fetch", "delegate", "call_pro_agent", "finish_step", "finish_task", "finish_standard_task", "read_task_evidence"]);
 
 /** Resolve existing ancestors too, so symlinks cannot widen a file write policy. */
 function realPath(input: string): string {
@@ -150,6 +152,9 @@ function within(file: string, base: string): boolean {
 
 /** One user turn owns one ledger and cancellation tree, with optional root limits. */
 export class TaskRuntime {
+  standard?: StandardSnapshot;
+  private evidenceObservers = new Set<(entry: ToolEvidence) => void>();
+  observeEvidence(observer: (entry: ToolEvidence) => void): void { this.evidenceObservers.add(observer); }
   private readonly executionMode?: AgentMode | "pro";
   plugins?: PluginHost;
   private pluginPrompt?: { role:string; sections:unknown };
@@ -292,6 +297,16 @@ export class TaskRuntime {
     while (this.pending.size) await Promise.allSettled([...this.pending]);
   }
   finish(status: AgentStatus): void {
+    this.evidenceObservers.clear();
+    // A caller returning normally cannot bypass the Standard acceptance checkpoint.
+    if (this.standard && status === "completed" && this.standard.status !== "completed") status = "partial";
+    if (this.standard && (this.signal.aborted || status !== "completed")) {
+      this.standard.status = "partial";
+      if (!this.standard.unresolved.length) this.standard.unresolved = [this.signal.aborted
+        ? `Task cancelled: ${String(this.signal.reason ?? "Task cancelled")}`
+        : this.budgetStop ? `Task stopped: ${this.budgetStop.code}` : "Task ended before completion acceptance"];
+      for (const requirement of this.standard.requirements) requirement.verified = false;
+    }
     this.state = this.signal.aborted ? "cancelled" : status;
     clearTimeout(this.deadline);
     clearTimeout(this.delegationDeadline);
@@ -300,7 +315,7 @@ export class TaskRuntime {
     if (this.diagnostics) void this.track(this.diagnostics.close());
   }
   snapshot(): TaskSnapshot {
-    return { rootRunId: this.rootRunId, state: this.state, counts: { ...this.usage }, limits: { ...this.limits },
+    return { rootRunId: this.rootRunId, state: this.state, ...(this.standard ? { standard: structuredClone(this.standard) } : {}), counts: { ...this.usage }, limits: { ...this.limits },
       ...(this.executionMode ? { execution_mode: this.executionMode } : {}),
       ...(this.plugins?.pins.length ? { plugins: structuredClone(this.plugins.pins) } : {}),
       ...(this.plugins?.diagnostics.length ? { pluginErrors: [...this.plugins.diagnostics] } : {}),
@@ -336,7 +351,7 @@ export class TaskRuntime {
     if (groups.length && (name === "run_command" || name === "execute_ts")) {
       throw new TaskControlError("write_scope", "Arbitrary command execution is unavailable under a restricted write-path policy");
     }
-    if (groups.length && name === "write_file") {
+    if (groups.length && (name === "write_file" || name === "edit_file")) {
       const target = realPath(path.resolve(this.cwd, String(args.path ?? "")));
       if (!groups.every(group => group.some(base => within(target, base)))) throw new TaskControlError("write_scope", "File is outside this task's allowed write paths");
     }
@@ -377,6 +392,7 @@ export class TaskRuntime {
   recordTool(name: string, args: Record<string, unknown>, result: string, status: ToolEvidence["status"], id = randomUUID(), runId = currentTask()?.runId ?? this.rootRunId): ToolEvidence {
     const entry = { id, runId, name, arguments: structuredClone(args), result, status };
     this.evidence.push(entry);
+    for (const observer of this.evidenceObservers) observer(entry);
     this.event("tool_finished", entry);
     if (this.plugins) void this.track(this.plugins.emit("tool.finished", { name, status, evidenceId:id })).catch(() => {});
     return entry;
@@ -387,6 +403,13 @@ export class TaskRuntime {
     return "Task incomplete. Recorded operations (not a claim that all requested work is done):\n" +
       this.evidence.slice(-24).map(entry => `- ${entry.status}: ${entry.name} ${String(entry.arguments.path ?? entry.arguments.command ?? entry.arguments.query ?? "").slice(0, 200)}\n  ${entry.result.split("\n").find(line => line.trim())?.slice(0, 200) ?? ""} [evidence ${entry.id}]`).join("\n") +
       "\nAnything not established by these records remains unverified.";
+  }
+
+  /** Advisory only: request() remains the authority for every actual dispatch. */
+  remainingRequestTokens(): number | undefined {
+    if (this.budgetScope === "task") return Math.max(0, this.limits.tokens - this.usage.tokens - this.reservedTokens);
+    if (this.isDelegated()) return Math.max(0, this.limits.tokens - this.delegatedUsage.tokens - this.delegatedReservedTokens);
+    return undefined;
   }
 
   /** Reserve before every actual HTTP attempt, including retries, reviews and summaries. */

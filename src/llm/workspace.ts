@@ -166,7 +166,7 @@ export function commandWorkspacePaths(command: string, cwd = process.cwd(), dept
 
 /** Preflight for declared workspace confinement. Arbitrary programs still require the normal approval gate. */
 export function workspaceViolation(name: string, args: Record<string, unknown>, cwd: string): string | undefined {
-  const paths = ["write_file", "read_file", "list_files"].includes(name)
+  const paths = ["write_file", "edit_file", "read_file", "list_files"].includes(name)
     ? [typeof args.path === "string" && args.path.trim() ? args.path : "."]
     : name === "run_command" ? commandWorkspacePaths(String(args.command ?? ""), cwd) : [];
   if (name === "run_command") {

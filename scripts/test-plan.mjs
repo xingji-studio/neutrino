@@ -1,3 +1,4 @@
+import { isStandardFixtureReview, standardFixtureFinish, standardFixtureAssessment } from "./standard-fixture.mjs";
 // Plan-first turns: a planner agent writes the steps, a worker agent executes
 // them one at a time, and the top-right info card shows the plan as a timeline.
 //
@@ -264,10 +265,15 @@ let scripted = [];
 const originalStream = LLMClient.prototype.streamTurn;
 LLMClient.prototype.streamTurn = async function* (messages, tools) {
   this.toolCalls = [];
+  this.outcome = { status: "completed" };
+  // Keep this suite's call list focused on planner/worker UI transitions.
+  if (isStandardFixtureReview(messages)) { yield standardFixtureAssessment; return; }
   calls.push({ messages: JSON.parse(JSON.stringify(messages)), tools: (tools ?? []).length });
   const next = scripted.shift() ?? { text: "ok" };
   if (next.gate) await next.gate;
   if (next.throw) throw next.throw;
+  const finish = standardFixtureFinish(messages, tools, next.text);
+  if (finish) { this.toolCalls = [finish]; return; }
   yield next.text;
 };
 

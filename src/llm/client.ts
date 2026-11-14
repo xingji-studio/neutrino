@@ -39,6 +39,16 @@ export function completionLimit(model: ModelInfo, provider: string, tokens: numb
     ? { max_completion_tokens: tokens } : { max_tokens: tokens };
 }
 
+/** Current DeepSeek models expose API effort independently of sampling controls. */
+export function deepSeekEffort(model: ModelInfo, provider: string, intensity: string): "low" | "high" | "max" | undefined {
+  let official = false;
+  try { official = new URL(model.url).hostname === "api.deepseek.com"; } catch { /* Local benchmark routes retain the provider name. */ }
+  if ((!official && provider.toLowerCase() !== "deepseek") ||
+      !/^deepseek-(?:flash|v4(?:[.-]|$))/i.test(model.name)) return undefined;
+  const level = intensity.toLowerCase();
+  return level === "max" || level === "ultra" ? "max" : level === "low" ? "low" : "high";
+}
+
 interface ApiMessage {
   role: string;
   content?: string;
@@ -225,7 +235,8 @@ export class LLMClient {
     const runtime = currentTask()?.runtime;
     const diagnostic = runtime?.diagnostics ? new DiagnosticRequest(runtime.diagnostics, { role: currentTask()?.depth ? "worker" : "main", ...options.diagnostic }, currentTask()) : undefined;
     if (diagnostic) runtime!.diagnostics!.emit("model_configuration", { request_id: diagnostic.requestId,
-      model_config_hash: diagnosticHash({ model: this.model.name, provider: this.provider, intensity: this.intensity, professional: this.professional, temperature: this.temperature, top_p: this.top_p }),
+      model_config_hash: diagnosticHash({ model: this.model.name, provider: this.provider, intensity: this.intensity, professional: this.professional, temperature: this.temperature, top_p: this.top_p,
+        ...(deepSeekEffort(this.model, this.provider, this.intensity) ? { api_reasoning_effort: deepSeekEffort(this.model, this.provider, this.intensity) } : {}) }),
       output_budget: options.maxOutputTokens ?? (runtime ? DEFAULT_OUTPUT_TOKENS : null) }, currentTask());
     const taskSignal = currentTask()?.signal;
     const release = runtime?.activity();
@@ -354,6 +365,9 @@ export class LLMClient {
       ...(this.professional ? { reasoning_effort: this.intensity } : {
         temperature: this.temperature,
         top_p: this.top_p,
+        ...(deepSeekEffort(this.model, this.provider, this.intensity) ? {
+          reasoning_effort: deepSeekEffort(this.model, this.provider, this.intensity), thinking: { type: "enabled" },
+        } : {}),
       }),
       stream: this.model.supports_streaming !== false,
       ...(this.model.supports_streaming !== false ? { stream_options: { include_usage: true } } : {}),
@@ -553,7 +567,12 @@ export class LLMClient {
       model: this.model.name,
       messages: chatMessages,
       max_tokens: options.maxOutputTokens ?? 4096,
-      ...(this.professional ? { output_config: { effort: this.intensity } } : { temperature: this.temperature }),
+      ...(this.professional ? { output_config: { effort: this.intensity } } : {
+        temperature: this.temperature,
+        ...(deepSeekEffort(this.model, this.provider, this.intensity) ? {
+          output_config: { effort: deepSeekEffort(this.model, this.provider, this.intensity) }, thinking: { type: "enabled" },
+        } : {}),
+      }),
       stream: this.model.supports_streaming !== false,
     };
     if (systemMessages.length) payload.system = systemMessages.join("\n\n");

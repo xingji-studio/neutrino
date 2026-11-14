@@ -2,6 +2,7 @@ import { exec, execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { webSearch } from "./search.js";
+import { editFile, readFileRange } from "./editing.js";
 import { currentTask, linkSignals } from "./runtime.js";
 
 const MAX_OUTPUT = 20000;
@@ -76,7 +77,7 @@ const DELEGATE_TOOL_DEFINITION: ToolDefinition = {
  * follow (or stop). The sub-agent prompt says so as well; removing the tool
  * makes it true.
  */
-export function getSubAgentToolDefinitions(): ToolDefinition[] {
+export function getSubAgentToolDefinitions(options: { preciseEditing?: boolean } = {}): ToolDefinition[] {
   return [
     {
       type: "function",
@@ -120,17 +121,30 @@ export function getSubAgentToolDefinitions(): ToolDefinition[] {
       type: "function",
       function: {
         name: "read_file",
-        description: "Read the content of a text file. Returns the file content or an error.",
+        description: "Read a text file. Use start_line/end_line for numbered ranges and the current full-file SHA256.",
         parameters: {
           type: "object",
           properties: {
             path: { type: "string", description: "Path to the file to read (absolute or relative to cwd)." },
+            start_line: { type: "integer", minimum: 1, description: "First line, 1-based; a range returns the full-file SHA256." },
+            end_line: { type: "integer", minimum: 1, description: "Last line, inclusive; at most 2000 lines." },
             reason: REASON_PROPERTY,
           },
           required: ["path", "reason"],
         },
       },
     },
+    ...(options.preciseEditing ? [{
+      type: "function" as const,
+      function: {
+        name: "edit_file",
+        description: "Apply one exact replacement to an existing file. Read a range first for expected_sha256; stale or ambiguous matches are rejected without changes. Prefer small edits over rewriting a whole file.",
+        parameters: { type: "object", properties: {
+          path: { type: "string" }, expected_sha256: { type: "string" },
+          old_text: { type: "string" }, new_text: { type: "string" }, reason: REASON_PROPERTY,
+        }, required: ["path", "expected_sha256", "old_text", "new_text", "reason"] },
+      },
+    }] : []),
     {
       type: "function",
       function: {
@@ -167,8 +181,8 @@ export function getSubAgentToolDefinitions(): ToolDefinition[] {
 }
 
 /** Every tool a top-level agent can call: the base set plus delegation. */
-export function getToolDefinitions(): ToolDefinition[] {
-  return [...getSubAgentToolDefinitions(), DELEGATE_TOOL_DEFINITION];
+export function getToolDefinitions(options: { preciseEditing?: boolean } = {}): ToolDefinition[] {
+  return [...getSubAgentToolDefinitions(options), DELEGATE_TOOL_DEFINITION];
 }
 
 export async function executeTool(
@@ -196,7 +210,12 @@ export async function executeTool(
           : await runCommand(String(args.command ?? ""), base);
         break;
       case "read_file":
-        result = readFile(String(args.path ?? ""), base);
+        result = args.start_line !== undefined || args.end_line !== undefined
+          ? readFileRange(path.resolve(base, String(args.path ?? "")), args)
+          : readFile(String(args.path ?? ""), base);
+        break;
+      case "edit_file":
+        result = editFile(path.resolve(base, String(args.path ?? "")), args, signal);
         break;
       case "write_file":
         result = writeFile(String(args.path ?? ""), String(args.content ?? ""), base);

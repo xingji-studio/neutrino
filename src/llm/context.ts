@@ -74,11 +74,48 @@ export async function prepareContext<T extends ContextMessage>(options: {
   stream?: StreamOptions;
   onUsage?(usage: UsageInfo): void;
   onProgress?(): void;
+  /** Standard's soft target; the original hard reservation remains authoritative. */
+  remainingBudget?: number;
+  evidenceBrief?: string;
 }): Promise<void> {
   const { messages, tools, capacity } = options;
   const schema = estimateTokens(tools) + 32;
   const allowance = outputAllowance(capacity);
   const limit = Math.floor(capacity * 0.8) - schema - allowance;
+  if (options.remainingBudget !== undefined && Number.isFinite(options.remainingBudget)) {
+    const target = Math.max(0, Math.floor((options.remainingBudget - 3 * allowance) / 2));
+    if (inputTokenBound({ messages, tools }) > target) {
+      // No extra model call while the task is short of budget. Keep original policy/user
+      // input and complete recent tool groups; full older records remain retrievable.
+      let lastUser = -1;
+      for (let i = 0; i < messages.length; i++) if (messages[i].role === "user") lastUser = i;
+      const head = messages.filter((m, i) => m.role === "system" || i === lastUser);
+      const body = messages.filter((m, i) => m.role !== "system" && i !== lastUser);
+      const marker = { role: "assistant", content: "Budget-aware context checkpoint. Earlier content remains in the task ledger. " +
+        "Previously denied calls remain denied; omitted evidence does not mean a check passed.\n" + (options.evidenceBrief ?? "") } as T;
+      const groups: T[][] = [];
+      for (const message of body) {
+        if (message.role === "assistant" || !groups.length) groups.push([]);
+        groups.at(-1)!.push(message);
+      }
+      let retained = groups.slice(-1).flat();
+      // Evidence index is bounded before any original request or recent message is touched.
+      if (inputTokenBound({ messages: [...head, marker, ...retained], tools }) > target) {
+        marker.content = "Budget-aware context checkpoint: retrieve earlier records with read_task_evidence. Original constraints and denials remain binding.";
+      }
+      for (let i = groups.length - 2; i >= 0; i--) {
+        const next = [...groups[i], ...retained];
+        if (inputTokenBound({ messages: [...head, marker, ...next], tools }) > target) break;
+        retained = next;
+      }
+      const packed = [...head, marker, ...retained];
+      // Never grow a context by trying to compact a tiny task, and never delete
+      // the last complete tool group merely to force another dispatch to fit.
+      if (inputTokenBound({ messages: packed, tools }) < inputTokenBound({ messages, tools })) {
+        messages.splice(0, messages.length, ...packed);
+      }
+    }
+  }
   if (Math.max(estimateTokens(messages), (options.lastPromptTokens ?? 0) - schema) <= limit) return;
   // Keep the system policy and current user input intact. Earlier history is evidence.
   let lastUser = -1;

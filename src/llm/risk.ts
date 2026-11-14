@@ -13,6 +13,7 @@
  * Everything else returns `null` and runs unsupervised.
  */
 import os from "node:os";
+import fs from "node:fs";
 import path from "node:path";
 import { currentTask } from "./runtime.js";
 
@@ -391,11 +392,18 @@ export function assessToolCall(
     return { level, tool: name, summary, reasons };
   }
 
-  if (name === "read_file" || name === "write_file" || name === "list_files") {
+  if (name === "read_file" || name === "write_file" || name === "edit_file" || name === "list_files") {
     const raw = typeof args.path === "string" && args.path.trim() ? args.path : ".";
     const reasons: string[] = [];
     if (outsideCwd(raw, workingDir)) {
       reasons.push(`accesses a path outside the working directory: ${raw}`);
+    }
+    if (name === "edit_file") {
+      try {
+        const real = fs.realpathSync(resolvePath(raw, workingDir));
+        if (outsideCwd(real, workingDir)) reasons.push("edit target resolves outside the working directory");
+        if (sensitiveMatch(real)) reasons.push("edit target resolves to credentials or repository internals");
+      } catch { /* The edit tool rejects missing files without side effects. */ }
     }
     if (name !== "list_files" && sensitiveMatch(raw)) {
       reasons.push("touches credentials or repository internals");

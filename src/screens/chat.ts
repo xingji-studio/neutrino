@@ -40,6 +40,7 @@ import { ellipsize, displayWidth } from "../width.js";
 import { sanitizeText } from "../sanitize.js";
 import { TaskRuntime, TaskControlError, currentTask, linkSignals, taskLimits, taskBudgetScope, resumeTaskSnapshot, type AgentStatus, type TaskSnapshot } from "../llm/runtime.js";
 import { prepareContext, outputAllowance, finalTaskReport } from "../llm/context.js";
+import { StandardTask, STANDARD_FINISH, STANDARD_FINISH_DEFINITION, STANDARD_EVIDENCE_DEFINITION, type StandardFinishResult } from "../llm/standard.js";
 import { FINISH_STEP_TOOL, FINISH_STEP_DEFINITION, finishPlanStep, preparePlan, settlePlan } from "../llm/plan.js";
 import { LLMClient, describeError } from "../llm/client.js";
 import { formatDelay } from "../llm/retry.js";
@@ -97,6 +98,8 @@ interface ApiMessage {
 }
 
 interface ToolMsg {
+  evidenceId?: string;
+  executionStatus?: string;
   role: "tool";
   name: string;
   arguments: Record<string, unknown>;
@@ -207,6 +210,7 @@ export class ChatScreen extends Screen implements LiveAgent {
   private taskRuntime: TaskRuntime | null = null;
   private lastTask: TaskSnapshot | undefined;
   private taskOutcome: AgentStatus = "completed";
+  private standardTask: StandardTask | null = null;
   private turnToken = 0;
   private agentMode: AgentMode = "standard";
   private activeAgentMode: AgentMode = "standard";
@@ -955,12 +959,14 @@ export class ChatScreen extends Screen implements LiveAgent {
   }
 
   private async runTaskTurn(token: number, turnMessages: Msg[], approvalContext: ApprovalContext): Promise<void> {
+    this.standardTask = null;
     // Shrink the history before building the request when it has outgrown the
     // configured budget.
     await this.autoCompress(token);
     if (token !== this.turnToken) return;
 
     if (this.activeAgentMode === FAST_MODE) return this.runFastTurn(token, turnMessages, approvalContext);
+    if (this.activeAgentMode === "standard" && currentTask()) this.standardTask = new StandardTask(currentTask()!.runtime);
 
     if (this.activeAgentMode !== "standard") this.plan = null;
     const plan = this.activeAgentMode === "standard" ? await this.makePlan(token) : null;
@@ -989,9 +995,10 @@ export class ChatScreen extends Screen implements LiveAgent {
           this.buildApiMessages(this.turnView(turnMessages), directive),
           token,
           approvalContext,
+          i === plan.steps.length - 1,
         );
         if (token !== this.turnToken) return;
-        this.setStep(i, currentTask()?.signal.aborted ? "cancelled" : finished ? "done" : "failed");
+        this.setStep(i, currentTask()?.signal.aborted ? "cancelled" : finished ? "done" : this.taskOutcome === "partial" ? "blocked" : "failed");
         // A step that failed stops the plan: the remaining steps assumed this one
         // succeeded, and the user has to see the failure before anything runs on
         // top of it.
@@ -1183,9 +1190,16 @@ export class ChatScreen extends Screen implements LiveAgent {
    * cut short (paused, superseded, or failed). The caller owns the turn's end,
    * because a planned turn runs this once per step.
    */
-  private async agentLoop(apiMessages: ApiMessage[], token: number, approvalContext: ApprovalContext): Promise<boolean> {
+  private async agentLoop(apiMessages: ApiMessage[], token: number, approvalContext: ApprovalContext, finalStandardStep = true): Promise<boolean> {
+    const standardContext = this.standardTask?.runtime === currentTask()?.runtime ? this.standardTask : null;
+    const standard = finalStandardStep ? standardContext : null;
+    const preciseEditing = this.activeAgentMode === "standard";
     const tools = this.activeAgentMode === "ptc"
-      ? [...getToolDefinitions(), (await import("../llm/codemode.js")).getCodeToolDefinition()] : getToolDefinitions();
+      ? [...getToolDefinitions({ preciseEditing }), (await import("../llm/codemode.js")).getCodeToolDefinition()] : getToolDefinitions({ preciseEditing });
+    if (standard) {
+      tools.push(STANDARD_FINISH_DEFINITION, STANDARD_EVIDENCE_DEFINITION);
+      apiMessages[0] = { ...apiMessages[0], content: `${apiMessages[0].content ?? ""}\n\n${standard.instructions()}\n${standard.evidenceBrief()}` };
+    }
     let emptyReplies = 0;
     try {
       while (true) {
@@ -1198,6 +1212,7 @@ export class ChatScreen extends Screen implements LiveAgent {
           createClient: () => new LLMClient(this.model, this.modelProvider, this.intensity),
           stream: { signal: currentTask()!.runtime.signal, cancelled: () => token !== this.turnToken || this.paused },
           onUsage: usage => { this.tokens.prompt += usage.prompt; this.tokens.completion += usage.completion; },
+          ...(standardContext ? { remainingBudget: currentTask()!.runtime.remainingRequestTokens(), evidenceBrief: standardContext.evidenceBrief() } : {}),
         });
         const client = new LLMClient(this.model, this.modelProvider, this.intensity);
         let content = "";
@@ -1269,6 +1284,14 @@ export class ChatScreen extends Screen implements LiveAgent {
           this.messages.push({ role: "assistant", content: report });
           return false;
         }
+        if (client.outcome?.error?.code === "output_limit" && standardContext) {
+          const recovery = standardContext.recoverOutputLimit();
+          if (recovery) {
+            this.streamingContent = null;
+            apiMessages.push({ role: "user", content: recovery });
+            continue;
+          }
+        }
         if (client.outcome?.status === "failed") {
           const recorded = currentTask()?.runtime.evidence.length ? currentTask()!.runtime.partialReport() : "";
           const message = client.outcome.error?.message ?? "Model request failed";
@@ -1280,6 +1303,21 @@ export class ChatScreen extends Screen implements LiveAgent {
         }
         const toolCalls = client.toolCalls;
         if (toolCalls.length === 0) {
+          if (standard) {
+            const feedback = standard.naturalCompletion();
+            if (feedback) {
+              this.streamingContent = null;
+              if (standard.naturalCompletionExhausted) {
+                this.taskOutcome = "partial";
+                this.messages.push({ role: "assistant", content: `Task incomplete. ${feedback}` });
+                return false;
+              }
+              if (content.trim()) apiMessages.push({ role: "assistant", content });
+              apiMessages.push({ role: "user", content: feedback });
+              continue;
+            }
+          }
+
           if (!content.trim() && emptyReplies++ === 0) continue;
           if (!content.trim()) {
             this.taskOutcome = "failed";
@@ -1344,8 +1382,26 @@ export class ChatScreen extends Screen implements LiveAgent {
             continue;
           }
 
+          let standardFinish: StandardFinishResult | undefined;
           let result: string;
-          try { result = await this.runTool(tc.name, args, toolMsg, token, apiMessages, approvalContext); }
+          try {
+            if (standard && [STANDARD_FINISH, "read_task_evidence"].includes(tc.name)) {
+              result = await currentTask()!.runtime.tool(tc.name, args, async () => {
+                if (tc.name === "read_task_evidence") return standard.readEvidence(args);
+                if (toolCalls.length !== 1) {
+                  standardFinish = standard.invalidCompletion("finish_standard_task must be called alone after other tools settle");
+                  return JSON.stringify(standardFinish);
+                }
+                standardFinish = await standard.finish(args, {
+                  createClient: () => new LLMClient(this.model, this.modelProvider, this.intensity),
+                  capacity: modelContextWindow(this.modelProvider, this.model),
+                  cancelled: () => token !== this.turnToken || this.paused,
+                  onUsage: usage => { this.tokens.prompt += usage.prompt; this.tokens.completion += usage.completion; },
+                });
+                return JSON.stringify(standardFinish);
+              });
+            } else result = await this.runTool(tc.name, args, toolMsg, token, apiMessages, approvalContext);
+          }
           catch (error) {
             toolMsg.result = `[Not executed: ${describeError(error)}]`;
             this.save();
@@ -1353,10 +1409,26 @@ export class ChatScreen extends Screen implements LiveAgent {
           }
           // A clear starts a different transcript while an old tool may finish.
           if (!this.messages.includes(toolMsg)) return false;
+          if (standardContext?.required) {
+            const evidence = currentTask()?.runtime.evidence.at(-1);
+            if (evidence) { toolMsg.evidenceId = evidence.id; toolMsg.executionStatus = evidence.status; }
+          }
           toolMsg.result = result;
           this.save();
           if (token !== this.turnToken || this.paused) return false;
-          apiMessages.push({ role: "tool", tool_call_id: tc.id, content: result });
+          apiMessages.push({ role: "tool", tool_call_id: tc.id, content: toolMsg.evidenceId
+            ? `${result}\n[Task evidence: ${toolMsg.evidenceId}; status=${toolMsg.executionStatus}]` : result });
+          if (standardFinish?.settled) {
+            if (standardFinish.completed && !standard!.acceptedArtifactsCurrent()) {
+              this.taskOutcome = "partial";
+              this.messages.push({ role: "assistant", content: "Task incomplete: artifact versions changed after completion review." });
+              return false;
+            }
+            this.taskOutcome = standardFinish.completed ? "completed" : "partial";
+            this.messages.push({ role: "assistant", content: standardFinish.report });
+            this.streamingContent = null;
+            return standardFinish.completed;
+          }
           this.publishLive();
           this.app.render();
         }
@@ -1640,6 +1712,8 @@ export class ChatScreen extends Screen implements LiveAgent {
     const execute = () => this.dispatchTool(name, args, toolMsg, token, apiMessages, approvalContext, executionSignal);
     if (!runtime) return execute();
     const result = await runtime.tool(name, args, execute);
+    const evidence = runtime.evidence.at(-1);
+    if (evidence && this.standardTask?.runtime === runtime && this.standardTask.required) { toolMsg.evidenceId = evidence.id; toolMsg.executionStatus = evidence.status; }
     return result;
   }
 

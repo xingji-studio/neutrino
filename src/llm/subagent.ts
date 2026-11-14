@@ -232,7 +232,7 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRun
       runId, status,
       report: status === "completed" ? report : composePartial({ text: report, evidence, denied, calls }),
       evidenceIds: records.map(entry => entry.id),
-      artifacts: records.filter(entry => entry.name === "write_file" && entry.status === "completed")
+      artifacts: records.filter(entry => ["write_file", "edit_file"].includes(entry.name) && entry.status === "completed")
         .map(entry => String(entry.arguments.path ?? "")),
       blockers, ...(error ? { error } : {}),
       aborted: status === "cancelled", exhausted, rounds, calls,
