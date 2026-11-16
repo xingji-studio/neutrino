@@ -344,11 +344,11 @@ export class TaskRuntime {
     const readTool = READ_TOOLS.has(name) || (plugin && !plugin.native && plugin.effects.every(e => ["filesystem.read","network"].includes(e)));
     if (scope.policy.readOnly && !readTool) throw new TaskControlError("read_only", "This task is read-only; commands and edits are unavailable, including through delegated agents");
     if (this.workspaceOnly) {
-      const violation = workspaceViolation(name, args, this.cwd);
+      const violation = workspaceViolation(name === "run_task_check" ? "run_command" : name, args, this.cwd);
       if (violation) throw new TaskControlError("workspace_scope", violation);
     }
     const groups = scope.policy.writePathGroups;
-    if (groups.length && (name === "run_command" || name === "execute_ts")) {
+    if (groups.length && (name === "run_command" || name === "run_task_check" || name === "execute_ts")) {
       throw new TaskControlError("write_scope", "Arbitrary command execution is unavailable under a restricted write-path policy");
     }
     if (groups.length && (name === "write_file" || name === "edit_file")) {
@@ -363,7 +363,7 @@ export class TaskRuntime {
       return (!plugin?.roles || plugin.roles.includes(pluginRole)) &&
         (!plugin?.native || (!scope.policy.readOnly && !scope.policy.writePathGroups.length && !this.workspaceOnly)) &&
         (!scope.policy.readOnly || READ_TOOLS.has(tool.function.name) || (plugin && plugin.effects.every(e => ["filesystem.read","network"].includes(e)))) &&
-        (!scope.policy.writePathGroups.length || !["run_command", "execute_ts"].includes(tool.function.name));
+        (!scope.policy.writePathGroups.length || !["run_command", "run_task_check", "execute_ts"].includes(tool.function.name));
     });
   }
   async tool(name: string, args: Record<string, unknown>, execute: () => Promise<string>): Promise<string> {

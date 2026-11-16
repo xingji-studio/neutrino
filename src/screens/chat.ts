@@ -41,12 +41,15 @@ import { sanitizeText } from "../sanitize.js";
 import { TaskRuntime, TaskControlError, currentTask, linkSignals, taskLimits, taskBudgetScope, resumeTaskSnapshot, type AgentStatus, type TaskSnapshot } from "../llm/runtime.js";
 import { prepareContext, outputAllowance, finalTaskReport } from "../llm/context.js";
 import { StandardTask, STANDARD_FINISH, STANDARD_FINISH_DEFINITION, STANDARD_EVIDENCE_DEFINITION, type StandardFinishResult } from "../llm/standard.js";
+import { STANDARD_CHECK_DEFINITIONS, STANDARD_CHECK_TOOLS } from "../llm/standard-checks.js";
 import { FINISH_STEP_TOOL, FINISH_STEP_DEFINITION, finishPlanStep, preparePlan, settlePlan } from "../llm/plan.js";
 import { LLMClient, describeError } from "../llm/client.js";
 import { formatDelay } from "../llm/retry.js";
 import {
   advancePlan,
   buildPlannerInput,
+  needsStandardPlan,
+  STANDARD_PLANNING_CONTRACT,
   lastRequestText,
   needsPlan,
   parsePlan,
@@ -852,14 +855,14 @@ export class ChatScreen extends Screen implements LiveAgent {
     // A request that is one action is not planned: the planner round-trip would
     // cost more than the steps are worth, and the worker states its steps in its
     // own answer. The card then shows the token counts, not a one-line plan.
-    if (!needsPlan(request)) return null;
+    if (!needsStandardPlan(request)) return null;
     this.planning = true;
     this.app.render();
     this.publishLive();
     try {
       const client = new LLMClient(this.model, this.modelProvider, this.intensity);
       const answer = await client.complete(
-        loadPlannerPrompt(),
+        `${loadPlannerPrompt()}\n\n${STANDARD_PLANNING_CONTRACT}`,
         buildPlannerInput({ request, cwd: this.liveDir, transcript: planTranscript(this.messages) }),
         {
           ...(currentTask()?.runtime.diagnostics ? { diagnostic: { role: "planning" as const } } : {}),
@@ -1196,9 +1199,10 @@ export class ChatScreen extends Screen implements LiveAgent {
     const preciseEditing = this.activeAgentMode === "standard";
     const tools = this.activeAgentMode === "ptc"
       ? [...getToolDefinitions({ preciseEditing }), (await import("../llm/codemode.js")).getCodeToolDefinition()] : getToolDefinitions({ preciseEditing });
-    if (standard) {
-      tools.push(STANDARD_FINISH_DEFINITION, STANDARD_EVIDENCE_DEFINITION);
-      apiMessages[0] = { ...apiMessages[0], content: `${apiMessages[0].content ?? ""}\n\n${standard.instructions()}\n${standard.evidenceBrief()}` };
+    if (standardContext) {
+      tools.push(STANDARD_EVIDENCE_DEFINITION, ...STANDARD_CHECK_DEFINITIONS);
+      if (standard) tools.push(STANDARD_FINISH_DEFINITION);
+      apiMessages[0] = { ...apiMessages[0], content: `${apiMessages[0].content ?? ""}\n\n${standardContext.instructions()}\n${standardContext.evidenceBrief()}` };
     }
     let emptyReplies = 0;
     try {
@@ -1212,7 +1216,7 @@ export class ChatScreen extends Screen implements LiveAgent {
           createClient: () => new LLMClient(this.model, this.modelProvider, this.intensity),
           stream: { signal: currentTask()!.runtime.signal, cancelled: () => token !== this.turnToken || this.paused },
           onUsage: usage => { this.tokens.prompt += usage.prompt; this.tokens.completion += usage.completion; },
-          ...(standardContext ? { remainingBudget: currentTask()!.runtime.remainingRequestTokens(), evidenceBrief: standardContext.evidenceBrief() } : {}),
+          ...(standardContext ? { workingSet: true, onCheckpoint: stats => standardContext.runtime.note("standard_context_checkpoint", stats), remainingBudget: currentTask()!.runtime.remainingRequestTokens(), evidenceBrief: standardContext.evidenceBrief() } : {}),
         });
         const client = new LLMClient(this.model, this.modelProvider, this.intensity);
         let content = "";
@@ -1358,7 +1362,7 @@ export class ChatScreen extends Screen implements LiveAgent {
 
           // Risky calls stop here until a human (or the reviewer agent) clears
           // them. The loop awaits a promise that the UI resolves.
-          const decision = await this.requestApproval(tc.name, args, {
+          const decision = await this.requestApproval(tc.name, standardContext?.approvalArguments(tc.name, args) ?? args, {
             ...approvalContext,
             context: captureApprovalContext(apiMessages).context,
           });
@@ -1385,9 +1389,12 @@ export class ChatScreen extends Screen implements LiveAgent {
           let standardFinish: StandardFinishResult | undefined;
           let result: string;
           try {
-            if (standard && [STANDARD_FINISH, "read_task_evidence"].includes(tc.name)) {
+            if (standardContext && ([STANDARD_FINISH, "read_task_evidence"].includes(tc.name) || STANDARD_CHECK_TOOLS.has(tc.name))) {
               result = await currentTask()!.runtime.tool(tc.name, args, async () => {
-                if (tc.name === "read_task_evidence") return standard.readEvidence(args);
+                if (tc.name === "read_task_evidence") return standardContext.readEvidence(args);
+                if (STANDARD_CHECK_TOOLS.has(tc.name)) return standardContext.controlTool(tc.name, args,
+                  (command, cwd) => executeTool("run_command", { command, reason: args.reason }, cwd));
+                if (!standard) return "[Error: whole-task completion is only available at the final step]";
                 if (toolCalls.length !== 1) {
                   standardFinish = standard.invalidCompletion("finish_standard_task must be called alone after other tools settle");
                   return JSON.stringify(standardFinish);
@@ -1397,6 +1404,17 @@ export class ChatScreen extends Screen implements LiveAgent {
                   capacity: modelContextWindow(this.modelProvider, this.model),
                   cancelled: () => token !== this.turnToken || this.paused,
                   onUsage: usage => { this.tokens.prompt += usage.prompt; this.tokens.completion += usage.completion; },
+                  inspect: async readArgs => {
+                    const runtime = currentTask()!.runtime;
+                    const decision = await this.requestApproval("read_file", readArgs, { ...approvalContext,
+                      context: captureApprovalContext(apiMessages).context });
+                    if (!decision.approved) {
+                      const denied = `[Not executed: independent read approval denied (${decision.source}): ${decision.reason}]`;
+                      runtime.recordTool("read_file", readArgs, denied, "denied");
+                      return denied;
+                    }
+                    return runtime.tool("read_file", readArgs, () => executeTool("read_file", readArgs, this.liveDir));
+                  },
                 });
                 return JSON.stringify(standardFinish);
               });

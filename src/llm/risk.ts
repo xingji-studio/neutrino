@@ -392,6 +392,11 @@ export function assessToolCall(
     return { level, tool: name, summary, reasons };
   }
 
+  if (name === "run_task_check") {
+    const assessment = assessToolCall("run_command", args, workingDir);
+    return assessment ? { ...assessment, tool: name } : null;
+  }
+
   if (name === "read_file" || name === "write_file" || name === "edit_file" || name === "list_files") {
     const raw = typeof args.path === "string" && args.path.trim() ? args.path : ".";
     const reasons: string[] = [];

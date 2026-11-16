@@ -105,6 +105,19 @@ export function needsPlan(request: string): boolean {
   return displayWidth(text) > PLAN_LENGTH_LIMIT;
 }
 
+/** Standard keeps the explicit plan switch/request. One read-only lookup with
+ * extra constraints does not need a separate planning-model invocation. */
+export function needsStandardPlan(request: string): boolean {
+  const text = request.trim();
+  if (PLAN_REQUEST.test(text) || LIST_LINE.test(text) || SEQUENCING.test(text)) return needsPlan(text);
+  const readOnly = /^(?:please\s+)?(?:read|show|display|explain|inspect)\b|^(?:请)?(?:读取|查看|解释)/i.test(text);
+  const mutating = /\b(?:write|create|modify|implement|build|delete|install|fix|rename|update)\b|写入|创建|实现|构建|删除|安装|修复|重命名/i.test(text.replace(/\b(?:do not|don't|never)\s+(?:edit|modify|write|delete)\b/ig, ""));
+  return readOnly && !mutating ? false : needsPlan(text);
+}
+
+/** The planner decomposes work; it does not pre-solve the implementation. */
+export const STANDARD_PLANNING_CONTRACT = "Return a compact executable outline, not the implementation or a proof of its algorithm. Use 2-5 steps when possible, one deliverable per step. Preserve every original constraint and input variation as acceptance references; leave concrete coding and test construction to the executor. Do not regenerate a second plan after an output-limit fallback. Output the requested plan JSON only.";
+
 // ------------------------------------------------------------------ parsing
 
 function cleanText(value: unknown, max: number): string {

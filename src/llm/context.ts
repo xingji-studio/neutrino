@@ -77,45 +77,70 @@ export async function prepareContext<T extends ContextMessage>(options: {
   /** Standard's soft target; the original hard reservation remains authoritative. */
   remainingBudget?: number;
   evidenceBrief?: string;
+  /** Standard-only early working set; hard request reservations are unchanged. */
+  workingSet?: boolean;
+  onCheckpoint?(stats: { before_bytes: number; after_bytes: number; deduplicated_bodies: number }): void;
 }): Promise<void> {
   const { messages, tools, capacity } = options;
   const schema = estimateTokens(tools) + 32;
   const allowance = outputAllowance(capacity);
   const limit = Math.floor(capacity * 0.8) - schema - allowance;
-  if (options.remainingBudget !== undefined && Number.isFinite(options.remainingBudget)) {
-    const target = Math.max(0, Math.floor((options.remainingBudget - 3 * allowance) / 2));
-    if (inputTokenBound({ messages, tools }) > target) {
-      // No extra model call while the task is short of budget. Keep original policy/user
-      // input and complete recent tool groups; full older records remain retrievable.
-      let lastUser = -1;
-      for (let i = 0; i < messages.length; i++) if (messages[i].role === "user") lastUser = i;
-      const head = messages.filter((m, i) => m.role === "system" || i === lastUser);
-      const body = messages.filter((m, i) => m.role !== "system" && i !== lastUser);
-      const marker = { role: "assistant", content: "Budget-aware context checkpoint. Earlier content remains in the task ledger. " +
-        "Previously denied calls remain denied; omitted evidence does not mean a check passed.\n" + (options.evidenceBrief ?? "") } as T;
-      const groups: T[][] = [];
-      for (const message of body) {
-        if (message.role === "assistant" || !groups.length) groups.push([]);
-        groups.at(-1)!.push(message);
-      }
-      let retained = groups.slice(-1).flat();
-      // Evidence index is bounded before any original request or recent message is touched.
-      if (inputTokenBound({ messages: [...head, marker, ...retained], tools }) > target) {
-        marker.content = "Budget-aware context checkpoint: retrieve earlier records with read_task_evidence. Original constraints and denials remain binding.";
-      }
-      for (let i = groups.length - 2; i >= 0; i--) {
-        const next = [...groups[i], ...retained];
-        if (inputTokenBound({ messages: [...head, marker, ...next], tools }) > target) break;
-        retained = next;
-      }
-      const packed = [...head, marker, ...retained];
-      // Never grow a context by trying to compact a tiny task, and never delete
-      // the last complete tool group merely to force another dispatch to fit.
-      if (inputTokenBound({ messages: packed, tools }) < inputTokenBound({ messages, tools })) {
-        messages.splice(0, messages.length, ...packed);
-      }
+  const beforeBytes = inputTokenBound({ messages, tools });
+  let deduplicated = 0;
+  if (options.workingSet) {
+    // Only replace identical successful OLD tool bodies. Keep their own IDs and
+    // protocol parents; text equality never merges executions or proof identity.
+    const seen = new Map<string, string>();
+    let lastAssistant = -1;
+    for (let i = 0; i < messages.length; i++) if (messages[i].role === "assistant") lastAssistant = i;
+    for (let i = 0; i < lastAssistant; i++) {
+      const m = messages[i];
+      if (m.role !== "tool" || !m.content) continue;
+      const tag = /\n\[Task evidence: ([^;]+); status=completed\]$/.exec(m.content);
+      if (!tag) continue;
+      const body = m.content.slice(0, tag.index);
+      if (body.length < 1024 || /^\[Error:|^Error:|\[exit code: (?!0\])/m.test(body)) continue;
+      const prior = seen.get(body);
+      if (prior) {
+        messages[i] = { ...m, content: `[Identical result text is retained in task evidence ${prior}; this execution keeps its own ID and dependency versions. Retrieve details with read_task_evidence.]${m.content.slice(tag.index)}` };
+        deduplicated++;
+      } else seen.set(body, tag[1]);
     }
   }
+  const budgetTarget = options.remainingBudget !== undefined && Number.isFinite(options.remainingBudget)
+    ? Math.max(0, Math.floor((options.remainingBudget - 3 * allowance) / 2)) : Infinity;
+  // Soft estimate only. The provider's observed usage and the original byte-based
+  // hard preflight still determine whether the actual request can be dispatched.
+  const workingTarget = options.workingSet ? 3 * Math.max(2 * allowance, Math.min(48_000, Math.floor(capacity * 0.18))) : Infinity;
+  const target = Math.min(budgetTarget, workingTarget);
+  if (inputTokenBound({ messages, tools }) > target) {
+    let lastUser = -1;
+    for (let i = 0; i < messages.length; i++) if (messages[i].role === "user") lastUser = i;
+    const head = messages.filter((m, i) => m.role === "system" || i === lastUser);
+    const body = messages.filter((m, i) => m.role !== "system" && i !== lastUser);
+    const marker = { role: "assistant", content: "Working context checkpoint. Full earlier results remain in the task ledger. Original constraints, failed checks and denials remain binding; omitted evidence is never a success.\n" + (options.evidenceBrief ?? "") } as T;
+    const groups: T[][] = [];
+    for (const message of body) {
+      if (message.role === "assistant" || !groups.length) groups.push([]);
+      groups.at(-1)!.push(message);
+    }
+    const keep = new Set<number>();
+    for (let i = Math.max(0, groups.length - (options.workingSet ? 2 : 1)); i < groups.length; i++) keep.add(i);
+    // Preserve the latest failure groups as complete assistant/tool protocol units.
+    const failed = groups.flatMap((g, i) => g.some(m => m.role === "tool" && /status=(?:failed|denied|cancelled)|^\[Error:|^Error:|^\[Not executed:|\[exit code: (?!0\])/m.test(m.content ?? "")) ? [i] : []);
+    for (const i of failed.slice(-3)) keep.add(i);
+    const retained = () => groups.filter((_, i) => keep.has(i)).flat();
+    if (inputTokenBound({ messages: [...head, marker, ...retained()], tools }) > target) marker.content = "Working context checkpoint: retrieve full prior records with read_task_evidence. Original constraints and every failed/denied operation remain binding.";
+    for (let i = groups.length - 1; i >= 0; i--) {
+      if (keep.has(i)) continue;
+      keep.add(i);
+      if (inputTokenBound({ messages: [...head, marker, ...retained()], tools }) > target) { keep.delete(i); break; }
+    }
+    const packed = [...head, marker, ...retained()];
+    if (inputTokenBound({ messages: packed, tools }) < inputTokenBound({ messages, tools })) messages.splice(0, messages.length, ...packed);
+  }
+  const afterBytes = inputTokenBound({ messages, tools });
+  if (afterBytes < beforeBytes) options.onCheckpoint?.({ before_bytes: beforeBytes, after_bytes: afterBytes, deduplicated_bodies: deduplicated });
   if (Math.max(estimateTokens(messages), (options.lastPromptTokens ?? 0) - schema) <= limit) return;
   // Keep the system policy and current user input intact. Earlier history is evidence.
   let lastUser = -1;

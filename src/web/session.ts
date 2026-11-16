@@ -57,6 +57,7 @@ import {
 import { TaskRuntime, TaskControlError, currentTask, linkSignals, taskLimits, taskBudgetScope, resumeTaskSnapshot, type AgentStatus, type TaskSnapshot } from "../llm/runtime.js";
 import { prepareContext, outputAllowance, finalTaskReport } from "../llm/context.js";
 import { StandardTask, STANDARD_FINISH, STANDARD_FINISH_DEFINITION, STANDARD_EVIDENCE_DEFINITION, type StandardFinishResult } from "../llm/standard.js";
+import { STANDARD_CHECK_DEFINITIONS, STANDARD_CHECK_TOOLS } from "../llm/standard-checks.js";
 import { FINISH_STEP_TOOL, FINISH_STEP_DEFINITION, finishPlanStep, preparePlan, settlePlan } from "../llm/plan.js";
 import { LLMClient, describeError } from "../llm/client.js";
 import { defaultProPreset, loadProModels, loadProPrompt, proMaxRecursionDepth, requireProPreset, type ProRole } from "../pro/config.js";
@@ -66,6 +67,8 @@ import type { RetryNotice } from "../llm/retry.js";
 import {
   advancePlan,
   buildPlannerInput,
+  needsStandardPlan,
+  STANDARD_PLANNING_CONTRACT,
   lastRequestText,
   needsPlan,
   parsePlan,
@@ -900,13 +903,13 @@ export class WebSession implements LiveAgent {
     const request = lastRequestText(this.messages);
     if (!request.trim()) return null;
     // One action is not a plan: run the turn in one pass, as the terminal does.
-    if (!needsPlan(request)) return null;
+    if (!needsStandardPlan(request)) return null;
     this.planning = true;
     this.publishLive();
     try {
       const client = new LLMClient(this.model, this.provider, this.intensity);
       const answer = await client.complete(
-        loadPlannerPrompt(),
+        `${loadPlannerPrompt()}\n\n${STANDARD_PLANNING_CONTRACT}`,
         buildPlannerInput({ request, cwd: this.dir, transcript: planTranscript(this.messages) }),
         {
           ...(currentTask()?.runtime.diagnostics ? { diagnostic: { role: "planning" as const } } : {}),
@@ -982,9 +985,10 @@ export class WebSession implements LiveAgent {
       ...(this.activeAgentMode === "ptc" ? [(await import("../llm/codemode.js")).getCodeToolDefinition()] : []),
     ];
     const team = this.proTeam;
-    if (standard) {
-      tools.push(STANDARD_FINISH_DEFINITION, STANDARD_EVIDENCE_DEFINITION);
-      apiMessages[0] = { ...apiMessages[0], content: `${apiMessages[0].content ?? ""}\n\n${standard.instructions()}\n${standard.evidenceBrief()}` };
+    if (standardContext) {
+      tools.push(STANDARD_EVIDENCE_DEFINITION, ...STANDARD_CHECK_DEFINITIONS);
+      if (standard) tools.push(STANDARD_FINISH_DEFINITION);
+      apiMessages[0] = { ...apiMessages[0], content: `${apiMessages[0].content ?? ""}\n\n${standardContext.instructions()}\n${standardContext.evidenceBrief()}` };
     }
     let emptyReplies = 0;
     try {
@@ -998,7 +1002,7 @@ export class WebSession implements LiveAgent {
           createClient: () => team?.client("main_model") ?? new LLMClient(this.model, this.provider, this.intensity),
           stream: { signal: currentTask()!.runtime.signal, cancelled: () => token !== this.turnToken || this.paused },
           onUsage: usage => { this.tokens.prompt += usage.prompt; this.tokens.completion += usage.completion; },
-          ...(standardContext ? { remainingBudget: currentTask()!.runtime.remainingRequestTokens(), evidenceBrief: standardContext.evidenceBrief() } : {}),
+          ...(standardContext ? { workingSet: true, onCheckpoint: stats => standardContext.runtime.note("standard_context_checkpoint", stats), remainingBudget: currentTask()!.runtime.remainingRequestTokens(), evidenceBrief: standardContext.evidenceBrief() } : {}),
         });
         const client = team ? team.client("main_model") : new LLMClient(this.model, this.provider, this.intensity);
         let text = "";
@@ -1126,7 +1130,7 @@ export class WebSession implements LiveAgent {
           this.save();
           this.publishLive();
 
-          const decision = await this.requestApproval(call.name, args, {
+          const decision = await this.requestApproval(call.name, standardContext?.approvalArguments(call.name, args) ?? args, {
             ...approvalContext,
             context: captureApprovalContext(apiMessages).context,
           });
@@ -1151,9 +1155,12 @@ export class WebSession implements LiveAgent {
           let standardFinish: StandardFinishResult | undefined;
           let result: string;
           try {
-            if (standard && [STANDARD_FINISH, "read_task_evidence"].includes(call.name)) {
+            if (standardContext && ([STANDARD_FINISH, "read_task_evidence"].includes(call.name) || STANDARD_CHECK_TOOLS.has(call.name))) {
               result = await currentTask()!.runtime.tool(call.name, args, async () => {
-                if (call.name === "read_task_evidence") return standard.readEvidence(args);
+                if (call.name === "read_task_evidence") return standardContext.readEvidence(args);
+                if (STANDARD_CHECK_TOOLS.has(call.name)) return standardContext.controlTool(call.name, args,
+                  (command, cwd) => executeTool("run_command", { command, reason: args.reason }, cwd));
+                if (!standard) return "[Error: whole-task completion is only available at the final step]";
                 if (toolCalls.length !== 1) {
                   standardFinish = standard.invalidCompletion("finish_standard_task must be called alone after other tools settle");
                   return JSON.stringify(standardFinish);
@@ -1163,6 +1170,17 @@ export class WebSession implements LiveAgent {
                   capacity: modelContextWindow(this.provider, this.model),
                   cancelled: () => token !== this.turnToken || this.paused,
                   onUsage: usage => { this.tokens.prompt += usage.prompt; this.tokens.completion += usage.completion; },
+                  inspect: async readArgs => {
+                    const runtime = currentTask()!.runtime;
+                    const decision = await this.requestApproval("read_file", readArgs, { ...approvalContext,
+                      context: captureApprovalContext(apiMessages).context });
+                    if (!decision.approved) {
+                      const denied = `[Not executed: independent read approval denied (${decision.source}): ${decision.reason}]`;
+                      runtime.recordTool("read_file", readArgs, denied, "denied");
+                      return denied;
+                    }
+                    return runtime.tool("read_file", readArgs, () => executeTool("read_file", readArgs, this.dir));
+                  },
                 });
                 return JSON.stringify(standardFinish);
               });
