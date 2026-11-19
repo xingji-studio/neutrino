@@ -133,6 +133,8 @@ class RemoteTerminal implements LiveAgent {
   liveSend(_text: string): void {}
 
   update(snapshot: LiveSnapshot): void {
+    if (snapshot.epoch && snapshot.epoch === this.current.epoch && snapshot.revision !== undefined
+        && this.current.revision !== undefined && snapshot.revision < this.current.revision) return;
     this.current = snapshot;
     hub.notify(this.key);
   }

@@ -300,6 +300,8 @@ const ZH = {
   // -- live status --------------------------------------------------------
   "paused": "已暂停",
   "Stopping tasks…": "正在停止任务…",
+  "Pause failed: operations still running": "暂停失败：仍有操作未结束",
+  "Retry stopping": "重试停止",
   "Blocked": "受阻",
   "Cancelled": "已取消",
   "Skipped": "已跳过",

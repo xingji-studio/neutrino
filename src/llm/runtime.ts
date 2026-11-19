@@ -94,6 +94,7 @@ export interface TaskSnapshot {
   pluginPrompt?: { role:string; sections:unknown };
   rootRunId: string;
   state: "running" | "cancelling" | AgentStatus;
+  cleanupError?: string;
   standard?: StandardSnapshot;
   counts: { agentRuns: number; modelRequests: number; toolCalls: number; tokens: number };
   limits: TaskLimits;
@@ -106,7 +107,8 @@ export interface TaskSnapshot {
 /** A saved task has no live worker after restart. Never replay its tool ledger. */
 export function resumeTaskSnapshot(snapshot: TaskSnapshot | undefined): TaskSnapshot | undefined {
   if (!snapshot || typeof snapshot.rootRunId !== "string" || !snapshot.counts || !snapshot.limits) return undefined;
-  return { ...snapshot, counts: { ...snapshot.counts }, limits: { ...snapshot.limits },
+  const { cleanupError: _cleanupError, ...saved } = snapshot;
+  return { ...saved, counts: { ...snapshot.counts }, limits: { ...snapshot.limits },
     state: snapshot.state === "running" || snapshot.state === "cancelling" ? "partial" : snapshot.state };
 }
 export class TaskControlError extends Error {
@@ -178,6 +180,32 @@ export class TaskRuntime {
   private delegationStarted?: number;
   private readonly started = Date.now();
   private readonly pending = new Set<Promise<unknown>>();
+  private readonly cleanups = new Set<() => void>();
+  private readonly stateObservers = new Set<() => void>();
+  private cleanupTimer?: ReturnType<typeof setTimeout>;
+  private cleanupError?: string;
+  private readonly cleanupRetries = new Set<() => void>();
+  retryCleanup(): void { for (const retry of this.cleanupRetries) retry(); }
+  onCleanupRetry(retry: () => void): () => void {
+    this.cleanupRetries.add(retry);
+    return () => this.cleanupRetries.delete(retry);
+  }
+  observeState(observer: () => void): void { this.stateObservers.add(observer); }
+  private changed(): void {
+    for (const observer of this.stateObservers) try { observer(); } catch { /* UI failure cannot interrupt cancellation. */ }
+  }
+  reportCleanupFailure(reason: string): void {
+    if (!this.signal.aborted) this.cancel(reason);
+    clearTimeout(this.cleanupTimer);
+    this.cleanupError = reason;
+    this.state = "blocked";
+    this.changed();
+  }
+  ownCleanup(cleanup: () => void): void { this.cleanups.add(cleanup); }
+  private stopOwned(): void {
+    for (const cleanup of this.cleanups) cleanup();
+    this.cleanups.clear();
+  }
   private readonly usage = { agentRuns: 0, modelRequests: 0, toolCalls: 0, tokens: 0 };
   private readonly delegatedUsage = { modelRequests: 0, toolCalls: 0, tokens: 0 };
   private reservedTokens = 0;
@@ -276,11 +304,24 @@ export class TaskRuntime {
     if (this.isDelegated() && this.delegationController.signal.aborted) throw this.delegationController.signal.reason;
   }
   cancel(reason = "Task cancelled"): void {
-    if (this.signal.aborted) return;
+    if (this.signal.aborted) { this.stopOwned(); return; }
     this.state = "cancelling";
     this.controller.abort(reason);
     this.event("cancelling", { reason });
-    void this.drain().then(() => { this.state = "cancelled"; this.event("cancelled", { reason }); });
+    this.cleanupTimer = setTimeout(() => {
+      if (!this.pending.size) return;
+      this.cleanupError = "Pause could not finish: operations are still running. Retry stopping before continuing.";
+      this.state = "blocked";
+      this.event("cleanup_timeout", { pending: this.pending.size });
+      this.changed();
+    }, 5000);
+    this.cleanupTimer.unref();
+    this.changed();
+    void this.drain().then(() => {
+      clearTimeout(this.cleanupTimer);
+      this.cleanupError = undefined;
+      this.state = "cancelled"; this.event("cancelled", { reason }); this.changed();
+    });
   }
   async track<T>(operation: Promise<T>): Promise<T> {
     this.pending.add(operation);
@@ -294,9 +335,11 @@ export class TaskRuntime {
   }
   get settling(): boolean { return this.signal.aborted && this.pending.size > 0; }
   async drain(): Promise<void> {
+    this.stopOwned();
     while (this.pending.size) await Promise.allSettled([...this.pending]);
   }
   finish(status: AgentStatus): void {
+    clearTimeout(this.cleanupTimer);
     this.evidenceObservers.clear();
     // A caller returning normally cannot bypass the Standard acceptance checkpoint.
     if (this.standard && status === "completed" && this.standard.status !== "completed") status = "partial";
@@ -315,7 +358,7 @@ export class TaskRuntime {
     if (this.diagnostics) void this.track(this.diagnostics.close());
   }
   snapshot(): TaskSnapshot {
-    return { rootRunId: this.rootRunId, state: this.state, ...(this.standard ? { standard: structuredClone(this.standard) } : {}), counts: { ...this.usage }, limits: { ...this.limits },
+    return { rootRunId: this.rootRunId, state: this.state, ...(this.cleanupError ? { cleanupError: this.cleanupError } : {}), ...(this.standard ? { standard: structuredClone(this.standard) } : {}), counts: { ...this.usage }, limits: { ...this.limits },
       ...(this.executionMode ? { execution_mode: this.executionMode } : {}),
       ...(this.plugins?.pins.length ? { plugins: structuredClone(this.plugins.pins) } : {}),
       ...(this.plugins?.diagnostics.length ? { pluginErrors: [...this.plugins.diagnostics] } : {}),

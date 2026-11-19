@@ -137,6 +137,7 @@ function boot(pathname, {
     window: { addEventListener() {} },
     URLSearchParams,
     setInterval: () => 1,
+    clearInterval() {}, AbortSignal,
     console: { error() {} },
     EventSource: StubEventSource,
     async fetch(url, init = {}) {

@@ -192,11 +192,15 @@ try {
     const res = await fetch(`${base}/api/live/${key}/pause`, { method: "POST" });
     assert(res.status === 200, "pause responds 200");
     assert(agent.paused === true, "pause reached the agent");
+    const body = await res.json();
+    assert(body.snapshot?.paused === true && body.snapshot.revision > 0, "pause returns the current versioned snapshot");
   }
   {
     const res = await fetch(`${base}/api/live/${key}/resume`, { method: "POST" });
     assert(res.status === 200, "resume responds 200");
     assert(agent.paused === false, "resume reached the agent");
+    const body = await res.json();
+    assert(body.snapshot?.paused === false && body.snapshot.epoch, "resume returns the current snapshot and service identity");
   }
   {
     const res = await fetch(`${base}/api/live/${key}/approve`, {
@@ -378,7 +382,8 @@ try {
 
   // --- SSE ------------------------------------------------------------------
   {
-    const buffer = await readSSE(`${base}/api/live/${key}/stream`, "event: snapshot");
+    const buffer = await readSSE(`${base}/api/live/${key}/stream`, "event: heartbeat", 15000);
+    assert(buffer.includes("event: heartbeat"), "SSE sends observable heartbeats even without task changes");
     assert(buffer.includes("event: snapshot"), "SSE sends an initial snapshot");
     assert(buffer.includes('"role":"assistant"'), "SSE snapshot contains messages");
   }

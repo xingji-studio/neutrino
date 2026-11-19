@@ -1,4 +1,4 @@
-import { exec, execFile, spawn } from "node:child_process";
+import { startCommand, controlCommand, forgetCommand } from "./command.js";
 import fs from "node:fs";
 import path from "node:path";
 import { webSearch } from "./search.js";
@@ -106,11 +106,13 @@ export function getSubAgentToolDefinitions(options: { preciseEditing?: boolean }
         name: "run_command",
         description:
           "Execute a shell command in the current working directory and return its stdout/stderr. " +
-          "Prefer one command that answers many questions (findstr /S, dir /s, for /r) over one call per file.",
+          "Prefer one command that answers many questions (findstr /S, dir /s, for /r) over one call per file. " +
+          "For a long-running server use background:true, then command_status/stop_command with the returned command_id. Background commands are stopped when this task ends or pauses.",
         parameters: {
           type: "object",
           properties: {
             command: { type: "string", description: "The shell command to execute." },
+            background: { type: "boolean", description: "Return a managed handle immediately for a long-running command (default false)." },
             reason: REASON_PROPERTY,
           },
           required: ["command", "reason"],
@@ -176,6 +178,11 @@ export function getSubAgentToolDefinitions(options: { preciseEditing?: boolean }
         },
       },
     },
+    ...["command_status", "stop_command"].map(name => ({
+      type: "function" as const,
+      function: { name, description: name === "command_status" ? "Read status and bounded output of a background command owned by this task scope." : "Stop a background command owned by this task scope and await its exit.",
+        parameters: { type: "object", properties: { command_id: { type: "string" }, reason: REASON_PROPERTY }, required: ["command_id", "reason"] } },
+    })),
     ...(currentTask()?.runtime.plugins?.definitions() ?? []),
   ];
 }
@@ -197,6 +204,7 @@ export async function executeTool(
   signal = linked.signal;
   if (signal.aborted) { linked.dispose(); return "[Error: command cancelled]"; }
   const base = cwd || process.cwd();
+  let releaseSignals = true;
   let result: string;
   try {
     currentTask()?.runtime.assertTool(name, args);
@@ -205,9 +213,31 @@ export async function executeTool(
         result = await webSearch(args, signal);
         break;
       case "run_command":
-        result = signal
-          ? await runCancellableCommand(String(args.command ?? ""), base, signal)
-          : await runCommand(String(args.command ?? ""), base);
+        {
+          const scope = currentTask();
+          const background = args.background === true;
+          if (background && !scope) throw new Error("background commands require an active task");
+          const command = startCommand(String(args.command ?? ""), base, signal, { background,
+            owner: scope ? `${scope.runtime.rootRunId}:${scope.runId}` : undefined,
+            onCleanupTimeout: () => scope?.runtime.reportCleanupFailure("Pause could not finish: command termination has not been confirmed. Retry stopping before continuing.") });
+          const detach = scope?.runtime.onCleanupRetry(() => command.stop());
+          void command.done.then(() => detach?.());
+          if (background) {
+            releaseSignals = false;
+            void command.done.then(() => linked.dispose());
+            scope!.runtime.ownCleanup(() => { command.stop(); forgetCommand(command.id); });
+            void scope!.runtime.track(command.done);
+            result = JSON.stringify({ command_id: command.id, running: true });
+          } else result = await command.done;
+        }
+        break;
+      case "command_status":
+      case "stop_command":
+        {
+          const scope = currentTask();
+          result = scope ? await controlCommand(String(args.command_id ?? ""), `${scope.runtime.rootRunId}:${scope.runId}`, name === "stop_command")
+            : "[Error: command controls require an active task]";
+        }
         break;
       case "read_file":
         result = args.start_line !== undefined || args.end_line !== undefined
@@ -231,84 +261,11 @@ export async function executeTool(
   } catch (e) {
     result = `[Error: ${e instanceof Error ? e.message : String(e)}]`;
   } finally {
-    linked.dispose();
+    if (releaseSignals) linked.dispose();
   }
   return result.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
-/** Kill the whole command tree when a PTC execution or its turn is stopped. */
-function runCancellableCommand(command: string, cwd: string, signal: AbortSignal): Promise<string> {
-  if (!command.trim()) return Promise.resolve("[Error: empty command]");
-  if (signal.aborted) return Promise.resolve("[Error: command cancelled]");
-  return new Promise(resolve => {
-    const child = spawn(command, { cwd, shell: true, windowsHide: true, detached: process.platform !== "win32" });
-    let stdout = "";
-    let stderr = "";
-    let stopped = "";
-    const stop = (reason: string) => {
-      if (stopped) return;
-      stopped = reason;
-      if (child.pid) {
-        if (process.platform === "win32") {
-          execFile("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true }, () => child.kill());
-        } else {
-          try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); }
-        }
-      }
-    };
-    const abort = () => stop("command cancelled");
-    signal.addEventListener("abort", abort, { once: true });
-    if (signal.aborted) abort();
-    const timeout = setTimeout(() => stop("command timed out"), 120_000);
-    const collect = (chunk: Buffer, output: "stdout" | "stderr") => {
-      if (output === "stdout") stdout += chunk.toString(); else stderr += chunk.toString();
-      if (stdout.length + stderr.length > MAX_OUTPUT * 4) stop("command output exceeded limit");
-    };
-    child.stdout.on("data", chunk => collect(chunk, "stdout"));
-    child.stderr.on("data", chunk => collect(chunk, "stderr"));
-    child.on("error", error => { stderr += error.message; });
-    child.on("close", code => {
-      clearTimeout(timeout);
-      signal.removeEventListener("abort", abort);
-      const parts = [stdout, stderr ? `[stderr]\n${stderr}` : ""];
-      const ending = stopped ? `[Error: ${stopped}]` : code !== 0 ? `[exit code: ${code ?? "unknown"}]` : "";
-      const result = parts.filter(Boolean).join("\n").trim();
-      // Keep the execution status even when stdout fills the output allowance.
-      const body = result.slice(0, MAX_OUTPUT - (ending ? ending.length + 1 : 0));
-      resolve(ending ? `${body}${body ? "\n" : ""}${ending}` : body || "(no output)");
-    });
-  });
-}
-
-function runCommand(command: string, cwd: string): Promise<string> {
-  return new Promise((resolve) => {
-    if (!command.trim()) {
-      resolve("[Error: empty command]");
-      return;
-    }
-    exec(
-      command,
-      // A detached Windows service has no console for its tool shells to inherit.
-      { cwd, timeout: 120000, maxBuffer: MAX_OUTPUT * 4, windowsHide: true },
-      (error, stdout, stderr) => {
-        const parts: string[] = [];
-        if (stdout) parts.push(stdout);
-        if (stderr) parts.push("[stderr]\n" + stderr);
-        if (error) {
-          const code = (error as NodeJS.ErrnoException & { code?: unknown }).code;
-          if (code === "ETIMEDOUT" || (error as { killed?: boolean }).killed) {
-            parts.push("[Error: command timed out]");
-          } else {
-            const exitCode = (error as { code?: number | string }).code;
-            parts.push(`[exit code: ${exitCode ?? "unknown"}]`);
-          }
-        }
-        const output = parts.join("\n").trim();
-        resolve(output ? output.slice(0, MAX_OUTPUT) : "(no output)");
-      },
-    );
-  });
-}
 
 function readFile(p: string, cwd: string): string {
   const resolved = path.isAbsolute(p) ? p : path.join(cwd, p);

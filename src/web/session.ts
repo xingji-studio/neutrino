@@ -463,7 +463,8 @@ export class WebSession implements LiveAgent {
   }
 
   livePause(): void {
-    if (this.paused || (!this.busy && !this.queued)) return;
+    if (this.paused) { this.taskRuntime?.retryCleanup(); return; }
+    if (!this.busy && !this.queued) return;
     if (this.fastState && this.activeAgentMode === FAST_MODE && this.busy) this.fastState.phase = "cancelling";
     this.paused = true;
     this.proAbort?.abort();
@@ -609,6 +610,12 @@ export class WebSession implements LiveAgent {
   }
 
   private startTurn(): void {
+    if (this.taskRuntime?.snapshot().cleanupError) {
+      this.paused = true;
+      this.queued = null;
+      this.publishLive();
+      return;
+    }
     if (this.taskRuntime?.settling) {
       const previous = this.taskRuntime;
       this.queued = lastRequestText(this.messages);
@@ -654,6 +661,7 @@ export class WebSession implements LiveAgent {
       journalDir: path.join(sessionDir(this.mode), "tasks", path.basename(this.sessionId || "unsaved")),
     });
     this.taskRuntime = runtime;
+    runtime.observeState(() => { if (this.taskRuntime === runtime) { this.save(); this.publishLive(); } });
     this.taskOutcome = "completed";
     let failed = false;
     try {

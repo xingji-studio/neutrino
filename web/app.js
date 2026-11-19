@@ -587,6 +587,10 @@ const state = {
   workspaces: null,
   // Translation key and colour class of the sidebar status line.
   status: { key: "connecting…", kind: "" },
+  streamConnected: false,
+  streamLastEvent: 0,
+  streamWatchdog: null,
+  snapshotRequest: null,
   // { identity: 1 } of finished conversations the reader has already opened,
   // restored from the server before the first sidebar paint (see loadSeen).
   seen: {},
@@ -987,7 +991,10 @@ async function loadOverview(options = {}) {
     if (gateShown) return;
     state.overview = overview;
     if (el.modePicker) renderAgentMode();
-    setStatus(state.selection?.kind === "live" ? "live" : "online", state.selection?.kind === "live" ? "live" : "online");
+    if (state.selection?.kind === "live") {
+      setStatus(state.streamConnected ? "live" : "reconnecting…", state.streamConnected ? "live" : "offline");
+      if (!state.streamConnected) void refreshLiveSnapshot(state.selection.key);
+    } else setStatus("online", "online");
     renderWorkspaceChrome();
     renderSidebar();
     syncSelection();
@@ -1451,56 +1458,79 @@ async function selectLive(key) {
   openStream(key);
 }
 
+/** Apply both HTTP and SSE state through the same ordering/navigation guard. */
+function applyLiveSnapshot(snapshot) {
+  if (gateShown || !snapshot || state.selection?.kind !== "live" || state.selection.key !== snapshot.key) return;
+  const previous = state.snapshot;
+  if (previous?.epoch && previous.epoch === snapshot.epoch && Number.isFinite(snapshot.revision)
+      && Number.isFinite(previous.revision) && snapshot.revision < previous.revision) return;
+  state.snapshot = snapshot;
+  if (snapshot.sessionId) state.lastSessionId = snapshot.sessionId;
+  announce(previous, snapshot);
+  renderLive();
+  if (snapshot.sessionId && statusOfLive(snapshot) === "done") rememberSeen(`id:${snapshot.sessionId}`);
+  if (statusOfLive(previous) !== statusOfLive(snapshot)) renderSidebar();
+  if (previous && !liveHasContent(previous) && liveHasContent(snapshot)) loadOverview({ silent: true });
+}
+
+async function refreshLiveSnapshot(key) {
+  if (state.snapshotRequest || gateShown) return;
+  const selection = state.selection, source = state.eventSource;
+  const request = (async () => {
+    try {
+      const response = await apiFetch(`/api/live/${encodeURIComponent(key)}`, { cache: "no-store", signal: AbortSignal.timeout(10000) });
+      if (response.status === 404) { void loadOverview({ silent: true }); return; }
+      if (!response.ok) return;
+      const snapshot = await response.json();
+      if (state.selection === selection && state.eventSource === source) applyLiveSnapshot(snapshot);
+    } catch { /* Keep the connection warning until a real event arrives. */ }
+  })();
+  state.snapshotRequest = request;
+  await request;
+  if (state.snapshotRequest === request) state.snapshotRequest = null;
+}
+
 function openStream(key) {
   closeStream();
   const source = new EventSource(apiPath(`/api/live/${encodeURIComponent(key)}/stream`));
   state.eventSource = source;
-
-  source.addEventListener("snapshot", (event) => {
+  state.streamLastEvent = Date.now();
+  const current = () => state.eventSource === source && state.selection?.kind === "live" && state.selection.key === key;
+  const alive = () => {
+    state.streamLastEvent = Date.now(); state.streamConnected = true; setStatus("live", "live");
+  };
+  source.addEventListener("snapshot", event => {
+    if (!current() || gateShown) return;
     let snapshot;
-    try {
-      snapshot = JSON.parse(event.data);
-    } catch {
-      return;
-    }
-    if (gateShown) return;
-    const previous = state.snapshot;
-    state.snapshot = snapshot;
-    if (snapshot.sessionId) state.lastSessionId = snapshot.sessionId;
-    announce(previous, snapshot);
-    setStatus("live", "live");
-    renderLive();
-    // A turn that finishes in the conversation on screen needs no blue dot:
-    // recording it before the repaint keeps the mark off as the turn ends.
-    if (snapshot.sessionId && statusOfLive(snapshot) === "done") rememberSeen(`id:${snapshot.sessionId}`);
-    // The sidebar mirrors the open conversation, so a turn that starts, waits
-    // for approval or finishes shows there instead of on the next poll.
-    if (statusOfLive(previous) !== statusOfLive(snapshot)) renderSidebar();
-    // A conversation stays out of the sidebar until it has content; the first
-    // message makes it history, so list it now instead of on the next poll.
-    const started = previous && !liveHasContent(previous) && liveHasContent(snapshot);
-    if (started) loadOverview({ silent: true });
+    try { snapshot = JSON.parse(event.data); } catch { return; }
+    alive(); applyLiveSnapshot(snapshot);
   });
-
+  source.addEventListener("heartbeat", () => { if (current() && !gateShown) alive(); });
   source.addEventListener("gone", () => {
-    closeStream();
-    syncSelection();
+    if (!current()) return;
+    closeStream(); void loadOverview({ silent: true });
   });
-
-  source.onopen = () => setStatus("live", "live");
   source.onerror = () => {
-    // EventSource retries automatically; wait for a fresh snapshot to flash.
+    if (!current() || gateShown) return;
+    state.streamConnected = false;
     el.header?.classList.remove("is-thinking");
     setStatus("reconnecting…", "offline");
+    void refreshLiveSnapshot(key);
   };
+  state.streamWatchdog = setInterval(() => {
+    if (!current() || gateShown || Date.now() - state.streamLastEvent < 30000) return;
+    setStatus("reconnecting…", "offline");
+    openStream(key);
+    void refreshLiveSnapshot(key);
+  }, 5000);
 }
 
 function closeStream() {
   el.header?.classList.remove("is-thinking");
-  if (state.eventSource) {
-    state.eventSource.close();
-    state.eventSource = null;
-  }
+  if (state.streamWatchdog != null) clearInterval(state.streamWatchdog);
+  state.streamWatchdog = null;
+  state.streamConnected = false;
+  if (state.eventSource) { state.eventSource.close(); state.eventSource = null; }
 }
 
 async function selectFile(id) {
@@ -1642,6 +1672,7 @@ function canResumeFromComposer() {
 }
 
 function composerAction() {
+  if (state.snapshot?.task?.cleanupError) return "pause";
   if (canPauseFromComposer()) return "pause";
   if (canResumeFromComposer()) return "resume";
   return "send";
@@ -1896,7 +1927,7 @@ function renderControls(snapshot) {
   // review callback is still winding down.
   const reviewing = snapshot.approval ? null : snapshot.reviewing;
   const subagent = snapshot.subagent;
-  badge.textContent = snapshot.task?.state === "cancelling" ? tr("Stopping tasks…") : snapshot.paused
+  badge.textContent = snapshot.task?.cleanupError ? tr("Pause failed: operations still running") : snapshot.task?.state === "cancelling" ? tr("Stopping tasks…") : snapshot.paused
     ? tr("paused")
     : snapshot.busy
       ? snapshot.compressing
@@ -1921,10 +1952,10 @@ function renderControls(snapshot) {
   // Resuming belongs to the composer button (see renderComposerAction), which
   // offers "Continue" on an empty draft, so the status bar never shows a second
   // way in. Pausing stays here, for a turn that is actually running.
-  if (snapshot.busy && !snapshot.paused) {
+  if ((snapshot.busy && !snapshot.paused) || snapshot.task?.cleanupError) {
     const button = document.createElement("button");
     button.className = "control";
-    button.textContent = tr("Pause");
+    button.textContent = snapshot.task?.cleanupError ? tr("Retry stopping") : tr("Pause");
     button.addEventListener("click", () => {
       postAction(snapshot.key, "pause");
     });
@@ -2203,13 +2234,20 @@ function scrollToBottom() {
 // ------------------------------------------------------------------- actions
 
 async function postAction(key, action, body) {
+  const selection = state.selection;
   try {
     const response = await apiFetch(`/api/live/${encodeURIComponent(key)}/${action}`, {
       method: "POST",
       headers: body ? { "Content-Type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(10000),
     });
-    if (!response.ok) { const data = await response.json(); throw new Error(data.error || `HTTP ${response.status}`); }
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    if (state.selection === selection) {
+      if (data.snapshot) applyLiveSnapshot(data.snapshot);
+      else if (["pause", "resume"].includes(action)) await refreshLiveSnapshot(key);
+    }
     return true;
   } catch (error) {
     el.sub.textContent = error.message;

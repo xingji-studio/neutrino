@@ -722,8 +722,8 @@ function streamLive(key: string, req: http.IncomingMessage, res: http.ServerResp
   const detach = unsubscribe;
 
   const keepAlive = setInterval(() => {
-    if (!write(": ping\n\n")) cleanup();
-  }, 25_000);
+    if (!write("event: heartbeat\ndata: {}\n\n")) cleanup();
+  }, 10_000);
   keepAlive.unref?.();
 
   function cleanup(): void {
@@ -1494,7 +1494,8 @@ async function handleApi(
           const body = ["approve", "approval-mode", "agent-mode", "message", "model", "pro-preset"].includes(action)
             ? await readJsonBody(req) : {};
           const result = await remote(action, body);
-          sendJson(res, result.status, result.data);
+          sendJson(res, result.status, result.status === 200 && result.data && typeof result.data === "object"
+            ? { ...result.data, snapshot: hub.snapshot(key) } : result.data);
         } catch (error) {
           sendJson(res, 400, { error: error instanceof Error ? error.message : "invalid request" });
         }
@@ -1555,12 +1556,14 @@ async function handleApi(
       }
       if (action === "pause") {
         hub.pause(key);
-        sendJson(res, 200, { ok: true, paused: true });
+        const snapshot = hub.snapshot(key);
+        sendJson(res, 200, { ok: true, paused: snapshot?.paused ?? false, snapshot });
         return true;
       }
       if (action === "resume") {
         hub.resume(key);
-        sendJson(res, 200, { ok: true, paused: false });
+        const snapshot = hub.snapshot(key);
+        sendJson(res, 200, { ok: true, paused: snapshot?.paused ?? false, snapshot });
         return true;
       }
       if (action === "approve") {

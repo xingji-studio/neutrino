@@ -109,6 +109,8 @@ export interface LiveMeta {
 
 /** Everything a browser needs to render a live conversation. */
 export interface LiveSnapshot extends LiveMeta {
+  revision?: number;
+  epoch?: string;
   key: string;
   cwd: string;
   messages: LiveWireMessage[];
@@ -160,6 +162,8 @@ export interface LiveEntrySummary extends LiveMeta {
 type Listener = (snapshot: LiveSnapshot) => void;
 
 interface Entry {
+  revision: number;
+  snapshotData: string;
   key: string;
   agent: LiveAgent;
   cwd: string;
@@ -174,6 +178,7 @@ interface Entry {
 const FLUSH_MS = 80;
 
 class LiveHub {
+  private readonly epoch = `${Date.now()}-${Math.random()}`;
   private entries = new Map<string, Entry>();
   private seq = 0;
 
@@ -184,6 +189,8 @@ class LiveHub {
     }
     const key = `L${++this.seq}`;
     this.entries.set(key, {
+      revision: 0,
+      snapshotData: "",
       key,
       agent,
       cwd: agent.liveCwd(),
@@ -230,7 +237,11 @@ class LiveHub {
   /** One-off snapshot, or null when the key is unknown. */
   snapshot(key: string): LiveSnapshot | null {
     const entry = this.entries.get(key);
-    return entry ? entry.agent.liveSnapshot(key) : null;
+    if (!entry) return null;
+    const snapshot = entry.agent.liveSnapshot(key);
+    const data = JSON.stringify(snapshot);
+    if (data !== entry.snapshotData) { entry.snapshotData = data; entry.revision++; }
+    return { ...snapshot, revision: entry.revision, epoch: this.epoch };
   }
 
   /**
@@ -242,7 +253,7 @@ class LiveHub {
     if (!entry) return null;
     entry.listeners.add(fn);
     try {
-      fn(entry.agent.liveSnapshot(key));
+      fn(this.snapshot(key)!);
     } catch {
       // A broken listener must not break registration.
     }
@@ -273,7 +284,7 @@ class LiveHub {
     let snapshot: LiveSnapshot;
     let data: string;
     try {
-      snapshot = entry.agent.liveSnapshot(entry.key);
+      snapshot = this.snapshot(entry.key)!;
       data = JSON.stringify(snapshot);
     } catch {
       return;

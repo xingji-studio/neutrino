@@ -372,6 +372,7 @@ try {
     createSettingsUI, turnAnswerIndex, turnFolds, turnPreview, turnRanges, document: globalThis.document,
     localStorage: { removeItem() {} }, location: { search: "" },
     window: { addEventListener() {} }, URLSearchParams, setInterval() {},
+    clearInterval() {}, AbortSignal,
     console: { error: error => browserErrors.push(error) },
     EventSource: class { addEventListener() {} close() {} },
     async fetch(url, init = {}) {

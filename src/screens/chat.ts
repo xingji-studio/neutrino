@@ -436,6 +436,7 @@ export class ChatScreen extends Screen implements LiveAgent {
   }
 
   livePause(): void {
+    if (this.paused) { this.taskRuntime?.retryCleanup(); return; }
     if (this.paused || (!this.busy && !this.queued)) return;
     if (this.fastState && this.activeAgentMode === FAST_MODE && this.busy) this.fastState.phase = "cancelling";
     this.paused = true;
@@ -926,6 +927,7 @@ export class ChatScreen extends Screen implements LiveAgent {
       journalDir: path.join(sessionDir("standard"), "tasks", path.basename(this.sessionId || "unsaved")),
     });
     this.taskRuntime = runtime;
+    runtime.observeState(() => { if (this.taskRuntime === runtime) { this.save(); this.publishLive(); } });
     this.taskOutcome = "completed";
     let failed = false;
     try {
@@ -1052,6 +1054,12 @@ export class ChatScreen extends Screen implements LiveAgent {
   }
 
   private startTurn(): void {
+    if (this.taskRuntime?.snapshot().cleanupError) {
+      this.paused = true;
+      this.queued = null;
+      this.publishLive();
+      return;
+    }
     if (this.taskRuntime?.settling) {
       const previous = this.taskRuntime;
       this.queued = lastRequestText(this.messages);
