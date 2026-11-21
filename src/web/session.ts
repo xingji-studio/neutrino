@@ -72,6 +72,7 @@ import {
   lastRequestText,
   needsPlan,
   parsePlan,
+  coalesceStandardPlan,
   planMessage,
   planTranscript,
   renderStepDirective,
@@ -90,6 +91,8 @@ import {
 import { assessToolCall, type RiskAssessment } from "../llm/risk.js";
 import { ApprovalGate, captureApprovalContext, describeApprovalIntent, type ApprovalDecision, type ApprovalContext } from "../llm/approval.js";
 import { SessionCheckpoint } from "../persistence.js";
+import { GoalController } from "../goal.js";
+import { SessionTitle } from "../sessionTitle.js";
 import { writeCrashLog } from "../terminal/restore.js";
 import {
   hub,
@@ -175,7 +178,7 @@ export function createWebSession(
     agent_mode: mode === "pro" ? "standard" : agentMode,
     ...(mode === "pro" ? { pro_preset: requireProPreset(proPreset ?? defaultProPreset()) } : {}),
   };
-  return new WebSession(source, selection.model, mode);
+  return new WebSession(source, selection.model, mode, true);
 }
 
 /** A preset may need fallback; defer model credentials/availability to preflight. */
@@ -255,6 +258,7 @@ export class WebSession implements LiveAgent {
 
   private messages: Msg[];
   private sessionId: string;
+  private sessionTitle: SessionTitle;
   private busy = false;
   private approvalMode: ApprovalMode;
   private paused = false;
@@ -281,6 +285,7 @@ export class WebSession implements LiveAgent {
     return saved;
   });
   private taskRuntime: TaskRuntime | null = null;
+  private goals = new GoalController();
   private lastTask: TaskSnapshot | undefined;
   private taskOutcome: AgentStatus = "completed";
   private standardTask: StandardTask | null = null;
@@ -309,7 +314,7 @@ export class WebSession implements LiveAgent {
   /** Reviewer count while an automated review runs, null otherwise. */
   private reviewing: LiveReviewProgress | null = null;
 
-  constructor(source: SessionData, model: ModelInfo, mode: Mode = "standard") {
+  constructor(source: SessionData, model: ModelInfo, mode: Mode = "standard", newConversation = false) {
     this.mode = mode;
     this.agentMode = mode === "pro" ? "standard" : normalizeAgentMode(source.agent_mode);
     if (mode === "pro") this.proPreset = requireProPreset(source.pro_preset ?? defaultProPreset());
@@ -321,10 +326,12 @@ export class WebSession implements LiveAgent {
     this.intensity = mode === "pro" ? source.intensity : intensityForModel(model, source.intensity, loadConfig(this.mode).default_intensity);
     this.dir = source.cwd;
     this.sessionId = source.id;
+    this.sessionTitle = new SessionTitle(source.title ?? "", newConversation);
     this.messages = (source.messages as Msg[]).slice();
     this.context = normalizeContext(source.context, this.messages.filter((m) => m.role !== "system").length);
     this.plan = resumePlan(source.plan ?? null);
     this.lastTask = resumeTaskSnapshot(source.task_run);
+    this.goals = new GoalController(source.goal);
     this.fastState = source.fast_run ? structuredClone(source.fast_run) : undefined;
     if (this.fastState && !["completed", "failed", "cancelled"].includes(this.fastState.phase)) {
       this.fastState.phase = "failed";
@@ -349,7 +356,9 @@ export class WebSession implements LiveAgent {
   /** Detach from the hub. The transcript stays on disk. */
   dispose(): void {
     if (this.disposed) return;
+    if (this.goals.active) this.goals.stop("paused", "Session closed. Resume the goal to continue.");
     this.disposed = true;
+    this.sessionTitle.cancel();
     this.approvalQueue.cancelWaiting();
     this.proAbort?.abort();
     this.turnAbort?.abort();
@@ -404,6 +413,7 @@ export class WebSession implements LiveAgent {
 
   liveMeta(): LiveMeta {
     return {
+      goal: this.goals.snapshot(),
       ...(this.mode === "pro" ? { pro: this.proState ?? {
         preset: this.proPreset!, checking: false, checkId: "", models: [], fallbacks: [],
       } } : {}),
@@ -463,6 +473,10 @@ export class WebSession implements LiveAgent {
   }
 
   livePause(): void {
+    if (this.goals.active) {
+      this.goals.stop("paused", "Paused by user.");
+      this.save();
+    }
     if (this.paused) { this.taskRuntime?.retryCleanup(); return; }
     if (!this.busy && !this.queued) return;
     if (this.fastState && this.activeAgentMode === FAST_MODE && this.busy) this.fastState.phase = "cancelling";
@@ -489,6 +503,11 @@ export class WebSession implements LiveAgent {
   }
 
   liveResume(): void {
+    const goal = this.goals.snapshot();
+    if (goal && ["paused", "blocked", "budget_exhausted"].includes(goal.status)) {
+      this.send("/goal resume");
+      return;
+    }
     if (!this.paused) return;
     this.paused = false;
     this.publishLive();
@@ -550,6 +569,8 @@ export class WebSession implements LiveAgent {
   liveClear(): void {
     if (this.disposed) return;
     if (!this.checkpoint.flush()) return;
+    this.sessionTitle.cancel();
+    this.sessionTitle = new SessionTitle("", true);
     this.proAbort?.abort();
     this.proTeam = null;
     this.proState = undefined;
@@ -558,6 +579,7 @@ export class WebSession implements LiveAgent {
     this.taskRuntime = null;
     this.lastTask = undefined;
     this.fastState = undefined;
+    this.goals = new GoalController();
     this.queuedAgentMode = null;
     if (this.pendingApproval) {
       const pending = this.pendingApproval;
@@ -585,12 +607,29 @@ export class WebSession implements LiveAgent {
 
   // ---- turn driving ----------------------------------------------------
 
-  private send(text: string): void {
+  private send(text: string, goalRequest = false): void {
     const trimmed = text.trim();
     if (!trimmed || this.disposed) return;
     this.touch();
+    const goalAction = goalRequest ? null : this.goals.handle(trimmed, this.busy);
+    if (goalAction) {
+      if (goalAction.pause) this.livePause();
+      if (goalAction.message) this.messages.push({ role: "assistant", content: goalAction.message });
+      this.save();
+      this.publishLive();
+      if (goalAction.request) {
+        this.paused = false;
+        this.send(goalAction.request, true);
+      } else if (goalAction.resume) {
+        this.paused = false;
+        if (this.queued) this.maybeFlushQueue();
+        else this.startTurn();
+      }
+      return;
+    }
     this.messages.push({ role: "user", content: trimmed });
     this.save();
+    if (this.mode !== "pro") this.generateTitle(trimmed);
 
     if (this.busy || this.paused) {
       this.queued = trimmed;
@@ -629,7 +668,8 @@ export class WebSession implements LiveAgent {
       return;
     }
     const turnMessages = this.messages.slice();
-    const approvalContext = captureApprovalContext(turnMessages);
+    const captured = captureApprovalContext(turnMessages);
+    const approvalContext = { ...captured, prompt: this.goals.request(captured.prompt) };
     this.busy = true;
     this.activeAgentMode = this.queuedAgentMode ?? this.agentMode;
     this.queuedAgentMode = null;
@@ -658,9 +698,11 @@ export class WebSession implements LiveAgent {
       request: approvalContext.prompt, priorUserRequests: approvalContext.priorUserRequests,
       cwd: this.dir, signal: this.turnAbort?.signal, limits: taskLimits(loadConfig(this.mode)),
       budgetScope: taskBudgetScope(loadConfig(this.mode)),
+      goalTokenBudget: this.goals.remainingTokens(),
       journalDir: path.join(sessionDir(this.mode), "tasks", path.basename(this.sessionId || "unsaved")),
     });
     this.taskRuntime = runtime;
+    this.goals.begin(runtime);
     runtime.observeState(() => { if (this.taskRuntime === runtime) { this.save(); this.publishLive(); } });
     this.taskOutcome = "completed";
     let failed = false;
@@ -680,9 +722,22 @@ export class WebSession implements LiveAgent {
     finally {
       await runtime.drain();
       if (runtime.signal.aborted) settlePlan(runtime.plan ?? null, true);
-      runtime.finish(runtime.signal.aborted ? "cancelled" : failed ? "failed" :
+      const outcome = runtime.signal.aborted ? "cancelled" : failed ? "failed" :
         runtime.plan?.steps.some(step => step.status === "failed") ? "failed" :
-        runtime.plan?.steps.some(step => !["done", "skipped"].includes(step.status)) ? "partial" : this.taskOutcome);
+        runtime.plan?.steps.some(step => !["done", "skipped"].includes(step.status)) ? "partial" : this.taskOutcome;
+      await runtime.run(() => this.goals.assess(runtime, outcome, {
+        messages: this.turnView(turnMessages),
+        createClient: () => this.proTeam?.client("main_model") ?? new LLMClient(this.model, this.provider, this.intensity),
+        cancelled: () => token !== this.turnToken || this.paused || this.disposed,
+        hasQueuedInput: () => !!this.queued,
+        onUsage: usage => { this.tokens.prompt += usage.prompt; this.tokens.completion += usage.completion; },
+      }));
+      runtime.finish(this.goals.owns(runtime) && runtime.snapshot().budgetStop ? "partial" : outcome);
+      if (this.goals.owns(runtime) && token === this.turnToken && !this.disposed && !this.paused && !failed) {
+        this.lastTask = runtime.snapshot();
+        if (this.goals.active && !this.queued) this.queued = lastRequestText(this.messages) || this.goals.snapshot()!.objective;
+        this.onTurnFinished();
+      }
       if (this.taskRuntime === runtime && !this.disposed) {
         if (runtime.signal.aborted && token === this.turnToken && this.busy && !this.paused) {
           if ((this.taskOutcome as AgentStatus) !== "cancelled") this.messages.push({ role: "assistant", content: `[Task stopped: ${String(runtime.signal.reason)}]\n${runtime.partialReport()}` });
@@ -753,7 +808,7 @@ export class WebSession implements LiveAgent {
       runtime, signal, cwd: this.dir, settings: fastSettings(loadConfig(this.mode)),
       directory: path.join(sessionDir(this.mode), "tasks", path.basename(this.sessionId), "fast"),
       history,
-      system: loadAgentPrompt(FAST_MODE), subagentSystem: loadSubAgentPrompt(),
+      system: loadAgentPrompt(FAST_MODE) + this.goals.instructions(), subagentSystem: loadSubAgentPrompt(),
       contextWindow: modelContextWindow(provider, model, this.mode),
       maxRounds: subAgentRounds(loadConfig(this.mode).subagent_max_rounds),
       createClient: () => new LLMClient(model, provider, intensity),
@@ -828,6 +883,8 @@ export class WebSession implements LiveAgent {
       this.model = main.model;
       this.provider = main.provider;
       this.intensity = main.intensity;
+      const firstMessage = this.messages.find(message => message.role === "user");
+      if (firstMessage?.role === "user") this.generateTitle(firstMessage.content);
       this.publishLive();
       this.planning = true;
       this.publishLive();
@@ -934,7 +991,7 @@ export class WebSession implements LiveAgent {
         this.lastPromptTokens = client.usage.prompt;
       }
       if (token !== this.turnToken) return null;
-      return parsePlan(answer);
+      return coalesceStandardPlan(parsePlan(answer), request, this.dir);
     } catch {
       return null;
     } finally {
@@ -948,6 +1005,7 @@ export class WebSession implements LiveAgent {
 
   /** Ends a turn whose floating promise rejected, instead of crashing the app. */
   private failTurn(err: unknown): void {
+    if (this.goals.active) this.goals.stop("paused", `Task failed: ${describeError(err)}`);
     this.retainStreamingContent();
     this.messages.push({ role: "assistant", content: `[Error: ${describeError(err)}]` });
     this.streamingContent = null;
@@ -965,9 +1023,11 @@ export class WebSession implements LiveAgent {
   private buildApiMessages(messages = this.messages, directive = ""): ApiMessage[] {
     // A step directive extends the system prompt: the plan is an instruction, not
     // something the user just said.
-    const prompt = this.mode === "pro" ? loadProPrompt("main_model") : loadAgentPrompt(this.activeAgentMode);
+    const prompt = (this.mode === "pro" ? loadProPrompt("main_model") : loadAgentPrompt(this.activeAgentMode)) + this.goals.instructions();
+    const standard = this.standardTask?.runtime === currentTask()?.runtime ? this.standardTask : null;
     const api: ApiMessage[] = [
-      { role: "system", content: (directive ? `${prompt}\n\n${directive}` : prompt) +
+      { role: "system", content: standard ? prompt + `\n\n${standard.runtime.instructions()}\n\n${standard.instructions()}` +
+        (directive ? `\n\n${directive}` : "") : (directive ? `${prompt}\n\n${directive}` : prompt) +
         (currentTask() ? `\n\n${currentTask()!.runtime.instructions()}` : "") },
     ];
     for (const m of modelHistory(messages, this.context)) {
@@ -996,7 +1056,7 @@ export class WebSession implements LiveAgent {
     if (standardContext) {
       tools.push(STANDARD_EVIDENCE_DEFINITION, ...STANDARD_CHECK_DEFINITIONS);
       if (standard) tools.push(STANDARD_FINISH_DEFINITION);
-      apiMessages[0] = { ...apiMessages[0], content: `${apiMessages[0].content ?? ""}\n\n${standardContext.instructions()}\n${standardContext.evidenceBrief()}` };
+      apiMessages[0] = { ...apiMessages[0], content: `${apiMessages[0].content ?? ""}\n\n${standardContext.evidenceBrief()}` };
     }
     let emptyReplies = 0;
     try {
@@ -1105,11 +1165,6 @@ export class WebSession implements LiveAgent {
             const feedback = standard.naturalCompletion();
             if (feedback) {
               this.streamingContent = null;
-              if (standard.naturalCompletionExhausted) {
-                this.taskOutcome = "partial";
-                this.messages.push({ role: "assistant", content: `Task incomplete. ${feedback}` });
-                return false;
-              }
               apiMessages.push({ role: "user", content: feedback });
               continue;
             }
@@ -1157,6 +1212,13 @@ export class WebSession implements LiveAgent {
             apiMessages.push({ role: "tool", content: denied, tool_call_id: call.id });
             this.save();
             this.publishLive();
+            if (this.goals.owns(currentTask()?.runtime ?? null) && decision.source !== "input") {
+              this.goals.stop("blocked", "A tool approval was denied. Review the request before resuming.");
+              this.taskOutcome = "blocked";
+              this.streamingContent = null;
+              this.messages.push({ role: "assistant", content: `Goal blocked: ${decision.reason}` });
+              return false;
+            }
             continue;
           }
 
@@ -1210,14 +1272,14 @@ export class WebSession implements LiveAgent {
           toolMsg.result = result;
           this.save();
           if (token !== this.turnToken || this.paused) return false;
+          if (standardFinish?.completed && !standard!.acceptedArtifactsCurrent()) {
+            standardFinish = standard!.invalidCompletion("Artifacts changed after completion review. Read the current artifacts and refresh affected checks before retrying completion.");
+            result = toolMsg.result = JSON.stringify(standardFinish);
+            this.save();
+          }
           apiMessages.push({ role: "tool", content: toolMsg.evidenceId
             ? `${result}\n[Task evidence: ${toolMsg.evidenceId}; status=${toolMsg.executionStatus}]` : result, tool_call_id: call.id });
           if (standardFinish?.settled) {
-            if (standardFinish.completed && !standard!.acceptedArtifactsCurrent()) {
-              this.taskOutcome = "partial";
-              this.messages.push({ role: "assistant", content: "Task incomplete: artifact versions changed after completion review." });
-              return false;
-            }
             this.taskOutcome = standardFinish.completed ? "completed" : "partial";
             this.messages.push({ role: "assistant", content: standardFinish.report });
             this.streamingContent = null;
@@ -1243,6 +1305,7 @@ export class WebSession implements LiveAgent {
         this.messages.push({ role: "assistant", content: this.streamingContent });
       }
       this.streamingContent = null;
+      this.taskOutcome = "failed";
       this.messages.push({
         role: "assistant",
         content: `[Error: ${err instanceof Error ? err.message : String(err)}]`,
@@ -1252,6 +1315,12 @@ export class WebSession implements LiveAgent {
   }
 
   private onTurnFinished(): void {
+    // Keep the turn busy until its goal checkpoint and all owned operations settle.
+    if (this.goals.owns(this.taskRuntime) && ["running", "cancelling"].includes(this.taskRuntime!.snapshot().state)) {
+      this.streamingContent = null;
+      this.save(); this.publishLive();
+      return;
+    }
     this.retrying = null;
     this.busy = false;
     this.paused = false;
@@ -1590,6 +1659,7 @@ export class WebSession implements LiveAgent {
   // ---- persistence -----------------------------------------------------
 
   private title(): string {
+    if (this.sessionTitle.value) return this.sessionTitle.value;
     for (const m of this.messages) {
       if (m.role === "user") {
         const line = m.content.trim().split(/\r?\n/)[0] ?? "";
@@ -1597,6 +1667,10 @@ export class WebSession implements LiveAgent {
       }
     }
     return "";
+  }
+
+  private generateTitle(firstMessage: string): void {
+    this.sessionTitle.generate(firstMessage, this.model, this.provider, this.mode, () => this.save());
   }
 
   private retainStreamingContent(): void {
@@ -1635,6 +1709,8 @@ export class WebSession implements LiveAgent {
         this.agentMode,
         this.taskRuntime?.snapshot() ?? this.lastTask,
         this.fastState,
+        this.sessionTitle.value || undefined,
+        this.goals.snapshot(),
       );
       this.saveError = null;
       return true;

@@ -33,6 +33,11 @@ export interface PlanStep {
   /** What the step needs: files, parameters, acceptance criteria. */
   detail?: string;
   status: PlanStepStatus;
+  /** Standard-only planning hints. They never grant file permissions. */
+  kind?: "inspect" | "implement" | "verify" | "deliver";
+  targets?: string[];
+  independent?: boolean;
+  mergedFrom?: string[];
 }
 
 /** The plan of one user turn, persisted with the session. */
@@ -116,7 +121,32 @@ export function needsStandardPlan(request: string): boolean {
 }
 
 /** The planner decomposes work; it does not pre-solve the implementation. */
-export const STANDARD_PLANNING_CONTRACT = "Return a compact executable outline, not the implementation or a proof of its algorithm. Use 2-5 steps when possible, one deliverable per step. Preserve every original constraint and input variation as acceptance references; leave concrete coding and test construction to the executor. Do not regenerate a second plan after an output-limit fallback. Output the requested plan JSON only.";
+export const STANDARD_PLANNING_CONTRACT = "Return a compact executable outline, not the implementation or a proof of its algorithm. Use 2-3 work groups when possible. Include kind (inspect/implement/verify/deliver) and concrete targets (file paths) on each step. Keep changes to the same file or coupled deliverable in ONE implementation group, including essential inspection; do not split building, sanitizing and manifest changes into repeated rewrites. Keep final verification separate, batch related input variations in one reusable checker, and retain checks that must be independent. Set independent true only for an actually required separate check. Planning hints never authorize paths or tools. Preserve every original constraint and input variation as acceptance references; leave concrete coding and test construction to the executor. Do not regenerate a second plan after an output-limit fallback. Output the requested plan JSON only.";
+
+/** Merge adjacent model-planned work on the same concrete files. Explicit user lists,
+ * independent checks, dependency-bearing plans and unknown targets remain separate. */
+export function coalesceStandardPlan(plan: PlanState | null, request: string, cwd = "."): PlanState | null {
+  if (!plan || /^\s*(?:[-*•]\s+|\d+[.)、]\s*)/m.test(request) || plan.steps.some(s => s.id || s.dependsOn?.length)) return plan;
+  const concrete = (step: PlanStep) => new Set((step.targets ?? []).filter(t => !/[?*{}]/.test(t)).map(t => path.resolve(cwd, t)));
+  const steps: PlanStep[] = [];
+  for (const original of plan.steps) {
+    const step = { ...original, ...(original.targets ? { targets: [...original.targets] } : {}) };
+    const prior = steps.at(-1);
+    const implementation = prior && !prior.independent && !step.independent &&
+      ["inspect", "implement"].includes(prior.kind ?? "") && ["inspect", "implement"].includes(step.kind ?? "") &&
+      (prior.kind === "implement" || step.kind === "implement") && [...concrete(prior)].some(file => concrete(step).has(file));
+    const delivery = prior?.kind === "verify" && step.kind === "deliver" && !prior.independent && !step.independent;
+    if (!prior || (!implementation && !delivery)) { steps.push(step); continue; }
+    const parts = prior.mergedFrom ?? [`${prior.title}${prior.detail ? ": " + prior.detail : ""}`];
+    prior.mergedFrom = [...parts, `${step.title}${step.detail ? ": " + step.detail : ""}`];
+    prior.detail = prior.mergedFrom.map((text, i) => `${i + 1}. ${text}`).join("\n");
+    if (implementation && prior.kind === "inspect") prior.title = step.title;
+    prior.kind = implementation ? "implement" : "verify";
+    prior.targets = [...new Set([...(prior.targets ?? []), ...(step.targets ?? [])])];
+    prior.acceptanceCriteria = [...(prior.acceptanceCriteria ?? []), ...(step.acceptanceCriteria ?? [])];
+  }
+  return { ...plan, steps };
+}
 
 // ------------------------------------------------------------------ parsing
 
@@ -141,7 +171,10 @@ function normalizeStep(value: unknown): PlanStep | null {
   const strings = (value: unknown) => Array.isArray(value) ? value.filter((v): v is string => typeof v === "string").slice(0, 10).map(v => cleanText(v, PLAN_MAX_DETAIL)) : undefined;
   const dependsOn = strings(o.dependsOn ?? o.depends_on);
   const acceptanceCriteria = strings(o.acceptanceCriteria ?? o.acceptance_criteria);
-  return { title, status: "pending", ...(detail ? { detail } : {}), ...(id ? { id } : {}),
+  const kind = ["inspect", "implement", "verify", "deliver"].includes(String(o.kind)) ? o.kind as PlanStep["kind"] : undefined;
+  const targets = strings(o.targets)?.filter(target => target && !/[?*{}]/.test(target));
+  return { title, status: "pending", ...(kind ? { kind } : {}), ...(targets?.length ? { targets } : {}),
+    ...(o.independent === true ? { independent: true } : {}), ...(detail ? { detail } : {}), ...(id ? { id } : {}),
     ...(dependsOn ? { dependsOn } : {}), ...(acceptanceCriteria ? { acceptanceCriteria } : {}) };
 }
 

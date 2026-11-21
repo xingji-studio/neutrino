@@ -151,7 +151,7 @@ try {
   fs.writeFileSync(path.join(home, "fixture.txt"), "Verified fixture");
   // Run actual LLM accounting through both UI drivers, rather than mocking streamTurn.
   for (const { scope, cap } of [{ scope: "delegation", cap: "none" }, { scope: "task", cap: "token" }, { scope: "task", cap: "tool" }]) {
-    saveConfig({ ...loadConfig(), task_budget_scope: scope, task_max_requests: cap === "tool" ? 8 : 2,
+    saveConfig({ ...loadConfig(), auto_title: false, task_budget_scope: scope, task_max_requests: cap === "tool" ? 8 : 2,
       task_max_tools: 1, task_max_tokens: cap === "tool" ? 2_000_000 : 10, task_timeout_ms: scope === "task" ? 5000 : 10 });
     for (const kind of ["web", "terminal"]) {
       let mainRequests = 0;

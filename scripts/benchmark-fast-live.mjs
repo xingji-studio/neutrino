@@ -85,7 +85,7 @@ try {
   config.saveModels({ providers: [{ name: provider.name, models: [model] }] });
   const intensity = config.intensityForModel(model, sourceConfig.selected_intensity, sourceConfig.default_intensity);
   config.saveConfig({ ...config.DEFAULT_CONFIG, selected_provider: provider.name, selected_model: model.name, selected_intensity: intensity,
-    default_intensity: intensity, plan_first: true, task_budget_scope: "task", task_timeout_ms: requestedTimeout,
+    default_intensity: intensity, plan_first: true, auto_title: false, task_budget_scope: "task", task_timeout_ms: requestedTimeout,
     model_context_windows: sourceConfig.model_context_windows ?? {}, fast_mode_enabled: true });
   report.model = { provider: provider.name, name: model.name, intensity, available_inference_slots: 4 };
   if ((argument("--expect-provider") && argument("--expect-provider") !== provider.name) ||

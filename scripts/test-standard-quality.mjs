@@ -164,7 +164,8 @@ try {
   const rejected = await bad.run(() => badContract.finish(invalid, { ...review, createClient() { throw new Error("Denied evidence must not reach a reviewer"); } }));
   assert.equal(rejected.completed, false); assert.match(rejected.feedback, /unsuccessful/);
   assert.ok(badContract.naturalCompletion()); assert.ok(badContract.naturalCompletion()); assert.ok(badContract.naturalCompletion());
-  assert.equal(badContract.naturalCompletionExhausted, true);
+  assert.equal(badContract.state.status, "working");
+  assert.ok(badContract.state.requirements.every(r => !r.verified));
   bad.finish("partial");
 
   // A normal return from an outer driver must not manufacture completion.
@@ -216,7 +217,7 @@ try {
     assert.equal(scopedContract.state.completionAttempts, 0);
   }));
   scoped.finish("completed");
-  console.log("PASS invariants: missing/denied evidence, bounded unsupported claims, outer completion guard, cancellation, actual review budget preflight, read-only and child write scopes");
+  console.log("PASS invariants: missing/denied evidence, unsupported claims keep working without acceptance, outer completion guard, cancellation, actual review budget preflight, read-only and child write scopes");
 
   // Compact below the model's context limit due to remaining task budget, retaining protocol groups.
   const messages = [{ role: "system", content: "ORIGINAL IMMUTABLE POLICY" }, { role: "user", content: request }];
@@ -234,7 +235,7 @@ try {
   console.log("PASS budget-aware context: zero extra model calls, immutable brief, complete tool groups, failed checks and retrievable evidence");
 
   config.saveModels({ providers: [{ name: "DeepSeek", models: [model] }] });
-  config.saveConfig({ ...config.loadConfig(), selected_provider: "DeepSeek", selected_model: model.name, selected_intensity: "Max",
+  config.saveConfig({ ...config.loadConfig(), auto_title: false, selected_provider: "DeepSeek", selected_model: model.name, selected_intensity: "Max",
     plan_first: false, task_budget_scope: "task", task_max_tokens: 2_000_000, task_max_requests: 100, task_max_tools: 100 });
   for (const kind of ["web", "terminal"]) {
     const dir = path.join(fixture, kind); fs.mkdirSync(dir);

@@ -8,6 +8,7 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, onUpd
     "settings-open", "settings-dialog", "settings-form", "settings-close", "settings-cancel", "settings-save", "settings-feedback",
     "default-provider", "default-model", "default-intensity", "settings-context", "settings-compress-note", "settings-reviewer",
     "settings-extreme", "settings-sound", "settings-password", "settings-password-confirm",
+    "settings-auto-title", "settings-title-model",
     "settings-language", "settings-plan", "settings-approval", "settings-web-console", "settings-web-lan", "settings-background",
     "settings-check-update", "settings-update-feedback",
     "settings-pro", "settings-pro-preset", "settings-pro-depth"];
@@ -87,6 +88,16 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, onUpd
   function reviewerOptions(selected) {
     const reviewers = [...new Set(config.providers.flatMap(provider => provider.models.map(model => model.name)))];
     options(el["settings-reviewer"], [{ value: "", label: t("Same as conversation") }, ...reviewers.map(value => ({ value, label: value }))], selected);
+  }
+  function titleModelOptions(selected) {
+    const value = selected && typeof selected === "object" ? JSON.stringify({ provider: selected.provider, model: selected.model }) : "";
+    options(el["settings-title-model"], [{ value: "", label: t("Same as conversation") },
+      ...config.providers.flatMap(provider => provider.models.map(model => ({
+        value: JSON.stringify({ provider: provider.name, model: model.name }),
+        label: `${provider.name} / ${model.name}` + (model.configured ? "" : ` ${t("(API key missing)")}`),
+      })))], value);
+    if (value && el["settings-title-model"].value !== value) unavailableOption(el["settings-title-model"], value);
+    el["settings-title-model"].disabled = !el["settings-auto-title"].checked;
   }
   function proPresets(selected) {
     options(el["settings-pro-preset"], (config.pro?.presets || []).map(preset => ({
@@ -301,6 +312,8 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, onUpd
       el["default-provider"].value, el["default-model"].value);
     renderContextWindow();
     reviewerOptions(config.settings.approval_model);
+    el["settings-auto-title"].checked = config.settings.auto_title !== false;
+    titleModelOptions(config.settings.title_model);
     if (proMode && el["settings-pro"]) {
       el["settings-pro"].classList.remove("hidden");
       proPresets(config.pro?.preset);
@@ -402,12 +415,16 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, onUpd
       intensities(el["default-intensity"], el["default-intensity"].value,
         el["default-provider"].value, el["default-model"].value);
       reviewerOptions(el["settings-reviewer"].value);
+      titleModelOptions(el["settings-title-model"].value ? JSON.parse(el["settings-title-model"].value) : "");
       renderCompressionNote();
       if (proMode) proPresets(el["settings-pro-preset"].value);
     }
     renderPicker();
   }
   el["settings-context"].addEventListener("input", renderCompressionNote);
+  el["settings-auto-title"].addEventListener("change", () => {
+    el["settings-title-model"].disabled = !el["settings-auto-title"].checked;
+  });
   el["default-model"].addEventListener("change", () => {
     if (!config) return;
     intensities(el["default-intensity"], el["default-intensity"].value,
@@ -470,6 +487,10 @@ export function createSettingsUI({ apiFetch, applyModel, onLanguageChange, onUpd
       }),
       auto_approve_extreme_risk: el["settings-extreme"].checked,
       sound_alerts: el["settings-sound"].checked,
+      auto_title: el["settings-auto-title"].checked,
+      ...(el["settings-auto-title"].checked ? {
+        title_model: el["settings-title-model"].value ? JSON.parse(el["settings-title-model"].value) : "",
+      } : {}),
       web_console: el["settings-web-console"].checked,
       ...(lanChanged ? { web_lan: el["settings-web-lan"].checked } : {}),
       ...(backgroundChanged ? { background: el["settings-background"].checked } : {}),

@@ -1,5 +1,7 @@
 import { createPluginUI } from "./plugins.js";
+import { createGoalUI } from "./goal.js";
 let pluginUI = null;
+let goalUI = null;
 import { createSettingsUI } from "./settings.js";
 import { createProUI } from "./pro.js";
 import { renderMarkdown as renderMarkdownHtml } from "./markdown.js";
@@ -979,6 +981,87 @@ function renderMarkdown(value) {
   return escapeHtml(String(value ?? "")).replace(/\n/g, "<br>");
 }
 
+async function writeClipboardText(text) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch { /* Fall back when clipboard access is unavailable or denied. */ }
+  }
+
+  // LAN HTTP pages do not have the secure-context Clipboard API.
+  const active = document.activeElement;
+  const selection = window.getSelection?.();
+  const ranges = [];
+  for (let index = 0; index < (selection?.rangeCount ?? 0); index++) {
+    ranges.push(selection.getRangeAt(index).cloneRange());
+  }
+  const input = document.createElement("textarea");
+  input.value = text;
+  input.readOnly = true;
+  input.style.cssText = "position:fixed;top:0;left:-9999px;font-size:16px";
+  document.body.appendChild(input);
+  try {
+    input.focus({ preventScroll: true });
+    input.select();
+    input.setSelectionRange(0, input.value.length);
+    if (!document.execCommand?.("copy")) throw new Error("Copy failed");
+  } finally {
+    input.remove();
+    active?.focus?.({ preventScroll: true });
+    if (selection) {
+      selection.removeAllRanges();
+      for (const range of ranges) selection.addRange(range);
+    }
+  }
+}
+
+function createCopyButton(className, title, getText) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `copy-button ${className}`;
+  button.title = title;
+  button.setAttribute("aria-label", title);
+  button.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span aria-live="polite"></span>';
+  const label = button.querySelector("span");
+  label.textContent = tr("Copy");
+  let resetTimer;
+  button.addEventListener("click", async () => {
+    if (button.disabled) return;
+    clearTimeout(resetTimer);
+    button.disabled = true;
+    button.classList.remove("copied");
+    try {
+      await writeClipboardText(getText());
+      label.textContent = tr("Copied");
+      button.classList.add("copied");
+    } catch {
+      label.textContent = tr("Copy failed");
+    } finally {
+      button.disabled = false;
+      resetTimer = setTimeout(() => {
+        label.textContent = tr("Copy");
+        button.classList.remove("copied");
+      }, 2000);
+    }
+  });
+  return button;
+}
+
+function addCodeCopyButtons(root) {
+  for (const pre of root.querySelectorAll("pre.code")) {
+    const code = pre.querySelector("code");
+    if (!code) continue;
+    const block = document.createElement("div");
+    block.className = "code-block";
+    const button = createCopyButton("code-copy", tr("Copy code"), () => code.textContent ?? "");
+    pre.replaceWith(block);
+    block.appendChild(button);
+    block.appendChild(pre);
+  }
+  return root;
+}
+
 // ------------------------------------------------------------------- status
 
 async function loadOverview(options = {}) {
@@ -1572,7 +1655,7 @@ function renderFile(data) {
   const messages = Array.isArray(data.messages) ? data.messages : [];
   state.fileData = data;
   state.agentData = null;
-  el.title.textContent = firstUserMessage(messages) || tr("Conversation");
+  el.title.textContent = data.title || firstUserMessage(messages) || tr("Conversation");
   el.sub.textContent = [data.cwd, data.model, data.provider].filter(Boolean).join(" · ");
   preferences.showConversation(data, `file:${data.id}`);
   proUI?.show(data, `file:${data.id}`);
@@ -2124,12 +2207,19 @@ function renderMessage(message, index) {
     article.innerHTML =
       `<div class="summary-label">${escapeHtml(tr("Context summary · {n} messages", { n: Number(message.count ?? 0) }))}</div>` +
       `<div class="body">${renderMarkdown(message.content)}</div>`;
-    return article;
+    return addCodeCopyButtons(article);
   }
 
   const who = message.role === "user" ? tr("You") : "Neutrino";
   article.innerHTML = `<div class="who">${escapeHtml(who)}</div><div class="body">${renderMarkdown(message.content)}</div>`;
-  return article;
+  if (message.role === "assistant" && message.content) {
+    const actions = document.createElement("div");
+    actions.className = "message-actions";
+    // Copy the source text so formatting, links and code fences stay intact.
+    actions.appendChild(createCopyButton("message-copy", tr("Copy reply"), () => String(message.content)));
+    article.appendChild(actions);
+  }
+  return addCodeCopyButtons(article);
 }
 
 /**
@@ -2274,6 +2364,7 @@ async function sendMessage() {
   if (!selection) return;
   const text = pluginRequest?.text ?? submittedText ?? el.input.value;
   if (!text.trim()) return;
+  if (!pluginRequest && goalUI?.isBareCommand(text)) { goalUI.open(); return; }
   try {
     if (PRO_MODE) await proUI?.flush();
     else await preferences.flush?.();
@@ -2286,11 +2377,11 @@ async function sendMessage() {
     autosize();
     // A paused turn only queues the text, so a user send resumes right away: the
     // message then starts the turn instead of waiting for a separate continue click.
-    const resumes = !pluginRequest && state.snapshot?.key === selection.key && Boolean(state.snapshot.paused);
+    const resumes = !pluginRequest && !goalUI?.isCommand(text) && state.snapshot?.key === selection.key && Boolean(state.snapshot.paused);
     const sent = await postAction(selection.key, "message", messagePayload);
     if (sent === false) { if (!pluginRequest?.preserveDraft) el.input.value = text; autosize(); }
     else if (resumes) await postAction(selection.key, "resume");
-    return;
+    return sent !== false;
   }
 
   if (selection.kind === "new") {
@@ -2302,11 +2393,14 @@ async function sendMessage() {
       const created = await createConversation(selection.cwd, preferences.defaultSelection?.());
       await selectLive(created.key);
       setConversationView(true);
-      if (await postAction(created.key, "message", messagePayload) === false) { if (!pluginRequest?.preserveDraft) el.input.value = text; autosize(); }
+      const sent = await postAction(created.key, "message", messagePayload);
+      if (sent === false) { if (!pluginRequest?.preserveDraft) el.input.value = text; autosize(); }
+      return sent !== false;
     } catch (error) {
       if (!pluginRequest?.preserveDraft) el.input.value = text;
       autosize();
       el.sub.textContent = tr("Could not start the conversation: {error}", { error: error.message });
+      return false;
     }
     return;
   }
@@ -2316,11 +2410,14 @@ async function sendMessage() {
   autosize();
   try {
     const key = await continueSession(selection.id);
-    if (await postAction(key, "message", messagePayload) === false) { if (!pluginRequest?.preserveDraft) el.input.value = text; autosize(); }
+    const sent = await postAction(key, "message", messagePayload);
+    if (sent === false) { if (!pluginRequest?.preserveDraft) el.input.value = text; autosize(); }
+    return sent !== false;
   } catch (error) {
     if (!pluginRequest?.preserveDraft) el.input.value = text;
     autosize();
     el.sub.textContent = tr("Could not continue this conversation: {error}", { error: error.message });
+    return false;
   }
 }
 
@@ -2948,6 +3045,7 @@ function fastPhaseLabel(phase) {
 }
 
 function renderPlanCard(source) {
+  goalUI?.show(source);
   if (!el.planCard) return;
   const plan = source && source.plan && Array.isArray(source.plan.steps) && source.plan.steps.length ? source.plan : null;
   const tokens = source && source.tokens ? source.tokens : null;
@@ -3532,14 +3630,22 @@ function initializeProWorkspace() {
 
 // --------------------------------------------------------------------- init
 
+goalUI = createGoalUI({
+  document, tr, input: el.input, onDraftChange: autosize,
+  getSelection: () => state.selection,
+  getSource: () => state.snapshot ?? state.fileData ?? null,
+  submitCommand: text => sendMessage({ selection: state.selection, text, preserveDraft: true }),
+});
+
 el.refresh.addEventListener("click", () => loadOverview());
 el.back.addEventListener("click", () => setConversationView(false));
 el.send.addEventListener("click", activateComposer);
-el.input.addEventListener("input", autosize);
+el.input.addEventListener("input", () => { autosize(); goalUI.onInput(); });
 el.input.addEventListener("keydown", (event) => {
   // An Enter that picks an IME candidate belongs to the input method, not to us:
   // preventDefault would cancel the commit and send the uncommitted composition.
   if (event.isComposing || event.keyCode === 229) return;
+  if (goalUI.onKey(event)) return;
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     sendMessage(null, el.input.value);

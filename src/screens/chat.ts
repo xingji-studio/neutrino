@@ -53,6 +53,7 @@ import {
   lastRequestText,
   needsPlan,
   parsePlan,
+  coalesceStandardPlan,
   planCardRows,
   planMessage,
   planRowsWidth,
@@ -85,6 +86,8 @@ import {
 } from "../compact.js";
 import { hub, liveApprovalDetails, type LiveAgent, type LiveMeta, type LiveSnapshot, type LiveWireMessage, type ModelChangeResult, type LiveReviewProgress } from "../web/hub.js";
 import { SessionCheckpoint } from "../persistence.js";
+import { GoalController, type GoalState } from "../goal.js";
+import { SessionTitle } from "../sessionTitle.js";
 import { writeCrashLog } from "../terminal/restore.js";
 
 interface ApiMessage {
@@ -168,6 +171,7 @@ function planRowStyle(kind: PlanRowKind): Style {
 export class ChatScreen extends Screen implements LiveAgent {
   initialMessage: string;
   loadedMessages: SessionMessage[] | null = null;
+  loadedTitle: string | null = null;
   loadedCwd: string | null = null;
   sessionId: string | null = null;
   loadedProvider: string | null = null;
@@ -179,6 +183,7 @@ export class ChatScreen extends Screen implements LiveAgent {
   loadedPlan: PlanState | null = null;
   loadedTask: TaskSnapshot | undefined;
   loadedFast: FastSnapshot | undefined;
+  loadedGoal: GoalState | null = null;
   loadedAgentMode: AgentMode | null = null;
   private approvalMode: ApprovalMode = "request";
 
@@ -198,6 +203,7 @@ export class ChatScreen extends Screen implements LiveAgent {
   private subagent: string | null = null;
 
   private messages: Msg[] = [];
+  private sessionTitle = new SessionTitle();
   private streamingContent: string | null = null;
   private saveError: string | null = null;
   /** Why a busy turn is silent: a transient network failure being retried. */
@@ -211,6 +217,7 @@ export class ChatScreen extends Screen implements LiveAgent {
   private paused = false;
   private queued: string | null = null;
   private taskRuntime: TaskRuntime | null = null;
+  private goals = new GoalController();
   private lastTask: TaskSnapshot | undefined;
   private taskOutcome: AgentStatus = "completed";
   private standardTask: StandardTask | null = null;
@@ -295,6 +302,7 @@ export class ChatScreen extends Screen implements LiveAgent {
   onActivate(): void {
     if (this.initialized) return;
     this.initialized = true;
+    this.sessionTitle = new SessionTitle(this.loadedTitle ?? "", this.loadedMessages === null && this.sessionId === null);
     this.agentMode = normalizeAgentMode(this.loadedAgentMode);
     this.approvalMode = normalizeApprovalMode(this.loadedApprovalMode ?? loadConfig().approval_mode);
     const st = this.app.state;
@@ -331,6 +339,7 @@ export class ChatScreen extends Screen implements LiveAgent {
     for (const start of this.userMessageIndexes()) this.finishedTurns.add(start);
     this.plan = resumePlan(this.loadedPlan);
     this.lastTask = resumeTaskSnapshot(this.loadedTask);
+    this.goals = new GoalController(this.loadedGoal);
     this.fastState = this.loadedFast ? structuredClone(this.loadedFast) : undefined;
     if (this.fastState && !["completed", "failed", "cancelled"].includes(this.fastState.phase)) {
       this.fastState.phase = "failed";
@@ -388,6 +397,7 @@ export class ChatScreen extends Screen implements LiveAgent {
 
   liveMeta(): LiveMeta {
     return {
+      goal: this.goals.snapshot(),
       sessionId: this.sessionId,
       title: this.liveTitle(),
       provider: this.modelProvider,
@@ -436,6 +446,10 @@ export class ChatScreen extends Screen implements LiveAgent {
   }
 
   livePause(): void {
+    if (this.goals.active) {
+      this.goals.stop("paused", "Paused by user.");
+      this.save();
+    }
     if (this.paused) { this.taskRuntime?.retryCleanup(); return; }
     if (this.paused || (!this.busy && !this.queued)) return;
     if (this.fastState && this.activeAgentMode === FAST_MODE && this.busy) this.fastState.phase = "cancelling";
@@ -458,6 +472,11 @@ export class ChatScreen extends Screen implements LiveAgent {
   }
 
   liveResume(): void {
+    const goal = this.goals.snapshot();
+    if (goal && ["paused", "blocked", "budget_exhausted"].includes(goal.status)) {
+      this.send("/goal resume");
+      return;
+    }
     if (this.paused) this.togglePause();
   }
 
@@ -499,11 +518,14 @@ export class ChatScreen extends Screen implements LiveAgent {
       this.app.render();
       return;
     }
+    this.sessionTitle.cancel();
+    this.sessionTitle = new SessionTitle("", true);
     this.turnAbort?.abort();
     this.turnToken++;
     this.taskRuntime = null;
     this.lastTask = undefined;
     this.fastState = undefined;
+    this.goals = new GoalController();
     this.queuedAgentMode = null;
     if (this.pendingApproval) this.settleApproval(false);
     this.busy = false;
@@ -539,6 +561,7 @@ export class ChatScreen extends Screen implements LiveAgent {
   }
 
   private liveTitle(): string {
+    if (this.sessionTitle.value) return this.sessionTitle.value;
     for (const message of this.messages) {
       if (message.role === "user") {
         const title = message.content.replace(/\s+/g, " ").trim();
@@ -811,6 +834,8 @@ export class ChatScreen extends Screen implements LiveAgent {
   }
 
   private togglePause(): void {
+    if (this.goals.active && this.busy) { this.livePause(); return; }
+    if (this.paused && this.goals.snapshot()) { this.liveResume(); return; }
     if (!this.busy && !this.queued) return;
     this.paused = !this.paused;
     if (this.paused) {
@@ -882,7 +907,7 @@ export class ChatScreen extends Screen implements LiveAgent {
         this.lastPromptTokens = client.usage.prompt;
       }
       if (token !== this.turnToken) return null;
-      return parsePlan(answer);
+      return coalesceStandardPlan(parsePlan(answer), request, this.liveDir);
     } catch {
       return null;
     } finally {
@@ -924,9 +949,11 @@ export class ChatScreen extends Screen implements LiveAgent {
       request: approvalContext.prompt, priorUserRequests: approvalContext.priorUserRequests,
       cwd: this.liveDir, signal: this.turnAbort?.signal, limits: taskLimits(loadConfig("standard")),
       budgetScope: taskBudgetScope(loadConfig("standard")),
+      goalTokenBudget: this.goals.remainingTokens(),
       journalDir: path.join(sessionDir("standard"), "tasks", path.basename(this.sessionId || "unsaved")),
     });
     this.taskRuntime = runtime;
+    this.goals.begin(runtime);
     runtime.observeState(() => { if (this.taskRuntime === runtime) { this.save(); this.publishLive(); } });
     this.taskOutcome = "completed";
     let failed = false;
@@ -946,9 +973,22 @@ export class ChatScreen extends Screen implements LiveAgent {
     finally {
       await runtime.drain();
       if (runtime.signal.aborted) settlePlan(runtime.plan ?? null, true);
-      runtime.finish(runtime.signal.aborted ? "cancelled" : failed ? "failed" :
+      const outcome = runtime.signal.aborted ? "cancelled" : failed ? "failed" :
         runtime.plan?.steps.some(step => step.status === "failed") ? "failed" :
-        runtime.plan?.steps.some(step => !["done", "skipped"].includes(step.status)) ? "partial" : this.taskOutcome);
+        runtime.plan?.steps.some(step => !["done", "skipped"].includes(step.status)) ? "partial" : this.taskOutcome;
+      await runtime.run(() => this.goals.assess(runtime, outcome, {
+        messages: this.turnView(turnMessages),
+        createClient: () => new LLMClient(this.model, this.modelProvider, this.intensity),
+        cancelled: () => token !== this.turnToken || this.paused,
+        hasQueuedInput: () => !!this.queued,
+        onUsage: usage => { this.tokens.prompt += usage.prompt; this.tokens.completion += usage.completion; },
+      }));
+      runtime.finish(this.goals.owns(runtime) && runtime.snapshot().budgetStop ? "partial" : outcome);
+      if (this.goals.owns(runtime) && token === this.turnToken && !this.paused && !failed) {
+        this.lastTask = runtime.snapshot();
+        if (this.goals.active && !this.queued) this.queued = lastRequestText(this.messages) || this.goals.snapshot()!.objective;
+        this.onTurnFinished();
+      }
       if (this.taskRuntime === runtime) {
         if (runtime.signal.aborted && token === this.turnToken && this.busy && !this.paused) {
           if ((this.taskOutcome as AgentStatus) !== "cancelled") this.messages.push({ role: "assistant", content: `[Task stopped: ${String(runtime.signal.reason)}]\n${runtime.partialReport()}` });
@@ -1032,12 +1072,31 @@ export class ChatScreen extends Screen implements LiveAgent {
     return view;
   }
 
-  private send(text: string): void {
+  private send(text: string, goalRequest = false): void {
     const trimmed = text.trim();
     if (!trimmed) return;
+    const goalAction = goalRequest ? null : this.goals.handle(trimmed, this.busy);
+    if (goalAction) {
+      this.inputValue = "";
+      this.cursor = 0;
+      this.followBottom = true;
+      if (goalAction.pause) this.livePause();
+      if (goalAction.message) this.messages.push({ role: "assistant", content: goalAction.message });
+      this.save(); this.publishLive(); this.app.render();
+      if (goalAction.request) {
+        this.paused = false;
+        this.send(goalAction.request, true);
+      } else if (goalAction.resume) {
+        this.paused = false;
+        if (this.queued) this.maybeFlushQueue();
+        else this.startTurn();
+      }
+      return;
+    }
     this.messages.push({ role: "user", content: trimmed });
     // Create the history entry before requesting a model or executing tools.
     this.save();
+    this.sessionTitle.generate(trimmed, this.model, this.modelProvider, "standard", () => this.save());
     this.inputValue = "";
     this.cursor = 0;
     this.followBottom = true;
@@ -1080,7 +1139,8 @@ export class ChatScreen extends Screen implements LiveAgent {
     for (const start of starts) if (start !== active) this.finishedTurns.add(start);
     this.activeTurnStart = active;
     const turnMessages = this.messages.slice();
-    const approvalContext = captureApprovalContext(turnMessages);
+    const captured = captureApprovalContext(turnMessages);
+    const approvalContext = { ...captured, prompt: this.goals.request(captured.prompt) };
     this.busy = true;
     this.paused = false;
     this.app.state.isThinking = true;
@@ -1106,6 +1166,7 @@ export class ChatScreen extends Screen implements LiveAgent {
    * failure visible in the transcript.
    */
   private failTurn(err: unknown): void {
+    if (this.goals.active) this.goals.stop("paused", `Task failed: ${describeError(err)}`);
     this.retainStreamingContent();
     this.messages.push({ role: "assistant", content: `[Error: ${describeError(err)}]` });
     this.streamingContent = null;
@@ -1141,7 +1202,7 @@ export class ChatScreen extends Screen implements LiveAgent {
       runtime, signal, cwd: this.liveDir, settings: fastSettings(loadConfig()),
       directory: path.join(sessionDir(), "tasks", path.basename(this.sessionId || "unsaved"), "fast"),
       history,
-      system: loadAgentPrompt(FAST_MODE), subagentSystem: loadSubAgentPrompt(),
+      system: loadAgentPrompt(FAST_MODE) + this.goals.instructions(), subagentSystem: loadSubAgentPrompt(),
       contextWindow: modelContextWindow(provider, model), maxRounds: subAgentRounds(loadConfig().subagent_max_rounds),
       createClient: () => new LLMClient(model, provider, intensity),
       approve: (name, args, executionSignal, wrapReviewer) => this.requestApproval(name, args, {
@@ -1178,8 +1239,10 @@ export class ChatScreen extends Screen implements LiveAgent {
   private buildApiMessages(messages = this.messages, directive = ""): ApiMessage[] {
     // A step directive extends the system prompt rather than adding a user
     // message: the plan is an instruction, not something the user just said.
-    const prompt = loadAgentPrompt(this.activeAgentMode);
-    const system = (directive ? `${prompt}\n\n${directive}` : prompt) +
+    const prompt = loadAgentPrompt(this.activeAgentMode) + this.goals.instructions();
+    const standard = this.standardTask?.runtime === currentTask()?.runtime ? this.standardTask : null;
+    const system = standard ? prompt + `\n\n${standard.runtime.instructions()}\n\n${standard.instructions()}` +
+      (directive ? `\n\n${directive}` : "") : (directive ? `${prompt}\n\n${directive}` : prompt) +
       (currentTask() ? `\n\n${currentTask()!.runtime.instructions()}` : "");
     const api: ApiMessage[] = [{ role: "system", content: system }];
     for (const m of modelHistory(messages, this.context)) {
@@ -1210,7 +1273,7 @@ export class ChatScreen extends Screen implements LiveAgent {
     if (standardContext) {
       tools.push(STANDARD_EVIDENCE_DEFINITION, ...STANDARD_CHECK_DEFINITIONS);
       if (standard) tools.push(STANDARD_FINISH_DEFINITION);
-      apiMessages[0] = { ...apiMessages[0], content: `${apiMessages[0].content ?? ""}\n\n${standardContext.instructions()}\n${standardContext.evidenceBrief()}` };
+      apiMessages[0] = { ...apiMessages[0], content: `${apiMessages[0].content ?? ""}\n\n${standardContext.evidenceBrief()}` };
     }
     let emptyReplies = 0;
     try {
@@ -1319,11 +1382,6 @@ export class ChatScreen extends Screen implements LiveAgent {
             const feedback = standard.naturalCompletion();
             if (feedback) {
               this.streamingContent = null;
-              if (standard.naturalCompletionExhausted) {
-                this.taskOutcome = "partial";
-                this.messages.push({ role: "assistant", content: `Task incomplete. ${feedback}` });
-                return false;
-              }
               if (content.trim()) apiMessages.push({ role: "assistant", content });
               apiMessages.push({ role: "user", content: feedback });
               continue;
@@ -1387,10 +1445,18 @@ export class ChatScreen extends Screen implements LiveAgent {
                 : `[Not executed: approval denied (${decision.source}): ${decision.reason}] ` +
                   describeApprovalIntent(approvalContext) +
                   "Do not retry this call unchanged; ask the user how to proceed.";
+            if (this.goals.owns(currentTask()?.runtime ?? null)) currentTask()?.runtime.recordTool(tc.name, args, toolMsg.result, "denied");
             apiMessages.push({ role: "tool", tool_call_id: tc.id, content: toolMsg.result });
             this.save();
             this.publishLive();
             this.app.render();
+            if (this.goals.owns(currentTask()?.runtime ?? null) && decision.source !== "input") {
+              this.goals.stop("blocked", "A tool approval was denied. Review the request before resuming.");
+              this.taskOutcome = "blocked";
+              this.streamingContent = null;
+              this.messages.push({ role: "assistant", content: `Goal blocked: ${decision.reason}` });
+              return false;
+            }
             continue;
           }
 
@@ -1442,14 +1508,14 @@ export class ChatScreen extends Screen implements LiveAgent {
           toolMsg.result = result;
           this.save();
           if (token !== this.turnToken || this.paused) return false;
+          if (standardFinish?.completed && !standard!.acceptedArtifactsCurrent()) {
+            standardFinish = standard!.invalidCompletion("Artifacts changed after completion review. Read the current artifacts and refresh affected checks before retrying completion.");
+            result = toolMsg.result = JSON.stringify(standardFinish);
+            this.save();
+          }
           apiMessages.push({ role: "tool", tool_call_id: tc.id, content: toolMsg.evidenceId
             ? `${result}\n[Task evidence: ${toolMsg.evidenceId}; status=${toolMsg.executionStatus}]` : result });
           if (standardFinish?.settled) {
-            if (standardFinish.completed && !standard!.acceptedArtifactsCurrent()) {
-              this.taskOutcome = "partial";
-              this.messages.push({ role: "assistant", content: "Task incomplete: artifact versions changed after completion review." });
-              return false;
-            }
             this.taskOutcome = standardFinish.completed ? "completed" : "partial";
             this.messages.push({ role: "assistant", content: standardFinish.report });
             this.streamingContent = null;
@@ -1485,6 +1551,11 @@ export class ChatScreen extends Screen implements LiveAgent {
    * Ctrl+C): a paused turn is not a completed one and stays open for reading.
    */
   private onTurnFinished(finished = true): void {
+    if (this.goals.owns(this.taskRuntime) && ["running", "cancelling"].includes(this.taskRuntime!.snapshot().state)) {
+      this.streamingContent = null;
+      this.save(); this.publishLive(); this.app.render();
+      return;
+    }
     if (finished && this.activeTurnStart !== null) this.finishedTurns.add(this.activeTurnStart);
     this.activeTurnStart = null;
     this.busy = false;
@@ -2105,6 +2176,8 @@ export class ChatScreen extends Screen implements LiveAgent {
         this.agentMode,
         this.taskRuntime?.snapshot() ?? this.lastTask,
         this.fastState,
+        this.sessionTitle.value || undefined,
+        this.goals.snapshot(),
       );
       this.saveError = null;
       return true;
@@ -2327,6 +2400,13 @@ export class ChatScreen extends Screen implements LiveAgent {
 
     const inW = Math.max(12, w - 2);
     drawApprovalToggle(buf, this.approvalToggleY(h), this.approvalMode);
+    const goal = this.goals.snapshot();
+    if (goal) {
+      const toggle = approvalToggle(w, this.approvalToggleY(h), this.approvalMode);
+      const x = toggle.x + toggle.w + 2;
+      const label = `Goal · ${goal.status} · ${goal.tokensUsed}${goal.tokenBudget === undefined ? " tokens" : ` / ${goal.tokenBudget}`}`;
+      buf.writeText(x, this.approvalToggleY(h), ellipsize(label, Math.max(0, w - x - 1)), { fg: goal.status === "active" ? C.accent : C.dim });
+    }
     drawInputBox(buf, 1, inputY, inW, this.inputValue, this.cursor, {
       active: true,
       dimmed: this.busy,
@@ -2335,7 +2415,7 @@ export class ChatScreen extends Screen implements LiveAgent {
     });
 
     const hintY = h - 1;
-    const hints = "Enter send · Ctrl+P plan · Ctrl+C pause · ESC ESC pause · Ctrl+A approval · Ctrl+B menu · Ctrl+L clear · drag to copy";
+    const hints = "Enter send · /goal target · Ctrl+P plan · Ctrl+C pause · ESC ESC pause · Ctrl+A approval · Ctrl+B menu · Ctrl+L clear · drag to copy";
     const hintW = displayWidth(hints);
     const hintX = Math.max(0, w - 1 - hintW);
     const pathAvail = Math.max(0, hintX - 2);
@@ -2387,6 +2467,17 @@ export class ChatScreen extends Screen implements LiveAgent {
    * kept for the counts, so a long plan cannot push them out of the card.
    */
   private infoCardRows(width: number, maxRows: number): PlanRow[] {
+    const goal = this.goals.snapshot();
+    if (goal) {
+      const rows: PlanRow[] = [
+        { kind: "header", text: `Goal · ${goal.status}` },
+        ...wrapText(sanitizeText(goal.objective), width).slice(0, Math.max(1, Math.min(4, maxRows - 3))).map(text => ({ kind: "line" as const, text })),
+        { kind: "line", text: `Tokens ${goal.tokensUsed}${goal.tokenBudget === undefined ? "" : ` / ${goal.tokenBudget}`} · Turns ${goal.turns}` },
+      ];
+      if (goal.reason && rows.length < maxRows) rows.push({ kind: "line", text: ellipsize(sanitizeText(goal.reason, { singleLine: true }), width) });
+      if (this.plan && rows.length < maxRows) rows.push(...planCardRows(this.plan, { width, maxRows: maxRows - rows.length }));
+      return rows.slice(0, maxRows);
+    }
     const plan = this.plan;
     if (!plan) {
       const total = this.tokens.prompt + this.tokens.completion;

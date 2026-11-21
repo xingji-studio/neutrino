@@ -68,6 +68,8 @@ export interface StreamOptions {
   diagnostic?: DiagnosticRequestContext;
   diagnosticObserver?: DiagnosticRequest;
   maxOutputTokens?: number;
+  /** Lightweight auxiliary completions: disable thinking, or use the lowest supported effort. */
+  minimizeReasoning?: boolean;
   /** Reserved final request after normal request capacity has been spent. */
   final?: boolean;
   /** Cancels both the connection and an in-progress response body. */
@@ -84,6 +86,38 @@ export interface StreamOptions {
   cancelled?: () => boolean;
   /** Override the policy (tests, or a caller with its own budget). */
   retry?: Partial<RetryPolicy>;
+}
+
+/** Provider controls for lightweight UI text, kept separate from the active chat's settings. */
+function minimalReasoningParams(model: ModelInfo, provider: string, intensity: string): Record<string, unknown> {
+  const name = model.name.toLowerCase();
+  if (provider.toLowerCase() === "deepseek" || /^deepseek-/.test(name)) {
+    return { thinking: { type: "disabled" } };
+  }
+  if (provider === "Anthropic") {
+    // Some recent Claude models always think; low adaptive effort is their minimum.
+    if (/^claude-(?:fable|mythos)-|^claude-opus-5[.-]5/.test(name)) {
+      return { thinking: { type: "adaptive" }, output_config: { effort: intensity.toLowerCase() } };
+    }
+    if (/^claude-sonnet-5[.-]5/.test(name)) {
+      return { thinking: { type: "between_tools" }, output_config: { effort: "low" } };
+    }
+    if (/^claude-(?:opus|sonnet|haiku)-[4-9]|^claude-3[.-]7/.test(name)) {
+      return { thinking: { type: "disabled" } };
+    }
+    // Older models do not think unless explicitly enabled.
+    return { temperature: 0.1 };
+  }
+  if (/^(?:o\d|gpt-[5-9])(?:\b|[.-])/.test(name)) {
+    let effort = intensity.toLowerCase();
+    if (effort === "low" && /^gpt-5(?:[.-](?:mini|nano))?(?:-\d{4}.*)?$/.test(name)) effort = "minimal";
+    else if (effort === "low" && /^gpt-5\.\d/.test(name) && !/codex|pro/.test(name)) effort = "none";
+    else if (/^gpt-5-pro(?:-|$)/.test(name)) effort = "high";
+    // o1-mini/preview predate the effort parameter.
+    return /^o1-(?:mini|preview)/.test(name) ? {} : { reasoning_effort: effort };
+  }
+  if (modelUsesReasoning(provider, model)) return { reasoning_effort: intensity.toLowerCase() };
+  return { temperature: 0.1, top_p: 0.1 };
 }
 
 /**
@@ -362,7 +396,7 @@ export class LLMClient {
       model: this.model.name,
       messages: this.wireMessages(messages),
       ...(options.maxOutputTokens ? completionLimit(this.model, this.provider, options.maxOutputTokens) : {}),
-      ...(this.professional ? { reasoning_effort: this.intensity } : {
+      ...(options.minimizeReasoning ? minimalReasoningParams(this.model, this.provider, this.intensity) : this.professional ? { reasoning_effort: this.intensity } : {
         temperature: this.temperature,
         top_p: this.top_p,
         ...(deepSeekEffort(this.model, this.provider, this.intensity) ? {
@@ -567,7 +601,7 @@ export class LLMClient {
       model: this.model.name,
       messages: chatMessages,
       max_tokens: options.maxOutputTokens ?? 4096,
-      ...(this.professional ? { output_config: { effort: this.intensity } } : {
+      ...(options.minimizeReasoning ? minimalReasoningParams(this.model, this.provider, this.intensity) : this.professional ? { output_config: { effort: this.intensity } } : {
         temperature: this.temperature,
         ...(deepSeekEffort(this.model, this.provider, this.intensity) ? {
           output_config: { effort: deepSeekEffort(this.model, this.provider, this.intensity) }, thinking: { type: "enabled" },

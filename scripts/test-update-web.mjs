@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { createGoalUI } from "../web/goal.js";
 
 /**
  * The console only needs a settings controller that can load the payload; the
@@ -131,6 +132,7 @@ function boot(pathname, {
   }
   const context = vm.createContext({
     createSettingsUI,
+    createGoalUI,
     document,
     localStorage: { getItem: () => "", setItem() {}, removeItem() {} },
     location: { search: "", pathname },

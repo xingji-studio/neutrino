@@ -117,6 +117,8 @@ export class TaskControlError extends Error {
 
 const storage = new AsyncLocalStorage<TaskScope>();
 export function currentTask(): TaskScope | undefined { return storage.getStore(); }
+/** Auxiliary UI requests run independently of task budgets and cancellation. */
+export function outsideTask<T>(callback: () => T): T { return storage.exit(callback); }
 /** Node 18-compatible signal composition with deterministic listener cleanup. */
 export function linkSignals(...values: Array<AbortSignal | undefined>): { signal: AbortSignal; dispose(): void } {
   const signals = [...new Set(values.filter((value): value is AbortSignal => Boolean(value)))];
@@ -209,6 +211,8 @@ export class TaskRuntime {
   private readonly usage = { agentRuns: 0, modelRequests: 0, toolCalls: 0, tokens: 0 };
   private readonly delegatedUsage = { modelRequests: 0, toolCalls: 0, tokens: 0 };
   private reservedTokens = 0;
+  /** Optional goal-wide remainder, enforced for every model role and retry. */
+  private readonly goalTokenBudget?: number;
   private delegatedReservedTokens = 0;
   private budgetStop?: TaskBudgetStop;
   private state: TaskSnapshot["state"] = "running";
@@ -221,6 +225,7 @@ export class TaskRuntime {
   constructor(options: {
     request: string; cwd?: string; priorUserRequests?: readonly string[]; limits?: Partial<TaskLimits>;
     budgetScope?: TaskBudgetScope;
+    goalTokenBudget?: number;
     executionMode?: AgentMode | "pro";
     signal?: AbortSignal; readOnly?: boolean; writePaths?: readonly string[]; workspaceOnly?: boolean; journalDir?: string;
     diagnostics?: DiagnosticRecorder;
@@ -232,6 +237,7 @@ export class TaskRuntime {
     // Direct runtime callers retain strict limits. Conversation drivers opt into
     // delegation-only limits so normal main-agent work can reach completion.
     this.budgetScope = options.budgetScope ?? "task";
+    this.goalTokenBudget = options.goalTokenBudget;
     this.originalRequest = options.request;
     this.priorUserRequests = Object.freeze([...(options.priorUserRequests ?? [])]);
     this.cwd = path.resolve(options.cwd || process.cwd());
@@ -448,11 +454,16 @@ export class TaskRuntime {
       "\nAnything not established by these records remains unverified.";
   }
 
+  /** Settled inference usage, without cloning the task's full evidence metadata. */
+  get tokensUsed(): number { return this.usage.tokens; }
+
   /** Advisory only: request() remains the authority for every actual dispatch. */
   remainingRequestTokens(): number | undefined {
-    if (this.budgetScope === "task") return Math.max(0, this.limits.tokens - this.usage.tokens - this.reservedTokens);
-    if (this.isDelegated()) return Math.max(0, this.limits.tokens - this.delegatedUsage.tokens - this.delegatedReservedTokens);
-    return undefined;
+    const taskRemaining = this.budgetScope === "task" ? this.limits.tokens - this.usage.tokens - this.reservedTokens :
+      this.isDelegated() ? this.limits.tokens - this.delegatedUsage.tokens - this.delegatedReservedTokens : Infinity;
+    const goalRemaining = this.goalTokenBudget === undefined ? Infinity : this.goalTokenBudget - this.usage.tokens - this.reservedTokens;
+    const remaining = Math.min(taskRemaining, goalRemaining);
+    return Number.isFinite(remaining) ? Math.max(0, remaining) : undefined;
   }
 
   /** Reserve before every actual HTTP attempt, including retries, reviews and summaries. */
@@ -466,6 +477,10 @@ export class TaskRuntime {
     const reporting = final && (this.budgetScope === "delegation" || (currentTask()?.runId ?? this.rootRunId) === this.rootRunId);
     const reserveRequests = reporting || this.limits.modelRequests === 1 ? 0 : 1;
     const reserve = Math.max(1, Math.ceil(inputTokens)) + Math.max(1, Math.ceil(outputTokens));
+    if (this.goalTokenBudget !== undefined && this.usage.tokens + this.reservedTokens + reserve > this.goalTokenBudget) {
+      throw this.stopBudget("goal_token_budget", "Goal token budget cannot accommodate this request", this.goalTokenBudget,
+        this.usage.tokens, reserve, "task", this.reservedTokens, final && !delegated);
+    }
     if (enforce && charged.modelRequests >= this.limits.modelRequests - reserveRequests) {
       throw this.stopBudget("request_budget", "Shared model-request budget exhausted", this.limits.modelRequests, charged.modelRequests, 1, this.budgetScope, reserveRequests, final && !delegated);
     }

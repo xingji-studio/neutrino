@@ -10,6 +10,7 @@ import type { PlanState } from "./llm/plan.js";
 import { SUBAGENT_MAX_ROUNDS } from "./llm/subagent.js";
 import { DEFAULT_TASK_LIMITS, type TaskSnapshot } from "./llm/runtime.js";
 import type { FastSnapshot } from "./fast/types.js";
+import { normalizeGoal, type GoalState } from "./goal.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(__dirname, "..");
@@ -142,6 +143,19 @@ export interface ModelSelection {
   intensity: string;
 }
 
+export type TitleModelSelection = Pick<ModelSelection, "provider" | "model">;
+
+/** Empty means the conversation's model; explicit choices always include the provider. */
+export function resolveTitleModel(value: unknown): { provider: string; model: ModelInfo } | null {
+  if (value === "" || value === undefined) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid title model");
+  const selection = value as Partial<TitleModelSelection>;
+  if (typeof selection.provider !== "string" || typeof selection.model !== "string") throw new Error("invalid title model");
+  const model = findConfiguredModel(selection.provider, selection.model);
+  if (!model) throw new Error("unknown title model");
+  return { provider: selection.provider, model };
+}
+
 /** Resolved only on the server; credentials must never be serialized to clients. */
 export interface ResolvedModelSelection {
   provider: string;
@@ -209,6 +223,10 @@ export const DEFAULT_CONFIG: Record<string, unknown> = {
   sound_alerts: true,
   // Model that reviews approval requests. Empty = same model as the chat.
   approval_model: "",
+  // Generate one title from the first message of a new conversation, in the background.
+  auto_title: true,
+  // Empty = conversation model; otherwise { provider, model } from model.json.
+  title_model: "",
   // Rounds one sub-agent may take; the last round has no tools and exists so the
   // child writes its report instead of exploring until it is cut off.
   subagent_max_rounds: SUBAGENT_MAX_ROUNDS,
@@ -341,6 +359,7 @@ export interface TokenUsage {
 }
 
 export interface SessionData {
+  goal?: GoalState | null;
   fast_run?: FastSnapshot;
   task_run?: TaskSnapshot;
   id: string;
@@ -508,6 +527,8 @@ export function saveSession(
   agentMode?: AgentMode,
   taskRun?: TaskSnapshot,
   fastRun?: FastSnapshot,
+  sessionTitle?: string,
+  goal?: GoalState | null,
 ): string {
   ensureDirs(mode);
   const now = new Date();
@@ -515,9 +536,9 @@ export function saveSession(
   const existing = sessionId ? loadSession(sessionId, mode) : null;
   const created_at = existing ? existing.created_at : now.toISOString();
 
-  let title = "";
+  let title = sessionTitle ?? existing?.title ?? "";
   for (const msg of messages) {
-    if (msg.role === "user") {
+    if (!title && msg.role === "user") {
       title = (msg.content ?? "").slice(0, 80);
       break;
     }
@@ -534,6 +555,7 @@ export function saveSession(
     title,
     messages,
     tokens,
+    goal: normalizeGoal(goal === undefined ? existing?.goal : goal),
     ...((fastRun ?? existing?.fast_run) ? { fast_run: fastRun ?? existing?.fast_run } : {}),
     ...((taskRun ?? existing?.task_run) ? { task_run: taskRun ?? existing?.task_run } : {}),
     approval_mode: normalizeApprovalMode(approvalMode ?? existing?.approval_mode),

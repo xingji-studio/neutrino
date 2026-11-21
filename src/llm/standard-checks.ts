@@ -10,7 +10,7 @@ export const STANDARD_CHECK_DEFINITIONS: ToolDefinition[] = [
   { type: "function", function: { name: "create_check_workspace", description: "Create a unique empty test workspace inside this project. Reuse its ID for checks; create another workspace for a new variant instead of deleting/rebuilding temporary folders. Keep test data for audit.", parameters: {
     type: "object", properties: { label: { type: "string" }, reason: { type: "string" } }, required: ["reason"],
   } } },
-  { type: "function", function: { name: "run_task_check", description: "Run a check in a previously created workspace. input_paths are project files already read/written with file tools, including the implementation under test. Runtime records their actual before/after hashes and the workspace's immutable input snapshot. This is declared dependency evidence, not proof of semantic coverage. Only explicitly request reuse for the identical command and unchanged inputs; independent checks must run separately.", parameters: {
+  { type: "function", function: { name: "run_task_check", description: "Run a check in a previously created workspace. input_paths are project files already read/written with file tools, including the implementation under test. Runtime records their actual before/after hashes and the workspace's immutable input snapshot. This is declared dependency evidence, not proof of semantic coverage. Batch related assertions/input variations into one checker. Use reuse:true for ordinary repeated regressions only with the identical command, implementation, complete fixture snapshot and environment. New variants are not automatically independent reruns. Set independent:true only when a fresh execution is actually required; it always bypasses reuse. Cached aliases never satisfy a required independent execution.", parameters: {
     type: "object", properties: { workspace_id: { type: "string" }, command: { type: "string" },
       input_paths: { type: "array", items: { type: "string" }, minItems: 1 },
       reuse: { type: "boolean" }, independent: { type: "boolean" }, reason: { type: "string" },
@@ -154,7 +154,8 @@ export class StandardChecks {
   }
   describe(id: string): unknown {
     const proof = this.proof(id);
-    const script = proof && /^(?:node|bun|python(?:3)?)\s+([\w./-]+)(?:\s|$)/.exec(proof.record.command)?.[1];
+    const invocation = proof && /^(?:node|bun|python(?:3)?)\s+(?:"([^"]+)"|'([^']+)'|(\S+))(?:\s|$)/.exec(proof.record.command);
+    const script = invocation && (invocation[1] ?? invocation[2] ?? invocation[3]);
     const workspace = proof && this.workspaces.get(proof.record.workspaceId);
     const relativeScript = script && workspace ? path.relative(workspace.directory, path.resolve(workspace.directory, script)) : undefined;
     const source = relativeScript && !relativeScript.startsWith(`..${path.sep}`) && !path.isAbsolute(relativeScript)

@@ -24,7 +24,7 @@ fs.writeFileSync(path.join(cwd, "input.txt"), "RAW_INTERMEDIATE\n".repeat(2000))
 const model = { name: "fixture-model", url: "https://fixture.invalid/v1", api_key: "fixture-key", supports_streaming: true };
 const selection = { provider: "Fixture", model, intensity: "High" };
 config.saveModels({ providers: [{ name: "Fixture", models: [model] }] });
-config.saveConfig({ plan_first: true, default_provider: "Fixture", default_model: model.name });
+config.saveConfig({ plan_first: true, auto_title: false, default_provider: "Fixture", default_model: model.name });
 seedProPresets();
 
 let script = [];

@@ -1,7 +1,7 @@
 import {
   DEFAULT_CONFIG, INTENSITY_LEVELS, WEB_LANGUAGES, contextWindow, intensityForModel, isContextWindow,
   loadConfig, loadModels, modelContextWindow, modelContextWindowKey, modelIntensities, normalizeApprovalMode,
-  normalizeIntensity, normalizeWebLanguage, resolveModelSelection, saveConfig, saveModels,
+  normalizeIntensity, normalizeWebLanguage, resolveModelSelection, resolveTitleModel, saveConfig, saveModels,
   type Mode, type ResolvedModelSelection,
 } from "../config.js";
 
@@ -75,6 +75,10 @@ export function getWebSettings(mode: Mode = "standard") {
       default_intensity: intensityForModel(configuredModel, config.default_intensity, "High"),
       model_context_window: model?.context_window ?? contextWindow(undefined),
       approval_model: String(config.approval_model ?? ""),
+      auto_title: config.auto_title !== false,
+      title_model: config.title_model && typeof config.title_model === "object" && !Array.isArray(config.title_model)
+        ? { provider: String((config.title_model as Record<string, unknown>).provider ?? ""),
+          model: String((config.title_model as Record<string, unknown>).model ?? "") } : "",
       auto_approve_extreme_risk: config.auto_approve_extreme_risk === true,
       sound_alerts: config.sound_alerts !== false,
       language: normalizeWebLanguage(config.language),
@@ -124,6 +128,12 @@ export function updateWebSettings(value: unknown, mode: Mode = "standard"): void
       } else if (key === "approval_model") {
         if (typeof val !== "string" || (val && !loadModels().providers.some((p) => p.models.some((m) => m.name === val)))) throw new Error("unknown approval model");
         config[key] = val;
+      } else if (key === "auto_title") {
+        if (typeof val !== "boolean") throw new Error("automatic titles must be a boolean");
+        config[key] = val;
+      } else if (key === "title_model") {
+        const selected = resolveTitleModel(val);
+        config[key] = selected ? { provider: selected.provider, model: selected.model.name } : "";
       } else if (key === "sound_alerts") {
         if (typeof val !== "boolean") throw new Error("sound alerts must be a boolean");
         config[key] = val;

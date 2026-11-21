@@ -154,7 +154,7 @@ if (process.argv[2] === "--owner") {
 
   try {
     saveModels({ providers: [provider] });
-    saveConfig({ ...loadConfig(), background: false, plan_first: false });
+    saveConfig({ ...loadConfig(), background: false, plan_first: false, auto_title: false });
 
     const owner = await spawnOwner();
     const initial = readBackgroundStatus();

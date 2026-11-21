@@ -62,16 +62,21 @@ try {
   const catalog = await request("/api/settings");
   assert.equal(catalog.status, 200);
   assert.equal(catalog.data.providers.length, 2);
+  assert.equal(catalog.data.settings.auto_title, true);
+  assert.equal(catalog.data.settings.title_model, "");
   // The update notice compares the running version with the published one; no
   // registry lookup has run in this process, so only the running one is known.
   assert.deepEqual(catalog.data.update, { current_version: loadVersion(), latest_version: "", has_update: false });
   for (const secret of ["http-secret", "https://", "web_password_hash"]) assert.ok(!catalog.text.includes(secret));
   assert.equal((await request("/api/settings", { method: "DELETE" })).status, 405);
   assert.equal((await request("/api/settings", { body: { selection: b }, headers: { Origin: "http://evil.example" } })).status, 403);
-  const updated = await request("/api/settings", { body: { selection: b, settings: { model_context_window: 128000, approval_model: "", auto_approve_extreme_risk: false } } });
+  const updated = await request("/api/settings", { body: { selection: b, settings: { model_context_window: 128000, approval_model: "", auto_approve_extreme_risk: false,
+    auto_title: false, title_model: { provider: "B", model: "shared" } } } });
   assert.equal(updated.status, 200);
   assert.deepEqual(updated.data.selection, b);
   assert.equal(loadConfig().unrelated, "keep");
+  assert.equal(updated.data.settings.auto_title, false);
+  assert.deepEqual(updated.data.settings.title_model, { provider: "B", model: "shared" });
   const before = loadConfig();
   assert.equal((await request("/api/settings", { body: { settings: { model_context_window: -1 } } })).status, 400);
   assert.deepEqual(loadConfig(), before);

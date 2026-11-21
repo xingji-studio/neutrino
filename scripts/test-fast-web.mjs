@@ -17,7 +17,7 @@ const { defaultState } = await import("../dist/state.js");
 const model = { name: "unchanged-model", url: "https://fixture.invalid/v1", api_key: "fixture", intensity: ["High"] };
 const selection = { provider: "Fixture", model: model.name, intensity: "High" };
 config.saveModels({ providers: [{ name: "Fixture", models: [model] }] });
-config.saveConfig({ selected_provider: "Fixture", selected_model: model.name, plan_first: false, fast_replans: 0 });
+config.saveConfig({ selected_provider: "Fixture", selected_model: model.name, plan_first: false, fast_replans: 0, auto_title: false });
 const originalStream = LLMClient.prototype.streamTurn;
 let releaseWorker, blocked = false;
 const calls = [];
@@ -118,7 +118,7 @@ try {
     el: { modePicker: picker, modeLabel: { removeAttribute() {} }, modeFeedback: { classList: { toggle() {} } },
       input: { value: "Inspect fixture" }, sub: {} },
     PRO_MODE: false, tr: text => text, readStorage: () => "standard", writeStorage() {},
-    preferences: { async flush() {} }, autosize() {},
+    preferences: { async flush() {} }, goalUI: null, autosize() {},
     apiFetch: async (route, options) => { const body = JSON.parse(options.body); sent.push({ route, body });
       return { ok: true, json: async () => ({ snapshot: { agentMode: body.mode } }) }; },
     postAction: async (...args) => { sent.push(args); return true; },

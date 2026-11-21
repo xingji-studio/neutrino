@@ -122,3 +122,17 @@ for (const invalid of [{ end: 100, summary: "invalid" }, { end: 4.5, summary: "i
   assert.equal(pane.children.length, messages.length, "invalid metadata must never hide originals");
 }
 console.log("ok web history: default disclosure, complete originals, stable tools, streaming state and scroll position");
+
+const renderFileSource = source.match(/function renderFile\([\s\S]*?\n\}/)?.[0];
+assert.ok(renderFileSource);
+const heading = { textContent: "" };
+const renderFile = vm.runInNewContext(`(${renderFileSource})`, {
+  state: {}, el: { title: heading, sub: {} }, tr: value => value,
+  firstUserMessage: entries => entries.find(message => message.role === "user")?.content,
+  preferences: { showConversation() {} }, proUI: null,
+  renderMessageList() {}, renderFileControls() {}, maybeOpenPlan() {}, renderPlanCard() {},
+});
+renderFile({ id: "generated", title: "Generated conversation title", messages: [{ role: "user", content: "Long original request" }] });
+assert.equal(heading.textContent, "Generated conversation title", "saved conversation headers use the persisted title");
+renderFile({ id: "legacy", messages: [{ role: "user", content: "Legacy first message" }] });
+assert.equal(heading.textContent, "Legacy first message");

@@ -24,6 +24,10 @@ A small, dependency-free single page app that is served by the Neutrino CLI at
   delete a saved transcript, and review or migrate other agents' history;
 - drive the running conversation: pause / resume the current turn and send new
   messages (they queue while the agent is busy);
+- set a persistent goal with `/goal` or **Set a goal**: choose an objective and
+  optional token budget, then track usage and control execution in the goal card
+  above the composer. `/goal status`, `pause`, `resume`, and `clear` also work in
+  CLI. See [Persistent goals](../README-en.md#persistent-goals-goal);
 - pick up a saved conversation in the browser and keep chatting, even when no
   terminal is running;
 - run the console as a detached background service, so conversations started in
@@ -255,6 +259,14 @@ the Web password, LAN access and background residency, which belong to the whole
 process.
 
 ## New conversations and working directories
+
+New conversations generate one title from their first message in the background.
+By default this uses the conversation model, with thinking disabled or minimized.
+**Settings → Automatically generate conversation titles** turns it off;
+**Title generation model** chooses a different configured provider/model.
+The main task continues while the title is pending, and a failed title request
+retains the message excerpt. Resumed history is never renamed automatically.
+The regular and Pro workspaces keep separate title settings.
 
 **New conversation** starts a chat that has no transcript yet. The dialog takes a
 working directory plus provider, model, thinking level and approval mode. The

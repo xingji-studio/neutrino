@@ -15,6 +15,7 @@ import {
   loadModels,
   saveConfig,
   saveModels,
+  type TitleModelSelection,
 } from "../config.js";
 import { drawHeader } from "../header.js";
 import { centerVertically, drawHint } from "../ui.js";
@@ -22,7 +23,7 @@ import { hashWebPassword } from "../web/auth.js";
 import { runningBackground } from "../background.js";
 
 /** The settings that can be changed here, top to bottom. */
-const ROWS = ["intensity", "compress", "approval_model", "extreme_approval", "sound", "web_console", "background", "web_password"] as const;
+const ROWS = ["intensity", "compress", "approval_model", "title_model", "extreme_approval", "sound", "web_console", "background", "web_password"] as const;
 type RowId = (typeof ROWS)[number];
 
 export class SettingsScreen extends Screen {
@@ -33,6 +34,10 @@ export class SettingsScreen extends Screen {
   private contextChanged = false;
   /** 0 = same model as the chat, otherwise index + 1 into `models`. */
   private approvalModelIdx = 0;
+  /** 0 = off, 1 = conversation model, 2+ = explicit provider/model. */
+  private titleModelIdx = 1;
+  private titleModels: TitleModelSelection[] = [];
+  private titleChanged = false;
   /** 0 = off (human only), 1 = on (two independent assessments). */
   private extremeIdx = 0;
   /** 0 = silent, 1 = audible cue on turn end and on approval requests. */
@@ -67,6 +72,11 @@ export class SettingsScreen extends Screen {
     const currentApproval = String(config.approval_model ?? "");
     const approvalAt = currentApproval ? this.models.indexOf(currentApproval) : -1;
     this.approvalModelIdx = approvalAt >= 0 ? approvalAt + 1 : 0;
+    this.titleModels = loadModels().providers.flatMap(provider => provider.models.map(model => ({ provider: provider.name, model: model.name })));
+    const titleSelection = config.title_model as Partial<TitleModelSelection> | undefined;
+    const titleAt = this.titleModels.findIndex(entry => entry.provider === titleSelection?.provider && entry.model === titleSelection?.model);
+    this.titleModelIdx = config.auto_title === false ? 0 : titleAt < 0 ? 1 : titleAt + 2;
+    this.titleChanged = false;
     this.extremeIdx = config.auto_approve_extreme_risk === true ? 1 : 0;
     this.soundIdx = config.sound_alerts === false ? 0 : 1;
     // A console started by an explicit flag is on even if the saved default is
@@ -92,6 +102,10 @@ export class SettingsScreen extends Screen {
     } else if (row === "approval_model") {
       const n = this.models.length + 1;
       this.approvalModelIdx = (this.approvalModelIdx + delta + n) % n;
+    } else if (row === "title_model") {
+      const n = this.titleModels.length + 2;
+      this.titleModelIdx = (this.titleModelIdx + delta + n) % n;
+      this.titleChanged = true;
     } else if (row === "extreme_approval") {
       // A switch, not a list: any nudge flips it.
       this.extremeIdx = this.extremeIdx === 1 ? 0 : 1;
@@ -253,6 +267,11 @@ export class SettingsScreen extends Screen {
         value: this.approvalModelIdx === 0 ? "Same as chat" : this.models[this.approvalModelIdx - 1] ?? "Same as chat",
       },
       {
+        label: "Automatic chat titles",
+        value: this.titleModelIdx === 0 ? "Off" : this.titleModelIdx === 1 ? "Same as chat (minimum thinking)"
+          : `${this.titleModels[this.titleModelIdx - 2].provider}/${this.titleModels[this.titleModelIdx - 2].model}`,
+      },
+      {
         label: "Extreme-risk auto-approval",
         // Names the mechanism: three separate review rounds, not three reviewers
         // sitting in one panel.
@@ -314,6 +333,11 @@ export class SettingsScreen extends Screen {
       this.contextChanged = false;
     }
     config.approval_model = this.approvalModelIdx === 0 ? "" : this.models[this.approvalModelIdx - 1] ?? "";
+    if (this.titleChanged) {
+      config.auto_title = this.titleModelIdx !== 0;
+      config.title_model = this.titleModelIdx < 2 ? "" : this.titleModels[this.titleModelIdx - 2];
+      this.titleChanged = false;
+    }
     config.auto_approve_extreme_risk = this.extremeIdx === 1;
     config.sound_alerts = this.soundIdx === 1;
     if (this.webChanged) {

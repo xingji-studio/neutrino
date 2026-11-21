@@ -238,7 +238,7 @@ try {
   {
     const { document } = parseHTML('<html><body><div id="plan"></div></body></html>');
     const source = fs.readFileSync(new URL("../web/app.js", import.meta.url), "utf8");
-    const context = vm.createContext({ document, el: { planCard: document.getElementById("plan") }, state: { planOpen: true },
+    const context = vm.createContext({ document, goalUI: null, el: { planCard: document.getElementById("plan") }, state: { planOpen: true },
       tr: (text, args = {}) => text.replace(/\{(\w+)\}/g, (_, key) => args[key]),
       snapshot: { activeAgentMode: "fast_dag", fast: explicit.result.snapshot } });
     const start = source.indexOf("function fastPhaseLabel(");

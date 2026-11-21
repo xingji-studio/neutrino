@@ -19,6 +19,7 @@ import type { RiskAssessment } from "../llm/risk.js";
 import type { PlanState } from "../llm/plan.js";
 import type { ProFallback } from "../pro/config.js";
 import type { FastSnapshot } from "../fast/types.js";
+import type { GoalState } from "../goal.js";
 
 export type ModelChangeResult = { ok: true } | { ok: false; error: string };
 
@@ -64,6 +65,7 @@ export interface LiveRetryNotice {
 
 /** The small, frequently-changing part of a live session. */
 export interface LiveMeta {
+  goal?: GoalState | null;
   task?: import("../llm/runtime.js").TaskSnapshot;
   /** On-disk session id, or null until the conversation is first saved. */
   sessionId: string | null;

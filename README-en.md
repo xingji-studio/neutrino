@@ -107,6 +107,14 @@ highlight stops at the log's edge instead of spilling into the header or the
 input box, and the copy includes the lines that scrolled out of view. Scroll back
 and the selection shrinks again; press `Esc` to drop it.
 
+## Persistent goals `/goal`
+
+Both Web and CLI support `/goal <objective>` to work across turns until the complete objective is established. Use `/goal --tokens 100000 <objective>` for a shared input/output token budget, `/goal status` to inspect progress without inference, and `/goal pause`, `/goal resume`, or `/goal clear` to control it. `/goal set <objective>` allows an objective that is itself a reserved command word.
+
+In Web, type `/goal` or click **Set a goal** to open the objective and optional budget dialog. A persistent card above the composer shows status, token budget usage, turns, and pause/resume/clear controls. CLI shows goal status above the input and details in the `Ctrl+P` card.
+
+Goals survive compression and are saved with the conversation. Reopened goals wait for an explicit resume; tools are never replayed automatically. Denied approvals, execution failures, invalid completion checks, and exhausted budgets stop continuation. Token accounting includes retries, summaries, reviews and delegated requests, with conservative estimates when provider usage is unavailable. Automatic continuation pauses after 20 turns for a progress checkpoint; resume retains cumulative token usage and starts a new continuation window.
+
 ## Plan-first turns
 
 A request is answered in two passes. A **planner agent** first turns the message
@@ -232,6 +240,8 @@ Settings are stored under `~/.neutrino/`:
   shared by both workspaces.
 
 Set your API key in the model select screen or directly in `model.json`.
+
+New conversations generate one title from the first user message in the background, using the conversation model with thinking disabled or minimized. The task continues independently; failures retain the message excerpt, and resumed conversations keep their existing titles. Change **Settings → Automatically generate conversation titles / Title generation model** on the Web, or **Settings → Automatic chat titles** in the terminal. Configuration defaults are `"auto_title": true` and `"title_model": ""` (same as the conversation). To choose a configured model, use `"title_model": { "provider": "OpenAI", "model": "gpt-4o-mini" }`. Pro stores these settings separately.
 
 A few environment variables override flags:
 

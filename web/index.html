@@ -25,6 +25,7 @@
     <title>Neutrino</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f9fafb' stroke-width='1.7'%3E%3Cellipse cx='12' cy='12' rx='9.4' ry='3.8' transform='rotate(-30 12 12)'/%3E%3Ccircle cx='12' cy='12' r='3.1'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="goal.css" />
     <link rel="stylesheet" href="plugins.css" />
   </head>
   <body>
@@ -128,6 +129,30 @@
 
         <footer id="composer" class="composer hidden">
           <div class="composer-inner">
+            <div id="goal-command-menu" class="goal-command-menu hidden" role="listbox" aria-label="Commands" data-i18n-aria-label="Commands">
+              <button id="goal-command-option" type="button" role="option" aria-selected="true">
+                <span class="goal-command-symbol" aria-hidden="true">◎</span>
+                <span><strong>/goal</strong><small data-i18n="Set a goal and keep working until it is done">Set a goal and keep working until it is done</small></span>
+                <kbd>↵</kbd>
+              </button>
+            </div>
+            <section id="goal-card" class="goal-card hidden" aria-label="Goal" data-i18n-aria-label="Goal">
+              <div class="goal-card-heading">
+                <span class="goal-symbol" aria-hidden="true">◎</span>
+                <strong data-i18n="Goal">Goal</strong>
+                <span id="goal-status" class="goal-status" role="status"></span>
+                <div class="goal-card-actions">
+                  <button id="goal-pause" class="goal-action hidden" type="button" data-i18n="Pause goal">Pause goal</button>
+                  <button id="goal-resume" class="goal-action hidden" type="button" data-i18n="Resume goal">Resume goal</button>
+                  <button id="goal-clear" class="goal-action" type="button" title="Clear goal" aria-label="Clear goal" data-i18n-title="Clear goal" data-i18n-aria-label="Clear goal">×</button>
+                </div>
+              </div>
+              <p id="goal-objective" class="goal-objective"></p>
+              <div class="goal-usage-row"><span id="goal-usage"></span><span id="goal-turns"></span></div>
+              <div id="goal-progress" class="goal-progress hidden" role="progressbar" aria-label="Goal token budget" data-i18n-aria-label="Goal token budget"><span id="goal-progress-fill"></span></div>
+              <p id="goal-reason" class="goal-reason hidden"></p>
+              <p id="goal-action-feedback" class="form-feedback error hidden" role="alert"></p>
+            </section>
             <div class="composer-card">
               <textarea id="input" rows="1" placeholder="Message Neutrino…" aria-label="Message" data-i18n-placeholder="Message Neutrino…"></textarea>
               <details id="agent-mode-picker" class="agent-mode-picker">
@@ -188,6 +213,8 @@
               </button>
             </div>
             <div class="composer-hint">
+              <button id="goal-open" class="goal-open" type="button" data-i18n="Set a goal">Set a goal</button>
+              <span class="hint-sep">·</span>
               <span><kbd>Enter</kbd> <span data-i18n="to send">to send</span></span>
               <span class="hint-sep">·</span>
               <span><kbd>Shift</kbd> + <kbd>Enter</kbd> <span data-i18n="for a new line">for a new line</span></span>
@@ -196,6 +223,22 @@
         </footer>
       </main>
     </div>
+
+    <dialog id="goal-dialog" class="sheet-dialog goal-dialog" aria-labelledby="goal-dialog-title">
+      <form id="goal-form" class="sheet goal-sheet">
+        <header class="sheet-header">
+          <div><h2 id="goal-dialog-title" data-i18n="Set a goal">Set a goal</h2><p class="sheet-sub" data-i18n="Neutrino keeps working across turns until your goal is complete.">Neutrino keeps working across turns until your goal is complete.</p></div>
+          <button id="goal-dialog-close" class="icon-btn" type="button" aria-label="Close" data-i18n-aria-label="Close">×</button>
+        </header>
+        <div class="sheet-body">
+          <label class="goal-field"><span data-i18n="What should Neutrino accomplish?">What should Neutrino accomplish?</span><textarea id="goal-input" rows="4" maxlength="8000" required placeholder="Describe the result you want…" data-i18n-placeholder="Describe the result you want…"></textarea></label>
+          <label class="goal-field"><span data-i18n="Token budget (optional)">Token budget (optional)</span><input id="goal-budget" type="number" min="1" step="1" inputmode="numeric" placeholder="No limit" data-i18n-placeholder="No limit" /></label>
+          <p class="settings-note" data-i18n="The budget includes input and output tokens across goal turns. Tool approvals still apply.">The budget includes input and output tokens across goal turns. Tool approvals still apply.</p>
+          <p id="goal-form-feedback" class="form-feedback error" role="alert"></p>
+        </div>
+        <footer class="sheet-actions"><button id="goal-dialog-cancel" class="control" type="button" data-i18n="Cancel">Cancel</button><button id="goal-start" class="primary" type="submit" data-i18n="Start goal">Start goal</button></footer>
+      </form>
+    </dialog>
 
     <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
       <form id="settings-form">
@@ -242,6 +285,9 @@
             <p class="settings-note" data-i18n="Edit role models, intensity and context windows in ~/.neutrino/pro/model.json. Default delegation depth: 10.">Edit role models, intensity and context windows in ~/.neutrino/pro/model.json. Default delegation depth: 10.</p>
           </section>
           <h3 data-i18n="Conversation and approvals">Conversation and approvals</h3>
+          <label class="checkbox-label"><input id="settings-auto-title" type="checkbox" /> <span data-i18n="Automatically generate conversation titles">Automatically generate conversation titles</span></label>
+          <label><span data-i18n="Title generation model">Title generation model</span><select id="settings-title-model"></select></label>
+          <p class="settings-note" data-i18n="New conversations only. Generates a title from the first message in the background, with thinking disabled or minimized.">New conversations only. Generates a title from the first message in the background, with thinking disabled or minimized.</p>
           <label class="standard-only"><span data-i18n="Model context window (tokens)">Model context window (tokens)</span><input id="settings-context" type="number" min="1" max="9007199254740991" step="1" required /></label>
           <p id="settings-compress-note" class="settings-note standard-only" data-i18n="Auto-compress at 80% of this model's context window. Default: 1,000,000 tokens.">Auto-compress at 80% of this model's context window. Default: 1,000,000 tokens.</p>
           <label class="standard-only"><span data-i18n="Approval reviewer model">Approval reviewer model</span><select id="settings-reviewer"></select></label>

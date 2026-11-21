@@ -10,7 +10,7 @@ const html = fs.readFileSync(new URL("../web/index.html", import.meta.url), "utf
 for (const match of html.matchAll(/data-i18n(?:-html|-title|-placeholder|-aria-label)?="((?:[^"\\]|\\.)*)"/g)) {
   sources.add(match[1]);
 }
-for (const file of ["../web/app.js", "../web/settings.js"]) {
+for (const file of ["../web/app.js", "../web/settings.js", "../web/goal.js"]) {
   const text = fs.readFileSync(new URL(file, import.meta.url), "utf8");
   for (const match of text.matchAll(/\b(?:tr|t)\(\s*"((?:[^"\\]|\\.)*)"/g)) sources.add(match[1]);
 }

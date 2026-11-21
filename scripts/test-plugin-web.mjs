@@ -20,7 +20,7 @@ const {createPluginUI}=await import("../web/plugins.js");
 const {pluginCatalog}=await import("../dist/plugins/catalog.js");
 const examples=fileURLToPath(new URL("../examples/plugins/",import.meta.url));
 const model={name:"fixture",url:"https://fixture.invalid/v1",api_key:"fixture",supports_streaming:true};
-config.saveConfig({plan_first:false,web_password_hash:hashWebPassword("plugin-test")});config.saveModels({providers:[{name:"Fixture",models:[model]}]});
+config.saveConfig({plan_first:false,auto_title:false,web_password_hash:hashWebPassword("plugin-test")});config.saveModels({providers:[{name:"Fixture",models:[model]}]});
 fs.mkdirSync(config.PRO_DIR,{recursive:true});fs.writeFileSync(path.join(config.PRO_DIR,"model.json"),'{"tier":[]}');
 let server,session,ui;const originalFetch=globalThis.fetch;const originalStream=LLMClient.prototype.streamTurn;
 const waitFor=async(predicate,message="condition")=>{const until=Date.now()+15000;while(!predicate()){assert(Date.now()<until,`Timed out: ${message}`);await new Promise(r=>setTimeout(r,10));}};
@@ -49,7 +49,7 @@ try{
   const appSource=fs.readFileSync(new URL("../web/app.js",import.meta.url),"utf8");
   const sendSource=appSource.slice(appSource.indexOf("async function sendMessage()"),appSource.indexOf("function autosize()"));
   const sends=[],selection={kind:"live",key:"fixture-live"};
-  const composerContext=vm.createContext({agentModePending:Promise.resolve(),state:{selection},el:{input:{value:"keep my draft"},sub:{}},PRO_MODE:false,preferences:{flush:async()=>{}},autosize(){},tr:value=>value,currentAgentMode:()=>"standard",postAction:async(...args)=>{sends.push(args);return true;}});
+  const composerContext=vm.createContext({agentModePending:Promise.resolve(),goalUI:null,state:{selection},el:{input:{value:"keep my draft"},sub:{}},PRO_MODE:false,preferences:{flush:async()=>{}},autosize(){},tr:value=>value,currentAgentMode:()=>"standard",postAction:async(...args)=>{sends.push(args);return true;}});
   vm.runInContext(sendSource,composerContext);
   await composerContext.sendMessage({selection,text:'/plugin community.text-tools/count {"text":"x"}',preserveDraft:true});
   assert.equal(composerContext.el.input.value,"keep my draft");assert.equal(sends[0][2].text,'/plugin community.text-tools/count {"text":"x"}');

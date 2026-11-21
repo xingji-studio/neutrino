@@ -145,7 +145,7 @@ try {
   assert.ok(!JSON.stringify(settings.body).includes("private"), "public config is a whitelist");
   const invalid = await request("/pro/api/settings", { settings: { pro_max_recursion_depth: 0 } });
   assert.equal(invalid.status, 400);
-  assert.equal((await request("/pro/api/settings", { settings: { pro_preset: "best", pro_max_recursion_depth: 4 } })).status, 200);
+  assert.equal((await request("/pro/api/settings", { settings: { pro_preset: "best", pro_max_recursion_depth: 4, auto_title: false } })).status, 200);
   assert.equal(loadConfig("pro").pro_max_recursion_depth, 4);
   assert.equal(loadConfig().pro_max_recursion_depth, undefined, "recursion is Pro-only");
   const created = await request("/pro/api/conversations", { cwd: testHome, pro_preset: "best", approval_mode: "auto" });

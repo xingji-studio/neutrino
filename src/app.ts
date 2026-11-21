@@ -1020,6 +1020,7 @@ export class App {
     const screen = new ChatScreen("");
     screen.sessionId = data.id;
     screen.loadedMessages = data.messages ?? [];
+    screen.loadedTitle = data.title ?? null;
     screen.loadedCwd = data.cwd ?? null;
     screen.loadedProvider = data.provider || null;
     screen.loadedModel = data.model || null;
@@ -1030,6 +1031,7 @@ export class App {
     screen.loadedPlan = data.plan ?? null;
     screen.loadedTask = data.task_run;
     screen.loadedFast = data.fast_run;
+    screen.loadedGoal = data.goal ?? null;
     screen.loadedAgentMode = data.agent_mode ?? null;
     if (data.provider) this.state.selectedProvider = data.provider;
     if (data.model) this.state.selectedModelName = data.model;

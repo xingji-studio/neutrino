@@ -80,7 +80,7 @@ try {
   const screen = new SettingsScreen("settings");
   screen.app = fake;
   screen.onActivate();
-  for (let i = 0; i < 5; i++) screen.onKey(key("down"));
+  for (let i = 0; i < 6; i++) screen.onKey(key("down"));
   const before = new Buffer(80, 24);
   screen.render(before);
   assert.match(flat(before), /Web console/);
@@ -100,7 +100,7 @@ try {
   untouched.onActivate();
   untouched.onKey(key("right"));
   assert.equal(loadConfig().web_console, false, "unrelated settings keep the saved web preference");
-  for (let i = 0; i < 5; i++) untouched.onKey(key("down"));
+  for (let i = 0; i < 6; i++) untouched.onKey(key("down"));
   untouched.onKey(key("left"));
   assert.equal(loadConfig().web_console, false, "explicitly turning it off saves off");
 
