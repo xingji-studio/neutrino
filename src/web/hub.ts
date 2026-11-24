@@ -65,6 +65,11 @@ export interface LiveRetryNotice {
 
 /** The small, frequently-changing part of a live session. */
 export interface LiveMeta {
+  executionOwner?: "service";
+  inputReceipts?: string[];
+  /** Transport availability is independent of the executor's task state. */
+  connection?: "connected" | "disconnected";
+  disconnectReason?: string;
   goal?: GoalState | null;
   task?: import("../llm/runtime.js").TaskSnapshot;
   /** On-disk session id, or null until the conversation is first saved. */
@@ -141,7 +146,7 @@ export interface LiveAgent {
   /** Resume a paused conversation. */
   liveResume(): void;
   /** Append a user message and start (or queue) a turn. */
-  liveSend(text: string): void;
+  liveSend(text: string, requestId?: string): void;
   /** Answer a pending approval. Returns false when nothing was pending. */
   liveApprove?(approved: boolean, approvalId?: string): boolean;
   liveSetApprovalMode?(mode: ApprovalMode): void;
@@ -318,22 +323,22 @@ class LiveHub {
     return true;
   }
 
-  send(key: string, text: string): boolean {
+  send(key: string, text: string, requestId?: string): boolean {
     const entry = this.entries.get(key);
     if (!entry) return false;
-    entry.agent.liveSend(text);
+    entry.agent.liveSend(text, requestId);
     this.notify(key);
     return true;
   }
 
   /** Mode and message are committed synchronously; a running turn keeps its frozen strategy. */
-  sendConfigured(key: string, text: string, mode?: AgentMode): ModelChangeResult {
+  sendConfigured(key: string, text: string, mode?: AgentMode, requestId?: string): ModelChangeResult {
     if (!this.entries.has(key)) return { ok: false, error: "unknown live session" };
     if (mode !== undefined) {
       const changed = this.setAgentMode(key, mode);
       if (!changed.ok) return changed;
     }
-    this.send(key, text);
+    this.send(key, text, requestId);
     return { ok: true };
   }
 

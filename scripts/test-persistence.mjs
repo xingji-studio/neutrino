@@ -145,9 +145,13 @@ try {
     assert.equal(read(paused).messages.at(-1).content, "paused partial");
     paused.liveSend("after pause");
     paused.liveResume();
-    await waitFor(() => paused.streamingContent === "new reply", "new stream");
+    // A replacement attempt must wait for the previous stream to acknowledge
+    // cancellation and release its lease. This mock deliberately ignores abort.
+    await sleep(20);
+    assert.notEqual(paused.streamingContent, "new reply");
     oldFinish.resolve();
     await oldStopped.promise;
+    await waitFor(() => paused.streamingContent === "new reply", "new stream after prior owner settled");
     assert.equal(paused.streamingContent, "new reply");
     newFinish.resolve();
     await waitFor(() => !paused.busy, "new reply completed");

@@ -144,11 +144,16 @@ function markOf(ui, session) {
 
 // --- finished conversations ------------------------------------------------
 {
-  // A saved transcript is done by definition, even while other sessions run.
+  // Legacy text-only history can retain its old mark; persisted task state wins.
   const ui = createUi();
   ui.state.overview = { groups: [], live: [live({ busy: true })] };
   const saved = { id: "saved", live: false, liveKey: null, title: "Saved", model: "deepseek-chat" };
   assert.deepEqual(markOf(ui, saved), { status: "done", label: "Done" }, "saved history is done");
+  assert.deepEqual(markOf(ui, { ...saved, task_state: "partial" }), { status: "interrupted", label: "Task incomplete" });
+  assert.equal(markOf(ui, { ...saved, task_state: "running" }).status, "interrupted");
+  assert.equal(markOf(ui, { ...saved, task_state: "completed" }).status, "done");
+  ui.state.snapshot = live({ connection: "disconnected", busy: true });
+  assert.equal(markOf(ui, liveRow()).status, "disconnected");
 }
 {
   // A live conversation whose turn ended — still open in a browser or terminal.
@@ -257,6 +262,7 @@ function markOf(ui, session) {
 
   // A conversation the record does not mention keeps its dot.
   const other = { id: "s2", live: true, liveKey: "live:2", model: "deepseek-chat" };
+  reloaded.state.overview.live.push(live({ key: "live:2", sessionId: "s2" }));
   assert.equal(markOf(reloaded, other).status, "done", "an unread conversation still asks");
 }
 {

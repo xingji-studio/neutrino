@@ -1,4 +1,5 @@
 import type { StandardSnapshot } from "./standard.js";
+import { TaskController, type TaskSpec } from "../tasks/controller.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -87,13 +88,15 @@ export interface ToolEvidence {
   status: "completed" | "failed" | "denied" | "cancelled";
 }
 export interface TaskSnapshot {
+  spec?: TaskSpec;
+  stopReason?: string;
   execution_mode?: AgentMode | "pro";
   plugins?: PluginPin[];
   pluginErrors?: string[];
   pluginUI?: OwnedUI[];
   pluginPrompt?: { role:string; sections:unknown };
   rootRunId: string;
-  state: "running" | "cancelling" | AgentStatus;
+  state: "running" | "cancelling" | "interrupted" | AgentStatus;
   cleanupError?: string;
   standard?: StandardSnapshot;
   counts: { agentRuns: number; modelRequests: number; toolCalls: number; tokens: number };
@@ -104,12 +107,18 @@ export interface TaskSnapshot {
   journal?: string;
   persistenceError?: string;
 }
+/** A rejected attempt must not inherit the previous turn's completed badge. */
+export function blockedTaskSnapshot(reason: string): TaskSnapshot {
+  return { rootRunId: randomUUID(), state: "blocked", stopReason: reason,
+    counts: { agentRuns: 0, modelRequests: 0, toolCalls: 0, tokens: 0 }, limits: { ...DEFAULT_TASK_LIMITS } };
+}
 /** A saved task has no live worker after restart. Never replay its tool ledger. */
 export function resumeTaskSnapshot(snapshot: TaskSnapshot | undefined): TaskSnapshot | undefined {
   if (!snapshot || typeof snapshot.rootRunId !== "string" || !snapshot.counts || !snapshot.limits) return undefined;
   const { cleanupError: _cleanupError, ...saved } = snapshot;
   return { ...saved, counts: { ...snapshot.counts }, limits: { ...snapshot.limits },
-    state: snapshot.state === "running" || snapshot.state === "cancelling" ? "partial" : snapshot.state };
+    state: snapshot.state === "running" || snapshot.state === "cancelling" ? "interrupted" : snapshot.state,
+    ...(["running", "cancelling"].includes(snapshot.state) ? { stopReason: "owner_lost_unknown" } : {}) };
 }
 export class TaskControlError extends Error {
   constructor(public readonly code: string, message: string) { super(message); this.name = "TaskControlError"; }
@@ -221,9 +230,17 @@ export class TaskRuntime {
   private journalStarted = false;
   private journalDiscarded = false;
   private readonly detachSignal?: () => void;
+  private readonly taskController?: TaskController;
+  private controlFinished = false;
+  private stopReason?: string;
+  private finishResolve!: () => void;
+  private readonly finishPromise = new Promise<void>(resolve => { this.finishResolve = resolve; });
+  get finished(): boolean { return this.controlFinished; }
+  whenFinished(): Promise<void> { return this.finishPromise; }
 
   constructor(options: {
     request: string; cwd?: string; priorUserRequests?: readonly string[]; limits?: Partial<TaskLimits>;
+    previousTask?: TaskSnapshot;
     budgetScope?: TaskBudgetScope;
     goalTokenBudget?: number;
     executionMode?: AgentMode | "pro";
@@ -247,6 +264,11 @@ export class TaskRuntime {
       return [key, typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : fallback];
     })) as unknown as TaskLimits);
     const groups = options.writePaths ? [Object.freeze(options.writePaths.map(p => realPath(path.resolve(this.cwd, p))))] : [];
+    if (options.journalDir) {
+      this.taskController = new TaskController(path.join(options.journalDir, "controller"), this.rootRunId, options.request, options.previousTask);
+      this.originalRequest = this.taskController.spec.objective;
+      this.workspaceOnly = options.workspaceOnly === true || requestsWorkspaceOnly(this.originalRequest);
+    }
     this.root = Object.freeze({ runtime: this, signal: this.signal, runId: this.rootRunId, role: "main", depth: 0,
       policy: Object.freeze({ readOnly: options.readOnly === true, writePathGroups: Object.freeze(groups) }), ancestors: Object.freeze([]) });
     if (options.journalDir) this.journal = path.join(options.journalDir, `${this.rootRunId}.jsonl`);
@@ -260,7 +282,7 @@ export class TaskRuntime {
       this.deadline = setTimeout(() => this.expireTask(), this.limits.durationMs);
       this.deadline.unref();
     }
-    this.event("started", { request: this.originalRequest, priorUserRequests: this.priorUserRequests,
+    this.event("started", { request: this.originalRequest, latestInput: options.request, owner: this.taskController?.owner, priorUserRequests: this.priorUserRequests,
       cwd: this.cwd, limits: this.limits, budgetScope: this.budgetScope });
   }
 
@@ -305,11 +327,15 @@ export class TaskRuntime {
   }
 
   check(): void {
+    if (this.persistenceError) throw new TaskControlError("task_persistence_failed", `Task execution stopped because its state could not be persisted: ${this.persistenceError}`);
+    this.taskController?.check();
     if (this.signal.aborted) throw new TaskControlError("cancelled", String(this.signal.reason ?? "Task cancelled"));
     if (this.budgetScope === "task" && Date.now() - this.started >= this.limits.durationMs) { this.expireTask(); this.check(); }
     if (this.isDelegated() && this.delegationController.signal.aborted) throw this.delegationController.signal.reason;
   }
   cancel(reason = "Task cancelled"): void {
+    if (this.controlFinished) return;
+    this.stopReason = reason;
     if (this.signal.aborted) { this.stopOwned(); return; }
     this.state = "cancelling";
     this.controller.abort(reason);
@@ -324,6 +350,7 @@ export class TaskRuntime {
     this.cleanupTimer.unref();
     this.changed();
     void this.drain().then(() => {
+      if (this.controlFinished) return;
       clearTimeout(this.cleanupTimer);
       this.cleanupError = undefined;
       this.state = "cancelled"; this.event("cancelled", { reason }); this.changed();
@@ -345,6 +372,7 @@ export class TaskRuntime {
     while (this.pending.size) await Promise.allSettled([...this.pending]);
   }
   finish(status: AgentStatus): void {
+    if (this.controlFinished) return;
     clearTimeout(this.cleanupTimer);
     this.evidenceObservers.clear();
     // A caller returning normally cannot bypass the Standard acceptance checkpoint.
@@ -356,15 +384,23 @@ export class TaskRuntime {
         : this.budgetStop ? `Task stopped: ${this.budgetStop.code}` : "Task ended before completion acceptance"];
       for (const requirement of this.standard.requirements) requirement.verified = false;
     }
-    this.state = this.signal.aborted ? "cancelled" : status;
+    this.state = this.persistenceError ? "blocked" : this.signal.aborted ? "cancelled" : status;
+    if (this.state === "completed") this.stopReason = undefined;
+    if (this.state !== "completed") this.stopReason ??= this.persistenceError ?? this.budgetStop?.code
+      ?? (this.standard?.unresolved.join("; ") || `task_${this.state}`);
     clearTimeout(this.deadline);
     clearTimeout(this.delegationDeadline);
     this.detachSignal?.();
     this.event("finished", { ...this.snapshot(), plan: this.plan });
+    if (this.persistenceError) this.state = "blocked";
+    try { this.taskController?.finish(this.state, this.persistenceError ?? this.stopReason); }
+    catch (error) { this.state = "blocked"; this.persistenceError = error instanceof Error ? error.message : String(error); }
+    this.controlFinished = true;
+    this.finishResolve();
     if (this.diagnostics) void this.track(this.diagnostics.close());
   }
   snapshot(): TaskSnapshot {
-    return { rootRunId: this.rootRunId, state: this.state, ...(this.cleanupError ? { cleanupError: this.cleanupError } : {}), ...(this.standard ? { standard: structuredClone(this.standard) } : {}), counts: { ...this.usage }, limits: { ...this.limits },
+    return { rootRunId: this.rootRunId, state: this.state, ...(this.stopReason ? { stopReason: this.stopReason } : {}), ...(this.taskController ? { spec: this.taskController.spec } : {}), ...(this.cleanupError ? { cleanupError: this.cleanupError } : {}), ...(this.standard ? { standard: structuredClone(this.standard) } : {}), counts: { ...this.usage }, limits: { ...this.limits },
       ...(this.executionMode ? { execution_mode: this.executionMode } : {}),
       ...(this.plugins?.pins.length ? { plugins: structuredClone(this.plugins.pins) } : {}),
       ...(this.plugins?.diagnostics.length ? { pluginErrors: [...this.plugins.diagnostics] } : {}),
@@ -415,7 +451,7 @@ export class TaskRuntime {
         (!scope.policy.writePathGroups.length || !["run_command", "run_task_check", "execute_ts"].includes(tool.function.name));
     });
   }
-  async tool(name: string, args: Record<string, unknown>, execute: () => Promise<string>): Promise<string> {
+  async tool(name: string, args: Record<string, unknown>, execute: () => Promise<string>, evidenceId?: string): Promise<string> {
     this.assertTool(name, args);
     const delegated = this.isDelegated();
     const charged = this.budgetScope === "task" ? this.usage : this.delegatedUsage;
@@ -426,7 +462,7 @@ export class TaskRuntime {
     if (delegated) this.delegatedUsage.toolCalls++;
     const scope = currentTask() ?? this.root;
     const resultStart = this.results.length;
-    const id = randomUUID();
+    const id = evidenceId ?? randomUUID();
     this.event("tool_started", { id, runId: scope.runId, name, arguments: args });
     let result: string;
     try { result = await this.track(Promise.resolve().then(() => { this.assertTool(name, args, scope); return execute(); })); }
@@ -438,7 +474,7 @@ export class TaskRuntime {
       (delegatedResult && delegatedResult.status !== "completed") || /^\[Error:|^Error:|\[exit code: (?!0\])/m.test(result) ? "failed" : "completed", id, scope.runId);
     return result;
   }
-  recordTool(name: string, args: Record<string, unknown>, result: string, status: ToolEvidence["status"], id = randomUUID(), runId = currentTask()?.runId ?? this.rootRunId): ToolEvidence {
+  recordTool(name: string, args: Record<string, unknown>, result: string, status: ToolEvidence["status"], id: string = randomUUID(), runId = currentTask()?.runId ?? this.rootRunId): ToolEvidence {
     const entry = { id, runId, name, arguments: structuredClone(args), result, status };
     this.evidence.push(entry);
     for (const observer of this.evidenceObservers) observer(entry);
@@ -490,8 +526,10 @@ export class TaskRuntime {
     this.usage.modelRequests++;
     this.reservedTokens += reserve;
     if (delegated) { this.delegatedUsage.modelRequests++; this.delegatedReservedTokens += reserve; }
-    this.event("model_started", { runId: currentTask()?.runId ?? this.rootRunId, request: this.usage.modelRequests,
+    const requestId = this.usage.modelRequests;
+    this.event("model_started", { runId: currentTask()?.runId ?? this.rootRunId, request: requestId,
       inputTokens, outputTokens, delegated });
+    this.check();
     let settled = false;
     return { settle: used => {
       if (settled) return;
@@ -502,7 +540,7 @@ export class TaskRuntime {
         this.delegatedReservedTokens -= reserve;
         this.delegatedUsage.tokens += Math.max(0, Math.ceil(used));
       }
-      this.event("model_finished", { runId: currentTask()?.runId ?? this.rootRunId, tokens: used });
+      this.event("model_finished", { runId: currentTask()?.runId ?? this.rootRunId, request: requestId, tokens: used });
     } };
   }
   private isDelegated(): boolean {
@@ -521,8 +559,16 @@ export class TaskRuntime {
     this.event("budget_stopped", stop);
     return new TaskControlError(code, `${message} (${scope}: used ${used}, limit ${limit}, reserved ${reserved}, next ${requested})`);
   }
-  note(type: string, data: unknown): void { if(type === "plugin_prompt") this.pluginPrompt=data as { role:string;sections:unknown }; this.event(type,data); }
+  note(type: string, data: unknown): void {
+    if (type === "plugin_prompt") this.pluginPrompt = data as { role: string; sections: unknown };
+    if (type === "model_failed") this.stopReason = String((data as { message?: string }).message ?? "model_failed");
+    this.event(type, data);
+  }
   private event(type: string, data: unknown): void {
+    if (this.taskController && !this.controlFinished) {
+      try { this.taskController.event(type, data); }
+      catch (error) { this.persistenceError = error instanceof Error ? error.message : String(error); }
+    }
     if (this.diagnostics) {
       const value = data as Record<string, unknown>;
       const current = currentTask() ?? this.root;

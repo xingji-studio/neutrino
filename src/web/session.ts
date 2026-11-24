@@ -14,7 +14,7 @@ import { ApprovalQueue } from "./approvalQueue.js";
  * (snapshot, stream, pause, resume, message) work unchanged.
  */
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { FastAgentEngine } from "../fast/engine.js";
 import { FAST_MODE, assertFastAvailable, fastSettings, type FastSnapshot } from "../fast/types.js";
 import {
@@ -54,7 +54,7 @@ import {
   normalizeContext,
   type ConversationContext,
 } from "../compact.js";
-import { TaskRuntime, TaskControlError, currentTask, linkSignals, taskLimits, taskBudgetScope, resumeTaskSnapshot, type AgentStatus, type TaskSnapshot } from "../llm/runtime.js";
+import { TaskRuntime, TaskControlError, currentTask, linkSignals, taskLimits, taskBudgetScope, resumeTaskSnapshot, blockedTaskSnapshot, type AgentStatus, type TaskSnapshot } from "../llm/runtime.js";
 import { prepareContext, outputAllowance, finalTaskReport } from "../llm/context.js";
 import { StandardTask, STANDARD_FINISH, STANDARD_FINISH_DEFINITION, STANDARD_EVIDENCE_DEFINITION, type StandardFinishResult } from "../llm/standard.js";
 import { STANDARD_CHECK_DEFINITIONS, STANDARD_CHECK_TOOLS } from "../llm/standard-checks.js";
@@ -246,6 +246,10 @@ export function resumeSession(source: SessionData, selection?: ModelSelection, m
 }
 
 export class WebSession implements LiveAgent {
+  clientId?: string;
+  private inputReceipts: string[] = [];
+  private receiptHashes: Record<string, string> = {};
+  private pendingInput: string | null = null;
   key: string | null = null;
   /** Workspace this conversation belongs to; keeps Pro and standard separate. */
   readonly mode: Mode;
@@ -315,6 +319,10 @@ export class WebSession implements LiveAgent {
   private reviewing: LiveReviewProgress | null = null;
 
   constructor(source: SessionData, model: ModelInfo, mode: Mode = "standard", newConversation = false) {
+    this.clientId = source.client_id;
+    this.inputReceipts = source.input_receipts ?? [];
+    this.receiptHashes = source.input_receipt_hashes ?? {};
+    this.pendingInput = source.pending_input ?? null;
     this.mode = mode;
     this.agentMode = mode === "pro" ? "standard" : normalizeAgentMode(source.agent_mode);
     if (mode === "pro") this.proPreset = requireProPreset(source.pro_preset ?? defaultProPreset());
@@ -351,6 +359,11 @@ export class WebSession implements LiveAgent {
     this.touch();
     this.publishLive();
     return this.key;
+  }
+
+  /** Called only after the service reconciles the previous owner's ledger. */
+  recoverExecution(): void {
+    if (!this.busy && !this.disposed) this.startTurn();
   }
 
   /** Detach from the hub. The transcript stays on disk. */
@@ -413,6 +426,8 @@ export class WebSession implements LiveAgent {
 
   liveMeta(): LiveMeta {
     return {
+      executionOwner: "service",
+      inputReceipts: this.inputReceipts.slice(),
       goal: this.goals.snapshot(),
       ...(this.mode === "pro" ? { pro: this.proState ?? {
         preset: this.proPreset!, checking: false, checkId: "", models: [], fallbacks: [],
@@ -523,8 +538,16 @@ export class WebSession implements LiveAgent {
     else this.startTurn();
   }
 
-  liveSend(text: string): void {
+  liveSend(text: string, requestId?: string): void {
+    const hash = createHash("sha256").update(text.trim()).digest("hex");
+    if (requestId && this.inputReceipts.includes(requestId)) {
+      if (this.receiptHashes[requestId] && this.receiptHashes[requestId] !== hash) throw new Error("request_id was already used with different message text");
+      return;
+    }
+    const receipts = this.inputReceipts;
+    if (requestId) { this.inputReceipts = [...this.inputReceipts, requestId]; this.receiptHashes[requestId] = hash; }
     this.send(text);
+    if (this.saveError) { this.inputReceipts = receipts; if (requestId) delete this.receiptHashes[requestId]; }
   }
 
   liveApprove(approved: boolean, approvalId?: string): boolean {
@@ -601,6 +624,9 @@ export class WebSession implements LiveAgent {
     this.lastPromptTokens = 0;
     this.saveError = null;
     this.sessionId = newSessionId();
+    this.inputReceipts = [];
+    this.receiptHashes = {};
+    this.pendingInput = null;
     this.publishLive();
     this.touch();
   }
@@ -628,7 +654,14 @@ export class WebSession implements LiveAgent {
       return;
     }
     this.messages.push({ role: "user", content: trimmed });
-    this.save();
+    const previousPending = this.pendingInput;
+    this.pendingInput = trimmed;
+    if (!this.save()) {
+      this.messages.pop();
+      this.pendingInput = previousPending;
+      this.publishLive();
+      return;
+    }
     if (this.mode !== "pro") this.generateTitle(trimmed);
 
     if (this.busy || this.paused) {
@@ -655,10 +688,10 @@ export class WebSession implements LiveAgent {
       this.publishLive();
       return;
     }
-    if (this.taskRuntime?.settling) {
+    if (this.taskRuntime && !this.taskRuntime.finished) {
       const previous = this.taskRuntime;
       this.queued = lastRequestText(this.messages);
-      void previous.drain().then(() => {
+      void previous.whenFinished().then(() => {
         if (this.taskRuntime === previous && this.queued && !this.paused) {
           this.queued = null;
           this.startTurn();
@@ -696,14 +729,17 @@ export class WebSession implements LiveAgent {
     const runtime = new TaskRuntime({
       executionMode: this.mode === "pro" ? "pro" : this.activeAgentMode,
       request: approvalContext.prompt, priorUserRequests: approvalContext.priorUserRequests,
+      previousTask: this.taskRuntime?.snapshot() ?? this.lastTask,
       cwd: this.dir, signal: this.turnAbort?.signal, limits: taskLimits(loadConfig(this.mode)),
       budgetScope: taskBudgetScope(loadConfig(this.mode)),
       goalTokenBudget: this.goals.remainingTokens(),
       journalDir: path.join(sessionDir(this.mode), "tasks", path.basename(this.sessionId || "unsaved")),
     });
     this.taskRuntime = runtime;
+    this.pendingInput = null;
     this.goals.begin(runtime);
     runtime.observeState(() => { if (this.taskRuntime === runtime) { this.save(); this.publishLive(); } });
+    if (!this.save()) { runtime.finish("blocked"); throw new Error("Task checkpoint failed before execution"); }
     this.taskOutcome = "completed";
     let failed = false;
     try {
@@ -733,9 +769,9 @@ export class WebSession implements LiveAgent {
         onUsage: usage => { this.tokens.prompt += usage.prompt; this.tokens.completion += usage.completion; },
       }));
       runtime.finish(this.goals.owns(runtime) && runtime.snapshot().budgetStop ? "partial" : outcome);
-      if (this.goals.owns(runtime) && token === this.turnToken && !this.disposed && !this.paused && !failed) {
+      if (token === this.turnToken && !this.disposed && !this.paused && !failed) {
         this.lastTask = runtime.snapshot();
-        if (this.goals.active && !this.queued) this.queued = lastRequestText(this.messages) || this.goals.snapshot()!.objective;
+        if (this.goals.owns(runtime) && this.goals.active && !this.queued) this.queued = lastRequestText(this.messages) || this.goals.snapshot()!.objective;
         this.onTurnFinished();
       }
       if (this.taskRuntime === runtime && !this.disposed) {
@@ -1005,6 +1041,10 @@ export class WebSession implements LiveAgent {
 
   /** Ends a turn whose floating promise rejected, instead of crashing the app. */
   private failTurn(err: unknown): void {
+    if (!this.taskRuntime || (this.taskRuntime.finished && this.taskRuntime.snapshot().state === "completed")) {
+      this.taskRuntime = null;
+      this.lastTask = blockedTaskSnapshot(describeError(err));
+    }
     if (this.goals.active) this.goals.stop("paused", `Task failed: ${describeError(err)}`);
     this.retainStreamingContent();
     this.messages.push({ role: "assistant", content: `[Error: ${describeError(err)}]` });
@@ -1277,7 +1317,7 @@ export class WebSession implements LiveAgent {
             result = toolMsg.result = JSON.stringify(standardFinish);
             this.save();
           }
-          apiMessages.push({ role: "tool", content: toolMsg.evidenceId
+          apiMessages.push({ role: "tool", content: toolMsg.evidenceId && (this.mode === "pro" || this.standardTask?.required)
             ? `${result}\n[Task evidence: ${toolMsg.evidenceId}; status=${toolMsg.executionStatus}]` : result, tool_call_id: call.id });
           if (standardFinish?.settled) {
             this.taskOutcome = standardFinish.completed ? "completed" : "partial";
@@ -1316,7 +1356,7 @@ export class WebSession implements LiveAgent {
 
   private onTurnFinished(): void {
     // Keep the turn busy until its goal checkpoint and all owned operations settle.
-    if (this.goals.owns(this.taskRuntime) && ["running", "cancelling"].includes(this.taskRuntime!.snapshot().state)) {
+    if (this.taskRuntime && !this.taskRuntime.finished) {
       this.streamingContent = null;
       this.save(); this.publishLive();
       return;
@@ -1485,9 +1525,11 @@ export class WebSession implements LiveAgent {
     const runtime = currentTask()?.runtime;
     const execute = () => this.dispatchTool(name, args, toolMsg, token, apiMessages, approvalContext, executionSignal);
     if (!runtime) return execute();
-    const result = await runtime.tool(name, args, execute);
-    const evidence = runtime.evidence.at(-1);
-    if (evidence && (this.mode === "pro" || (this.standardTask?.runtime === runtime && this.standardTask.required))) {
+    const id = toolMsg.evidenceId = randomUUID();
+    if (!this.save()) throw new Error("Tool intent checkpoint failed before execution");
+    const result = await runtime.tool(name, args, execute, id);
+    const evidence = runtime.evidence.find(entry => entry.id === id);
+    if (evidence) {
       toolMsg.evidenceId = evidence.id;
       toolMsg.executionStatus = evidence.status;
     }
@@ -1680,8 +1722,8 @@ export class WebSession implements LiveAgent {
     this.streamingContent = null;
   }
 
-  private save(): void {
-    this.checkpoint.flush();
+  private save(): boolean {
+    return this.checkpoint.flush();
   }
 
   private writeSession(): boolean {
@@ -1711,6 +1753,7 @@ export class WebSession implements LiveAgent {
         this.fastState,
         this.sessionTitle.value || undefined,
         this.goals.snapshot(),
+        { client_id: this.clientId, input_receipts: this.inputReceipts, input_receipt_hashes: this.receiptHashes, pending_input: this.pendingInput },
       );
       this.saveError = null;
       return true;

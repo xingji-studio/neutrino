@@ -38,6 +38,9 @@ import { migrateAgentSession, SessionMigrationError } from "../migration.js";
 import { runningBackground, type BackgroundStatus, type BackgroundUpdate } from "../background.js";
 import { MANUAL_UPDATE_COMMAND, checkForUpdate, installUpdate, updateStatus, type UpdateStatus } from "../update.js";
 import { subscribeUpdateAnnouncements } from "../updateWatch.js";
+import { ManagedSession } from "../tasks/managedSession.js";
+import { readTaskService, TASK_SERVICE_BUILD } from "../tasks/service.js";
+import { ownerAlive, type TaskOwner } from "../tasks/controller.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // dist/web -> package root (mirrors the same trick used in config.ts).
@@ -48,7 +51,29 @@ const WEB_DIR = path.join(PKG_ROOT, "web");
  * Conversations resumed from the browser only live as long as this map keeps
  * them reachable; the TUI owns its own sessions and must not be closable here.
  */
-const webSessions = new Map<string, WebSession>();
+const webSessions = new Map<string, WebSession | ManagedSession>();
+
+async function openStoredSession(source: SessionData, selection: ModelSelection | undefined, mode: Mode, managed: boolean) {
+  if (!managed) return resumeSession(source, selection, mode);
+  try {
+    const session = await ManagedSession.open({ cwd: source.cwd, sessionId: source.id, mode });
+    if (selection) {
+      const changed = await session.remoteAction("model", selection);
+      if (changed.status !== 200) { session.dispose(); return { ok: false as const, error: String((changed.data as { error?: string }).error) }; }
+    }
+    if (source.agent_mode && mode !== "pro") await session.remoteAction("agent-mode", { mode: source.agent_mode });
+    if (source.pro_preset && mode === "pro") await session.remoteAction("pro-preset", { preset: source.pro_preset });
+    return { ok: true as const, session };
+  } catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : String(error) }; }
+}
+
+export function registerRecoveredSession(source: SessionData, mode: Mode): void {
+  const result = resumeSession(source, undefined, mode);
+  if (!result.ok) return;
+  const key = result.session.start();
+  webSessions.set(key, result.session);
+  result.session.recoverExecution();
+}
 
 function closeWebSession(key: string): boolean {
   const session = webSessions.get(key);
@@ -59,6 +84,10 @@ function closeWebSession(key: string): boolean {
 }
 
 export interface WebServerOptions {
+  /** Private executor refuses to overwrite an unowned legacy running task. */
+  executionService?: boolean;
+  /** Production consoles subscribe to the supervised execution service. */
+  managedTasks?: boolean;
   /** Port to listen on. `0` lets the OS pick a free one. */
   port: number;
   /** Interface to bind. Defaults to loopback. */
@@ -200,6 +229,8 @@ export function webUrls(host: string, port: number): { url: string; urls: string
  * it between loopback and every interface without restarting the process.
  */
 interface WebBinding {
+  executionService: boolean;
+  managedTasks: boolean;
   host: string;
   port: number;
   setHost(host: string): Promise<void>;
@@ -1214,6 +1245,21 @@ async function handleApi(
         throw new ApiError(400, "invalid request", "invalid request");
       }
       const input = body as Record<string, unknown>;
+      const clientId = input.client_id;
+      if (clientId !== undefined && (typeof clientId !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(clientId))) throw new Error("invalid client id");
+      if (typeof clientId === "string") {
+        const existing = [...webSessions.entries()].find(([, session]) => session.clientId === clientId);
+        if (existing) { sendJson(res, 200, { ok: true, key: existing[0], snapshot: hub.snapshot(existing[0]) }); return true; }
+        const saved = listSessions(mode).find(session => session.client_id === clientId);
+        if (saved) {
+          const data = loadSessionSafe(saved.id, mode);
+          const resumed = data && await openStoredSession(data, undefined, mode, binding.managedTasks);
+          if (resumed && resumed.ok) {
+            const key = resumed.session.start(); webSessions.set(key, resumed.session);
+            sendJson(res, 200, { ok: true, key, snapshot: hub.snapshot(key) }); return true;
+          }
+        }
+      }
       const cwd = existingDirectory(input.cwd ?? process.cwd());
       const requested = input.selection === undefined
         ? getWebSettings(mode).selection
@@ -1230,7 +1276,11 @@ async function handleApi(
       if (input.agent_mode !== undefined && (!isAgentMode(input.agent_mode) || (mode === "pro" && input.agent_mode !== "standard"))) {
         throw new ApiError(400, "invalid agent mode", "invalid agent mode");
       }
-      const session = createWebSession(cwd, selection, approvalMode, mode, preset, input.agent_mode as AgentMode | undefined);
+      const session = binding.managedTasks ? await ManagedSession.open({ cwd, mode, selection: {
+        provider: selection.provider, model: selection.model.name, intensity: selection.intensity,
+      }, approvalMode, agentMode: input.agent_mode as AgentMode | undefined, proPreset: preset, clientId: clientId as string | undefined })
+        : createWebSession(cwd, selection, approvalMode, mode, preset, input.agent_mode as AgentMode | undefined);
+      if (typeof clientId === "string" && session instanceof WebSession) session.clientId = clientId;
       const key = session.start();
       webSessions.set(key, session);
       recordWorkspace(cwd, mode);
@@ -1330,7 +1380,8 @@ async function handleApi(
       const migrated = migrateAgentSession(agent, id, cwd, {
         provider: selection.provider, model: selection.model.name, intensity: selection.intensity,
       }, mode, preset);
-      const session = new WebSession(migrated, selection.model, mode);
+      const session = binding.managedTasks ? await ManagedSession.open({ cwd, sessionId: migrated.id, mode })
+        : new WebSession(migrated, selection.model, mode);
       const key = session.start();
       webSessions.set(key, session);
       sendJson(res, 201, { ok: true, id: migrated.id, key, cwd, snapshot: hub.snapshot(key) });
@@ -1429,13 +1480,27 @@ async function handleApi(
       sendJson(res, 404, { error: "session not found" });
       return true;
     }
+    if (binding.executionService && data.task_run && ["running", "cancelling"].includes(data.task_run.state) && !data.task_run.spec) {
+      sendJson(res, 409, { error: "Legacy task may still have an executor. Keep using its original console; automatic takeover is blocked." }); return true;
+    }
+    if (binding.executionService) {
+      const ownerFile = path.join(sessionDir(mode), "tasks", id, "controller", "owner.lock");
+      if (fs.existsSync(ownerFile)) {
+        let owner: TaskOwner;
+        try { owner = JSON.parse(fs.readFileSync(ownerFile, "utf8")) as TaskOwner; }
+        catch { sendJson(res, 409, { error: "Task owner cannot be verified; automatic takeover is blocked" }); return true; }
+        if (!Number.isSafeInteger(owner.pid) || ownerAlive(owner)) {
+          sendJson(res, 409, { error: "Task still has an executor. Attach through its owning service instead of overwriting its state." }); return true;
+        }
+      }
+    }
     if (preset !== undefined) data.pro_preset = preset;
     if (agentMode !== undefined) data.agent_mode = agentMode;
 
     const requested: ModelSelection | undefined = selection ? {
       provider: selection.provider, model: selection.model.name, intensity: selection.intensity,
     } : undefined;
-    const outcome = resumeSession(data, requested, mode);
+    const outcome = await openStoredSession(data, requested, mode, binding.managedTasks);
     if (!outcome.ok) {
       sendJson(res, 400, { error: outcome.error });
       return true;
@@ -1486,7 +1551,7 @@ async function handleApi(
       }
       const remote = hub.remoteAction(key);
       if (remote) {
-        if (action === "close") {
+        if (action === "close" && !(webSessions.get(key) instanceof ManagedSession)) {
           sendJson(res, 400, { error: "this session is owned by the terminal UI" });
           return true;
         }
@@ -1494,6 +1559,7 @@ async function handleApi(
           const body = ["approve", "approval-mode", "agent-mode", "message", "model", "pro-preset"].includes(action)
             ? await readJsonBody(req) : {};
           const result = await remote(action, body);
+          if (action === "close" && result.status === 200) webSessions.delete(key);
           sendJson(res, result.status, result.status === 200 && result.data && typeof result.data === "object"
             ? { ...result.data, snapshot: hub.snapshot(key) } : result.data);
         } catch (error) {
@@ -1575,7 +1641,8 @@ async function handleApi(
           return true;
         }
         const approved = (body as { approved?: unknown })?.approved === true;
-        if (!hub.approve(key, approved)) {
+        const approvalId = (body as { approval_id?: unknown })?.approval_id;
+        if (!hub.approve(key, approved, typeof approvalId === "string" ? approvalId : undefined)) {
           sendJson(res, 409, { error: "no approval is pending" });
           return true;
         }
@@ -1615,9 +1682,16 @@ async function handleApi(
       if (agentMode !== undefined && (!isAgentMode(agentMode) || mode === "pro")) {
         sendJson(res, 400, { error: "invalid agent mode" }); return true;
       }
-      const sent = hub.sendConfigured(key, text, agentMode as AgentMode | undefined);
+      const requestId = (body as { request_id?: unknown })?.request_id;
+      if (requestId !== undefined && (typeof requestId !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(requestId))) {
+        sendJson(res, 400, { error: "invalid request id" }); return true;
+      }
+      let sent;
+      try { sent = hub.sendConfigured(key, text, agentMode as AgentMode | undefined, requestId as string | undefined); }
+      catch (error) { sendJson(res, 409, { error: error instanceof Error ? error.message : "message rejected" }); return true; }
       if (!sent.ok) { sendJson(res, 409, { error: sent.error }); return true; }
-      sendJson(res, 200, { ok: true });
+      const snapshot = hub.snapshot(key);
+      sendJson(res, snapshot?.saveError ? 503 : 200, { ok: !snapshot?.saveError, snapshot });
       return true;
     }
 
@@ -1687,6 +1761,8 @@ async function handleRequest(
 
 /** Start the web UI. Resolves once the socket is actually listening. */
 export async function startWebServer(options: WebServerOptions): Promise<WebServerHandle> {
+  let discoveryTimer: NodeJS.Timeout | undefined;
+  let discovering = false;
   const auth = new WebAuth(options.auth !== false);
   // An explicit --host/--lan wins for this run; otherwise the saved Web access
   // switch is applied exactly as if `--lan` had been passed.
@@ -1696,6 +1772,8 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 
   // The settings page reads and changes this binding while the process runs.
   const binding: WebBinding = {
+    executionService: options.executionService === true,
+    managedTasks: options.managedTasks === true,
     host,
     port,
     setHost: (next) => rebind(next),
@@ -1851,10 +1929,11 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
     urls: [],
     setHost: (next) => rebind(next),
     close: async () => {
+      closed = true;
+      clearInterval(discoveryTimer);
       await localApi?.close();
       localApi = null;
       await new Promise<void>((resolve) => {
-        closed = true;
         // These streams never end on their own, so they are closed explicitly;
         // otherwise server.close() would wait for a window that stays open.
         updates.closeAll();
@@ -1868,6 +1947,36 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
     },
   };
 
+  if (options.managedTasks) {
+    const discover = async () => {
+      if (closed || discovering) return;
+      const service = readTaskService();
+      if (!service || service.build !== TASK_SERVICE_BUILD) return;
+      discovering = true;
+      try {
+        for (const mode of ["standard", "pro"] as Mode[]) {
+          const response = await fetch(`${service.url}${mode === "pro" ? "/pro" : ""}/live`, {
+            headers: { Authorization: `Bearer ${service.token}` }, signal: AbortSignal.timeout(1500),
+          });
+          if (!response.ok) continue;
+          const body = await response.json() as { live?: LiveEntrySummary[] };
+          for (const entry of body.live ?? []) {
+            if (closed || !entry.sessionId || entry.empty) continue;
+            if ([...webSessions.values()].some(session => session.mode === mode && session.liveMeta().sessionId === entry.sessionId)) continue;
+            const session = await ManagedSession.open({ cwd: entry.cwd, sessionId: entry.sessionId, mode });
+            if (closed) { session.dispose(); break; }
+            // A browser request may have attached while the subscription opened.
+            if ([...webSessions.values()].some(other => other.mode === mode && other.liveMeta().sessionId === entry.sessionId)) { session.dispose(); continue; }
+            const key = session.start(); webSessions.set(key, session);
+          }
+        }
+      } catch { /* Existing subscriptions report connection loss themselves. */ }
+      finally { discovering = false; }
+    };
+    discoveryTimer = setInterval(() => { void discover(); }, 750);
+    discoveryTimer.unref();
+    void discover();
+  }
   if (!options.apiOnly) await listenRetry(host);
   // Port 0 means "let the OS pick": remember the real one for every URL.
   const address = server.address();

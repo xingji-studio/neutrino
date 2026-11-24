@@ -327,6 +327,7 @@ export function findConfiguredModel(providerName: string, modelName: string): Mo
 }
 
 export interface SessionMeta {
+  client_id?: string;
   id: string;
   created_at: string;
   updated_at: string;
@@ -337,6 +338,7 @@ export interface SessionMeta {
   title: string;
   message_count: number;
   agent_mode?: AgentMode;
+  task_state?: TaskSnapshot["state"];
 }
 
 export interface ToolMessage {
@@ -359,6 +361,10 @@ export interface TokenUsage {
 }
 
 export interface SessionData {
+  client_id?: string;
+  input_receipts?: string[];
+  input_receipt_hashes?: Record<string, string>;
+  pending_input?: string | null;
   goal?: GoalState | null;
   fast_run?: FastSnapshot;
   task_run?: TaskSnapshot;
@@ -529,6 +535,7 @@ export function saveSession(
   fastRun?: FastSnapshot,
   sessionTitle?: string,
   goal?: GoalState | null,
+  transport?: Pick<SessionData, "client_id" | "input_receipts" | "input_receipt_hashes" | "pending_input">,
 ): string {
   ensureDirs(mode);
   const now = new Date();
@@ -545,6 +552,10 @@ export function saveSession(
   }
 
   const session: SessionData = {
+    ...(transport?.client_id ?? existing?.client_id ? { client_id: transport?.client_id ?? existing?.client_id } : {}),
+    ...(transport?.input_receipts ?? existing?.input_receipts ? { input_receipts: transport?.input_receipts ?? existing?.input_receipts } : {}),
+    input_receipt_hashes: transport?.input_receipt_hashes ?? existing?.input_receipt_hashes,
+    pending_input: transport && "pending_input" in transport ? transport.pending_input : existing?.pending_input,
     id,
     created_at,
     updated_at: now.toISOString(),
@@ -626,6 +637,7 @@ export function listSessions(mode: Mode = "standard"): SessionMeta[] {
       const data = JSON.parse(fs.readFileSync(path.join(dir, f), "utf-8")) as SessionData;
       sessions.push({
         id: data.id ?? f.replace(/\.json$/, ""),
+        ...(data.client_id ? { client_id: data.client_id } : {}),
         created_at: data.created_at ?? "",
         updated_at: data.updated_at ?? data.created_at ?? "",
         model: data.model ?? "",
@@ -635,6 +647,7 @@ export function listSessions(mode: Mode = "standard"): SessionMeta[] {
         title: data.title ?? "",
         message_count: (data.messages ?? []).length,
         agent_mode: normalizeAgentMode(data.agent_mode),
+        ...(data.pending_input ? { task_state: "interrupted" as const } : data.task_run ? { task_state: data.task_run.state } : {}),
       });
     } catch {
       // ignore unreadable sessions

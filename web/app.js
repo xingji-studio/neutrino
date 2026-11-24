@@ -1351,14 +1351,16 @@ function forgetSeen(identity) {
  * user, so only manual approval leaves a conversation waiting on a human.
  */
 function statusOfLive(live) {
-  if (!live) return "done";
+  if (!live) return "interrupted";
+  if (live.connection === "disconnected") return "disconnected";
   if (live.approval && (live.approvalMode ?? "request") === "request") return "approval";
-  return live.busy || live.paused || live.queued || live.compressing ? "running" : "done";
+  if (live.busy || live.paused || live.queued || live.compressing) return "running";
+  return live.task && live.task.state !== "completed" ? "interrupted" : "done";
 }
 
-/** Status of a sidebar row; a saved transcript has finished by definition. */
+/** Saved task state remains authoritative when its executor is unavailable. */
 function sessionStatus(session) {
-  if (!session.liveKey) return "done";
+  if (!session.liveKey) return session.task_state && session.task_state !== "completed" ? "interrupted" : "done";
   // The open stream is newer than the last overview poll.
   const snapshot = state.snapshot;
   if (snapshot && snapshot.key === session.liveKey) return statusOfLive(snapshot);
@@ -1381,7 +1383,9 @@ function sessionStatusMark(session) {
   }
   const label = status === "running"
     ? tr("Running")
-    : status === "approval" ? tr("Waiting for approval") : tr("Done");
+    : status === "approval" ? tr("Waiting for approval")
+    : status === "disconnected" ? tr("Executor disconnected")
+    : status === "interrupted" ? tr("Task incomplete") : tr("Done");
   return `<span class="session-state ${status}" title="${escapeHtml(label)}"></span>`;
 }
 
@@ -1659,7 +1663,8 @@ function renderFile(data) {
   el.sub.textContent = [data.cwd, data.model, data.provider].filter(Boolean).join(" · ");
   preferences.showConversation(data, `file:${data.id}`);
   proUI?.show(data, `file:${data.id}`);
-  renderMessageList(messages, null, { readOnly: true, context: data.context, active: false });
+  renderMessageList(messages, null, { readOnly: true, context: data.context,
+    active: Boolean(data.task_run && data.task_run.state !== "completed") });
   renderFileControls(data);
   maybeOpenPlan(data.plan);
   renderPlanCard(data);
@@ -1676,7 +1681,7 @@ function renderFileControls(data) {
 
   const badge = document.createElement("span");
   badge.className = "badge readonly";
-  badge.textContent = tr("Read-only");
+  badge.textContent = tr(data.task_run && data.task_run.state !== "completed" ? "Task incomplete" : "Read-only");
   el.controls.appendChild(badge);
 
   const button = document.createElement("button");
@@ -1923,7 +1928,7 @@ function renderApproval(snapshot) {
 function decideApproval(approved) {
   const snapshot = state.snapshot;
   if (!snapshot || !snapshot.approval) return;
-  postAction(snapshot.key, "approve", { approved });
+  postAction(snapshot.key, "approve", { approved, approval_id: snapshot.approval.id });
 }
 
 function renderLive() {
@@ -1944,7 +1949,8 @@ function renderLive() {
     context: snapshot.context,
     // The turn in flight must stay readable: only a finished turn folds. A
     // paused turn is unfinished by the user's own choice, so it stays open too.
-    active: Boolean(snapshot.busy || snapshot.paused),
+    active: Boolean(snapshot.busy || snapshot.paused || snapshot.connection === "disconnected"
+      || (snapshot.task && snapshot.task.state !== "completed")),
   });
   maybeOpenPlan(snapshot.plan);
   renderPlanCard(snapshot);
@@ -2023,6 +2029,15 @@ function renderControls(snapshot) {
               ? tr("sub-agent: {label}", { label: subagent })
               : snapshot.fast && snapshot.activeAgentMode === "fast_dag" ? fastPhaseLabel(snapshot.fast.phase) : tr("working")
       : tr("idle");
+  if (snapshot.connection === "disconnected") {
+    badge.className = "badge paused";
+    badge.textContent = tr("Executor disconnected");
+    badge.title = snapshot.disconnectReason || "";
+  } else if (!snapshot.busy && !snapshot.paused && snapshot.task && snapshot.task.state !== "completed") {
+    badge.className = "badge paused";
+    badge.textContent = tr("Task incomplete");
+    badge.title = snapshot.task.stopReason || snapshot.task.state;
+  }
   el.controls.appendChild(badge);
 
   if (snapshot.saveError || snapshot.task?.persistenceError) {

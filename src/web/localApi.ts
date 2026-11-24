@@ -99,6 +99,7 @@ export async function startLocalApi(port: number, route: Route, publish: boolean
       if (name.startsWith("pro/")) { mode = "pro"; name = name.slice(4); }
       if (req.method === "GET" && name === "health") { json(res, 200, { ok: true, version: 1 }); return; }
       if (req.method === "GET" && name === "capabilities") { json(res, 200, { version: 1, workspaces: ["standard", "pro"], agent_modes: AGENT_MODES, streaming: "sse-snapshots", approval_ids: true }); return; }
+      if (req.method === "GET" && name === "live") { json(res, 200, { live: hub.list(mode) }); return; }
       if (req.method === "GET" && name === "models") {
         const settings = getWebSettings(mode);
         json(res, 200, { providers: settings.providers, intensities: settings.intensities, ...(mode === "pro" ? { pro: settings.pro } : {}) }); return;

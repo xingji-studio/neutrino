@@ -312,6 +312,8 @@ const ZH = {
   "Show {n} more": "再显示 {n} 个",
   "Live": "实时",
   "Running": "运行中",
+  "Executor disconnected": "执行者连接中断",
+  "Task incomplete": "任务未完成",
   "Waiting for approval": "等待审批",
   "Earlier conversation · {n} messages": "更早的对话 · {n} 条消息",
   "Context summary · {n} messages": "上下文摘要 · {n} 条消息",

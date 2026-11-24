@@ -266,7 +266,9 @@ try {
   settlePlan(plan);
   assert.deepEqual(plan.steps.map(step => step.status), ["done", "blocked"]);
   assert.deepEqual(resumePlan(structuredClone(plan)).steps.map(step => step.status), ["done", "blocked"]);
-  assert.equal(resumeTaskSnapshot({ ...acceptance.snapshot(), state: "running" }).state, "partial");
+  const interrupted = resumeTaskSnapshot({ ...acceptance.snapshot(), state: "running" });
+  assert.equal(interrupted.state, "interrupted");
+  assert.equal(interrupted.stopReason, "owner_lost_unknown");
   acceptance.finish("partial");
   console.log("ok runtime: step acceptance rejects invented evidence, incomplete dependencies and child self-approval");
 

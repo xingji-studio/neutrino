@@ -462,13 +462,16 @@ export class ApprovalGate {
    */
   async decide(request: ApprovalRequest): Promise<ApprovalDecision> {
     const scope = currentTask();
+    scope?.runtime.note("approval_started", { tool: request.tool, arguments: request.args, level: request.risk.level });
     const span = scope?.runtime.diagnostics?.span("approval_decision", { tool_name: request.tool }, scope);
     try {
       const decision = await this.route(request, 0);
+      scope?.runtime.note("approval_finished", { tool: request.tool, approved: decision.approved, source: decision.source });
       span?.end({ approved: decision.approved, status: decision.source });
       return decision;
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
+      scope?.runtime.note("approval_failed", { tool: request.tool, reason: detail });
       return {
         approved: false,
         source: "ai",

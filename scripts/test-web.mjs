@@ -5,11 +5,14 @@
 // the SSE stream.
 import fs from "node:fs";
 import http from "node:http";
-import { startWebServer } from "../dist/web/server.js";
-import { hub } from "../dist/web/hub.js";
-import { WebSession } from "../dist/web/session.js";
+import os from "node:os";
 import path from "node:path";
-import { SESSION_DIR } from "../dist/config.js";
+const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "neutrino-web-suite-"));
+process.env.NEUTRINO_HOME = path.join(testHome, "home");
+const { startWebServer } = await import("../dist/web/server.js");
+const { hub } = await import("../dist/web/hub.js");
+const { WebSession } = await import("../dist/web/session.js");
+const { SESSION_DIR } = await import("../dist/config.js");
 
 // This test drives a resumed turn end to end; the planner would add requests it
 // does not expect.
@@ -397,6 +400,7 @@ try {
 } finally {
   hub.unregister(key);
   await server.close();
+  fs.rmSync(testHome, { recursive: true, force: true });
 }
 
 console.log(failures === 0 ? "\nWEB TESTS PASSED" : `\n${failures} FAILURE(S)`);

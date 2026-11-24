@@ -573,6 +573,8 @@ svg {
   background: var(--accent);
 }
 
+.session-state.interrupted,
+.session-state.disconnected,
 .session-state.approval {
   background: var(--amber);
   animation: pulse-amber 1.6s ease-out infinite;

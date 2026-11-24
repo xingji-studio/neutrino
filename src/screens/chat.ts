@@ -38,7 +38,8 @@ import { computeInputWindow, cursorFromColumn, drawInputBox, drawScrollbar, wrap
 import { drawSpans, renderMarkdownText, type Line, type Span } from "../markdown.js";
 import { ellipsize, displayWidth } from "../width.js";
 import { sanitizeText } from "../sanitize.js";
-import { TaskRuntime, TaskControlError, currentTask, linkSignals, taskLimits, taskBudgetScope, resumeTaskSnapshot, type AgentStatus, type TaskSnapshot } from "../llm/runtime.js";
+import { TaskRuntime, TaskControlError, currentTask, linkSignals, taskLimits, taskBudgetScope, resumeTaskSnapshot, blockedTaskSnapshot, type AgentStatus, type TaskSnapshot } from "../llm/runtime.js";
+import { TaskClient } from "../tasks/service.js";
 import { prepareContext, outputAllowance, finalTaskReport } from "../llm/context.js";
 import { StandardTask, STANDARD_FINISH, STANDARD_FINISH_DEFINITION, STANDARD_EVIDENCE_DEFINITION, type StandardFinishResult } from "../llm/standard.js";
 import { STANDARD_CHECK_DEFINITIONS, STANDARD_CHECK_TOOLS } from "../llm/standard-checks.js";
@@ -271,6 +272,11 @@ export class ChatScreen extends Screen implements LiveAgent {
 
   // ---- web bridge ----
   private liveKey: string | null = null;
+  private viewAttached = false;
+  private remoteClient?: TaskClient;
+  private remoteReady?: Promise<void>;
+  private remoteSnapshot?: LiveSnapshot;
+  private remoteFailure: string | null = null;
   private liveDir = process.cwd();
 
   // ---- approval gate ---------------------------------------------------
@@ -300,7 +306,14 @@ export class ChatScreen extends Screen implements LiveAgent {
   }
 
   onActivate(): void {
-    if (this.initialized) return;
+    this.viewAttached = true;
+    if (this.initialized) {
+      if (this.remoteClient) void this.remoteClient.connect().catch(error => this.remoteError(error));
+      else this.checkpoint.register();
+      this.liveKey = hub.register(this);
+      this.publishLive();
+      return;
+    }
     this.initialized = true;
     this.sessionTitle = new SessionTitle(this.loadedTitle ?? "", this.loadedMessages === null && this.sessionId === null);
     this.agentMode = normalizeAgentMode(this.loadedAgentMode);
@@ -336,7 +349,11 @@ export class ChatScreen extends Screen implements LiveAgent {
       this.messages.push(m as Msg);
     }
     // Everything already on disk was answered, so history opens compact.
-    for (const start of this.userMessageIndexes()) this.finishedTurns.add(start);
+    const savedTurns = this.userMessageIndexes();
+    for (const start of savedTurns) {
+      if (start === savedTurns.at(-1) && this.loadedTask && this.loadedTask.state !== "completed") continue;
+      this.finishedTurns.add(start);
+    }
     this.plan = resumePlan(this.loadedPlan);
     this.lastTask = resumeTaskSnapshot(this.loadedTask);
     this.goals = new GoalController(this.loadedGoal);
@@ -347,6 +364,19 @@ export class ChatScreen extends Screen implements LiveAgent {
     }
     this.context = normalizeContext(this.loadedContext, this.messages.filter((m) => m.role !== "system").length);
     this.liveDir = this.loadedCwd ?? process.cwd();
+    if (this.app.managedTasks) {
+      this.remoteClient = new TaskClient({
+        cwd: this.liveDir, sessionId: this.sessionId,
+        selection: { provider: this.modelProvider, model: this.model.name, intensity: this.intensity },
+        approvalMode: this.approvalMode, agentMode: this.agentMode,
+      }, snapshot => this.applyRemote(snapshot), reason => this.remoteError(reason));
+      this.liveKey = hub.register(this);
+      this.remoteReady = this.remoteClient.connect();
+      void this.remoteReady.catch(error => { this.remoteReady = undefined; this.remoteError(error); });
+      if (this.initialMessage) this.send(this.initialMessage);
+      else this.app.render();
+      return;
+    }
     this.checkpoint.register();
     this.liveKey = hub.register(this);
     this.publishLive();
@@ -358,24 +388,96 @@ export class ChatScreen extends Screen implements LiveAgent {
   }
 
   onDeactivate(): void {
-    this.approvalQueue.cancelWaiting();
-    // Never leave the agent awaiting a decision nobody can give.
-    if (this.pendingApproval) this.settleApproval(false);
+    this.viewAttached = false;
+    if (this.remoteClient) {
+      this.remoteClient.detach();
+      hub.unregister(this.liveKey); this.liveKey = null;
+      this.app.state.approval = null;
+      return;
+    }
     // A turn can continue after returning to the menu. Keep its exit checkpoint
     // registered until it finishes, including while a tool is still running.
     if (this.busy) this.save();
     else this.checkpoint.dispose();
-    hub.unregister(this.liveKey);
-    this.liveKey = null;
+    if (!this.busy && !this.paused && !this.queued && !this.pendingApproval) {
+      hub.unregister(this.liveKey);
+      this.liveKey = null;
+    }
   }
 
   // ---- web bridge (see src/web/hub.ts) ---------------------------------
+
+  private applyRemote(snapshot: LiveSnapshot): void {
+    this.remoteSnapshot = snapshot;
+    if (snapshot.connection !== "disconnected") this.remoteFailure = null;
+    this.sessionId = snapshot.sessionId;
+    this.sessionTitle = new SessionTitle(snapshot.title);
+    this.modelProvider = snapshot.provider;
+    const configured = findConfiguredModel(snapshot.provider, snapshot.model);
+    this.model = configured ? { ...configured } : { ...this.model, name: snapshot.model };
+    this.intensity = snapshot.intensity;
+    this.messages = snapshot.messages as Msg[];
+    this.tokens = { ...snapshot.tokens };
+    this.context = snapshot.context ?? null;
+    this.plan = snapshot.plan ?? null;
+    this.lastTask = snapshot.task;
+    this.goals = new GoalController(snapshot.goal);
+    this.fastState = snapshot.fast;
+    this.busy = snapshot.busy;
+    this.paused = snapshot.paused;
+    this.queued = snapshot.queued;
+    this.compressing = snapshot.compressing;
+    this.streamingContent = snapshot.streamingContent;
+    this.reviewing = snapshot.reviewing ?? null;
+    this.subagent = snapshot.subagent ?? null;
+    this.saveError = snapshot.saveError ?? null;
+    this.retryNotice = snapshot.retrying ? `Retrying model request ${snapshot.retrying.attempt}/${snapshot.retrying.attempts}…` : null;
+    this.agentMode = snapshot.agentMode ?? "standard";
+    this.activeAgentMode = snapshot.activeAgentMode ?? this.agentMode;
+    this.approvalMode = snapshot.approvalMode ?? "request";
+    const approval = snapshot.approval;
+    this.pendingApproval = approval?.id ? {
+      id: approval.id, tool: approval.tool, args: approval.arguments,
+      risk: { level: approval.level, tool: approval.tool, summary: approval.summary, reasons: approval.reasons },
+      resolve: approved => { if (approved !== null) void this.sendRemoteAction("approve", { approved, approval_id: approval.id }); },
+    } : null;
+    const turns = this.userMessageIndexes();
+    this.finishedTurns = new Set(turns.filter(start => start !== turns.at(-1)
+      || (!snapshot.busy && !snapshot.paused && snapshot.connection !== "disconnected" && snapshot.task?.state === "completed")));
+    this.activeTurnStart = this.busy ? turns.at(-1) ?? null : null;
+    this.app.state.isThinking = this.busy;
+    this.app.state.approval = this.pendingApproval ? { tool: this.pendingApproval.tool, level: this.pendingApproval.risk.level } : null;
+    Object.assign(this.app.state, {
+      selectedProvider: this.modelProvider, selectedModelName: this.model.name,
+      selectedModelUrl: this.model.url, selectedModelApiKey: this.model.api_key,
+      selectedModelStreaming: this.model.supports_streaming, selectedIntensity: this.intensity,
+    });
+    this.publishLive(); this.app.render();
+  }
+
+  private remoteError(error: unknown): void {
+    this.remoteFailure = error instanceof Error ? error.message : String(error);
+    if (!this.remoteSnapshot) { this.busy = false; this.app.state.isThinking = false; }
+    this.publishLive(); this.app.render();
+  }
+
+  private async sendRemoteAction(action: string, body: Record<string, unknown> = {}): Promise<void> {
+    try {
+      await this.remoteReady;
+      await this.remoteClient!.action(action, body);
+    } catch (error) { this.remoteError(error); }
+  }
 
   liveCwd(): string {
     return this.liveDir;
   }
 
   liveConfigure(selection: ResolvedModelSelection): ModelChangeResult {
+    if (this.remoteClient) {
+      if (this.busy) return { ok: false, error: "pause the current turn before changing models" };
+      void this.sendRemoteAction("model", { provider: selection.provider, model: selection.model.name, intensity: selection.intensity });
+      return { ok: true };
+    }
     if (this.busy || this.pendingApproval) {
       return { ok: false, error: "pause the current turn before changing models" };
     }
@@ -397,6 +499,7 @@ export class ChatScreen extends Screen implements LiveAgent {
 
   liveMeta(): LiveMeta {
     return {
+      ...(this.remoteSnapshot ? { connection: this.remoteSnapshot.connection, disconnectReason: this.remoteSnapshot.disconnectReason, executionOwner: "service" as const } : {}),
       goal: this.goals.snapshot(),
       sessionId: this.sessionId,
       title: this.liveTitle(),
@@ -446,6 +549,7 @@ export class ChatScreen extends Screen implements LiveAgent {
   }
 
   livePause(): void {
+    if (this.remoteClient) { void this.sendRemoteAction("pause"); return; }
     if (this.goals.active) {
       this.goals.stop("paused", "Paused by user.");
       this.save();
@@ -472,6 +576,7 @@ export class ChatScreen extends Screen implements LiveAgent {
   }
 
   liveResume(): void {
+    if (this.remoteClient) { void this.sendRemoteAction("resume"); return; }
     const goal = this.goals.snapshot();
     if (goal && ["paused", "blocked", "budget_exhausted"].includes(goal.status)) {
       this.send("/goal resume");
@@ -488,6 +593,7 @@ export class ChatScreen extends Screen implements LiveAgent {
   }
 
   liveSetAgentMode(mode: AgentMode): ModelChangeResult {
+    if (this.remoteClient) { void this.sendRemoteAction("agent-mode", { mode }); return { ok: true }; }
     if (mode === FAST_MODE) {
       try { assertFastAvailable(loadConfig()); }
       catch (error) { return { ok: false, error: describeError(error) }; }
@@ -499,6 +605,7 @@ export class ChatScreen extends Screen implements LiveAgent {
   }
 
   liveSetApprovalMode(mode: ApprovalMode): void {
+    if (this.remoteClient) { void this.sendRemoteAction("approval-mode", { mode }); return; }
     if (this.approvalMode === mode) return;
     this.approvalMode = mode;
     if (this.pendingApproval) this.settleApproval(null);
@@ -513,6 +620,7 @@ export class ChatScreen extends Screen implements LiveAgent {
    * previous transcript is saved first and is never overwritten.
    */
   liveClear(): void {
+    if (this.remoteClient) { void this.sendRemoteAction("clear"); return; }
     this.save();
     if (this.saveError) {
       this.app.render();
@@ -554,9 +662,9 @@ export class ChatScreen extends Screen implements LiveAgent {
     this.app.render();
   }
 
-  liveSend(text: string): void {
+  liveSend(text: string, requestId?: string): void {
     if (!text.trim()) return;
-    this.send(text);
+    this.send(text, false, requestId);
     this.publishLive();
   }
 
@@ -834,6 +942,7 @@ export class ChatScreen extends Screen implements LiveAgent {
   }
 
   private togglePause(): void {
+    if (this.remoteClient) { void this.sendRemoteAction(this.paused ? "resume" : "pause"); return; }
     if (this.goals.active && this.busy) { this.livePause(); return; }
     if (this.paused && this.goals.snapshot()) { this.liveResume(); return; }
     if (!this.busy && !this.queued) return;
@@ -947,6 +1056,7 @@ export class ChatScreen extends Screen implements LiveAgent {
     const runtime = new TaskRuntime({
       executionMode: this.activeAgentMode,
       request: approvalContext.prompt, priorUserRequests: approvalContext.priorUserRequests,
+      previousTask: this.taskRuntime?.snapshot() ?? this.lastTask,
       cwd: this.liveDir, signal: this.turnAbort?.signal, limits: taskLimits(loadConfig("standard")),
       budgetScope: taskBudgetScope(loadConfig("standard")),
       goalTokenBudget: this.goals.remainingTokens(),
@@ -955,6 +1065,7 @@ export class ChatScreen extends Screen implements LiveAgent {
     this.taskRuntime = runtime;
     this.goals.begin(runtime);
     runtime.observeState(() => { if (this.taskRuntime === runtime) { this.save(); this.publishLive(); } });
+    this.save();
     this.taskOutcome = "completed";
     let failed = false;
     try {
@@ -984,9 +1095,9 @@ export class ChatScreen extends Screen implements LiveAgent {
         onUsage: usage => { this.tokens.prompt += usage.prompt; this.tokens.completion += usage.completion; },
       }));
       runtime.finish(this.goals.owns(runtime) && runtime.snapshot().budgetStop ? "partial" : outcome);
-      if (this.goals.owns(runtime) && token === this.turnToken && !this.paused && !failed) {
+      if (token === this.turnToken && !this.paused && !failed) {
         this.lastTask = runtime.snapshot();
-        if (this.goals.active && !this.queued) this.queued = lastRequestText(this.messages) || this.goals.snapshot()!.objective;
+        if (this.goals.owns(runtime) && this.goals.active && !this.queued) this.queued = lastRequestText(this.messages) || this.goals.snapshot()!.objective;
         this.onTurnFinished();
       }
       if (this.taskRuntime === runtime) {
@@ -1072,9 +1183,17 @@ export class ChatScreen extends Screen implements LiveAgent {
     return view;
   }
 
-  private send(text: string, goalRequest = false): void {
+  private send(text: string, goalRequest = false, requestId?: string): void {
     const trimmed = text.trim();
     if (!trimmed) return;
+    if (this.remoteClient) {
+      this.inputValue = ""; this.cursor = 0; this.followBottom = true;
+      this.busy = true;
+      this.app.state.isThinking = true;
+      void this.sendRemoteAction("message", { text: trimmed, agent_mode: this.agentMode, request_id: requestId });
+      this.app.render();
+      return;
+    }
     const goalAction = goalRequest ? null : this.goals.handle(trimmed, this.busy);
     if (goalAction) {
       this.inputValue = "";
@@ -1119,11 +1238,11 @@ export class ChatScreen extends Screen implements LiveAgent {
       this.publishLive();
       return;
     }
-    if (this.taskRuntime?.settling) {
+    if (this.taskRuntime && !this.taskRuntime.finished) {
       const previous = this.taskRuntime;
       this.queued = lastRequestText(this.messages);
       this.paused = false;
-      void previous.drain().then(() => {
+      void previous.whenFinished().then(() => {
         if (this.taskRuntime === previous && this.queued && !this.paused) {
           this.queued = null;
           this.startTurn();
@@ -1166,6 +1285,11 @@ export class ChatScreen extends Screen implements LiveAgent {
    * failure visible in the transcript.
    */
   private failTurn(err: unknown): void {
+    if (!this.taskRuntime || (this.taskRuntime.finished && this.taskRuntime.snapshot().state === "completed")) {
+      this.taskRuntime = null;
+      this.lastTask = blockedTaskSnapshot(describeError(err));
+      this.taskOutcome = "blocked";
+    }
     if (this.goals.active) this.goals.stop("paused", `Task failed: ${describeError(err)}`);
     this.retainStreamingContent();
     this.messages.push({ role: "assistant", content: `[Error: ${describeError(err)}]` });
@@ -1513,7 +1637,7 @@ export class ChatScreen extends Screen implements LiveAgent {
             result = toolMsg.result = JSON.stringify(standardFinish);
             this.save();
           }
-          apiMessages.push({ role: "tool", tool_call_id: tc.id, content: toolMsg.evidenceId
+          apiMessages.push({ role: "tool", tool_call_id: tc.id, content: toolMsg.evidenceId && this.standardTask?.required
             ? `${result}\n[Task evidence: ${toolMsg.evidenceId}; status=${toolMsg.executionStatus}]` : result });
           if (standardFinish?.settled) {
             this.taskOutcome = standardFinish.completed ? "completed" : "partial";
@@ -1551,12 +1675,12 @@ export class ChatScreen extends Screen implements LiveAgent {
    * Ctrl+C): a paused turn is not a completed one and stays open for reading.
    */
   private onTurnFinished(finished = true): void {
-    if (this.goals.owns(this.taskRuntime) && ["running", "cancelling"].includes(this.taskRuntime!.snapshot().state)) {
+    if (this.taskRuntime && !this.taskRuntime.finished) {
       this.streamingContent = null;
       this.save(); this.publishLive(); this.app.render();
       return;
     }
-    if (finished && this.activeTurnStart !== null) this.finishedTurns.add(this.activeTurnStart);
+    if (finished && this.taskOutcome === "completed" && this.activeTurnStart !== null) this.finishedTurns.add(this.activeTurnStart);
     this.activeTurnStart = null;
     this.busy = false;
     this.paused = false;
@@ -1565,7 +1689,11 @@ export class ChatScreen extends Screen implements LiveAgent {
     this.app.render();
     this.maybeFlushQueue();
     this.publishLive();
-    if (!this.busy && !this.liveKey) this.checkpoint.dispose();
+    if (!this.busy && !this.paused && !this.queued && !this.viewAttached) {
+      hub.unregister(this.liveKey);
+      this.liveKey = null;
+      this.checkpoint.dispose();
+    }
     // After the queue flush: a queued prompt that took over immediately is not
     // the end of the user's work, and ringing then would be a false alarm.
     // Hosts are stubbed in tests, hence the optional call.
@@ -1808,9 +1936,12 @@ export class ChatScreen extends Screen implements LiveAgent {
     const runtime = currentTask()?.runtime;
     const execute = () => this.dispatchTool(name, args, toolMsg, token, apiMessages, approvalContext, executionSignal);
     if (!runtime) return execute();
-    const result = await runtime.tool(name, args, execute);
-    const evidence = runtime.evidence.at(-1);
-    if (evidence && this.standardTask?.runtime === runtime && this.standardTask.required) { toolMsg.evidenceId = evidence.id; toolMsg.executionStatus = evidence.status; }
+    const id = toolMsg.evidenceId = randomUUID();
+    this.save();
+    if (this.saveError) throw new Error("Tool intent checkpoint failed before execution");
+    const result = await runtime.tool(name, args, execute, id);
+    const evidence = runtime.evidence.find(entry => entry.id === id);
+    if (evidence) { toolMsg.evidenceId = evidence.id; toolMsg.executionStatus = evidence.status; }
     return result;
   }
 
@@ -2140,10 +2271,12 @@ export class ChatScreen extends Screen implements LiveAgent {
   }
 
   private save(): void {
+    if (this.remoteClient) return;
     this.checkpoint.flush();
   }
 
   private writeSession(): boolean {
+    if (this.remoteClient) return true;
     const chatMessages: SessionMessage[] = [];
     for (const m of this.messages) {
       if (m.role === "user" || m.role === "assistant" || m.role === "tool") {
@@ -2324,7 +2457,13 @@ export class ChatScreen extends Screen implements LiveAgent {
 
     let status = "";
     let statusStyle: Style = { fg: C.dim };
-    if (this.saveError) {
+    if (this.remoteFailure || this.remoteSnapshot?.connection === "disconnected") {
+      status = `${this.remoteSnapshot?.connection === "connected" ? "Task action failed" : "Executor disconnected — reconnecting"}: ${sanitizeText(this.remoteFailure ?? this.remoteSnapshot?.disconnectReason ?? "", { singleLine: true })}`;
+      statusStyle = { fg: C.orange, bold: true };
+    } else if (!this.busy && this.lastTask && this.lastTask.state !== "completed" && !this.paused) {
+      status = `Task incomplete: ${this.lastTask.state}${this.lastTask.stopReason ? ` — ${this.lastTask.stopReason}` : ""}`;
+      statusStyle = { fg: C.orange, bold: true };
+    } else if (this.saveError) {
       status = `History save failed: ${sanitizeText(this.saveError, { singleLine: true })}`;
       statusStyle = { fg: C.orange, bold: true };
     } else if (this.taskRuntime?.snapshot().state === "cancelling") {

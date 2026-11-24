@@ -54,6 +54,8 @@ const DRAG_SCROLL_RAMP = 8;
 const DRAG_SCROLL_MAX_ROWS = 3;
 
 export class App {
+  /** Production terminal views use the same detached runner as the web UI. */
+  managedTasks = false;
   state: AppState = defaultState();
   width: number;
   height: number;
@@ -384,6 +386,7 @@ export class App {
   }
 
   async start(): Promise<void> {
+    this.managedTasks = true;
     // Installed before anything touches the terminal: from here on, a crash
     // restores mouse tracking, raw mode and the alternate screen instead of
     // handing the shell a terminal that types mouse reports.

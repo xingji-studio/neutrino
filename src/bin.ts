@@ -277,7 +277,7 @@ const portFromEnv = envPort();
 
 if (options.mode === "api") {
   try {
-    const handle = await startWebServer({ port: 0, apiOnly: true, apiPort: options.port ?? undefined, publishApi: true, auth: false });
+    const handle = await startWebServer({ port: 0, apiOnly: true, apiPort: options.port ?? undefined, publishApi: true, auth: false, managedTasks: true });
     process.stdout.write(`Local API listening at ${handle.api!.url}; connection details: ${process.env.NEUTRINO_HOME || "~/.neutrino"}/api.json\n`);
     const shutdown = () => { void handle.close().finally(() => process.exit(0)); };
     process.on("SIGINT", shutdown);

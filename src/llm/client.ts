@@ -62,8 +62,68 @@ interface ApiMessage {
 
 /** Give up if the server has not started to respond within this window. */
 const CONNECT_TIMEOUT_MS = 120_000;
+const DEFAULT_STREAM_IDLE_MS = 180_000;
+const DEFAULT_STREAM_PROGRESS_MS = 600_000;
+const lastProgress = new WeakMap<object, number>();
+const streamProgress = new WeakMap<object, number>();
+
+function markStreamProgress(reader: object): void {
+  streamProgress.set(reader, Date.now());
+  const runtime = currentTask()?.runtime;
+  if (runtime && Date.now() - (lastProgress.get(runtime) ?? 0) >= 5000) {
+    lastProgress.set(runtime, Date.now()); runtime.note("model_progress", { kind: "content" });
+  }
+}
+
+/** Bound a silent response body, independently of legitimate long tools. */
+async function readStreamPart(reader: ReadableStreamDefaultReader<Uint8Array>, options: StreamOptions) {
+  const configured = options.streamIdleTimeoutMs ?? Number(process.env.NEUTRINO_STREAM_IDLE_TIMEOUT_MS);
+  const idleMs = Number.isSafeInteger(configured) && configured > 0 ? configured : DEFAULT_STREAM_IDLE_MS;
+  const configuredProgress = options.streamProgressTimeoutMs ?? Number(process.env.NEUTRINO_STREAM_PROGRESS_TIMEOUT_MS);
+  const progressMs = Number.isSafeInteger(configuredProgress) && configuredProgress > 0 ? configuredProgress : DEFAULT_STREAM_PROGRESS_MS;
+  if (!streamProgress.has(reader)) streamProgress.set(reader, Date.now());
+  const remaining = Math.max(1, progressMs - (Date.now() - streamProgress.get(reader)!));
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const part = await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(remaining <= idleMs ? `Model response timed out: no content progress for ${progressMs}ms` : `Model response timed out: no stream data for ${idleMs}ms`));
+          void reader.cancel().catch(() => {});
+        }, Math.min(idleMs, remaining));
+      }),
+    ]);
+    return part;
+  } finally { clearTimeout(timer); }
+}
+
+async function responseText(response: Response, options: StreamOptions, maxChars = Infinity): Promise<string> {
+  if (!response.body) throw new Error("empty response body");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  try {
+    for (;;) {
+      const part = await readStreamPart(reader, options);
+      if (part.done) break;
+      markStreamProgress(reader);
+      text += decoder.decode(part.value, { stream: true });
+      if (text.length >= maxChars) return text.slice(0, maxChars);
+    }
+    return text + decoder.decode();
+  } finally { try { await reader.cancel(); } catch { /* Closed body. */ } }
+}
+
+async function responseJson(response: Response, options: StreamOptions): Promise<unknown> {
+  return JSON.parse(await responseText(response, options));
+}
 
 export interface StreamOptions {
+  /** Override response-body inactivity timeout; never an overall task deadline. */
+  streamIdleTimeoutMs?: number;
+  /** Bound heartbeat-only streams without timing out active reasoning/text/tools. */
+  streamProgressTimeoutMs?: number;
   /** Internal opt-in timing metadata; never included in a provider payload. */
   diagnostic?: DiagnosticRequestContext;
   diagnosticObserver?: DiagnosticRequest;
@@ -303,6 +363,7 @@ export class LLMClient {
       }
       yield* this.streamOpenAI(messages, tools, requestOptions);
     } catch (e) {
+      runtime?.note("model_failed", { provider: this.provider, model: this.model.name, message: describeError(e), cancelled: cancelled() });
       this.outcome = { status: cancelled() ? "cancelled" : "failed", error: {
         code: e instanceof TaskControlError ? e.code : "model_error", message: describeError(e),
       } };
@@ -426,11 +487,11 @@ export class LLMClient {
       // Thrown rather than printed: a 502/503/504/429 is as transient as a
       // reset and deserves the same retries, while a 400/401 must surface at
       // once. `streamTurn` renders the final failure into the transcript.
-      const body = await resp.text().catch(() => "");
+      const body = await responseText(resp, options, 500).catch(() => "");
       throw new HttpStatusError(resp.status, body.slice(0, 500));
     }
     if (this.model.supports_streaming === false || resp.headers.get("content-type")?.includes("application/json")) {
-      const body = await resp.json() as {
+      const body = await responseJson(resp, options) as {
         choices?: Array<{ finish_reason?: string; message?: { content?: string; reasoning_content?: string; reasoning?: string;
           tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> } }>;
         usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
@@ -466,7 +527,7 @@ export class LLMClient {
 
     try {
       while (!stopped) {
-        const { done, value } = await reader.read();
+        const { done, value } = await readStreamPart(reader, options);
         if (done) break;
         buf += decoder.decode(value, { stream: true });
         let idx: number;
@@ -487,6 +548,8 @@ export class LLMClient {
           } catch {
             continue;
           }
+          const failure = (chunk as { error?: { message?: string } }).error;
+          if (failure) throw new Error(failure.message ?? "Model stream failed");
           const usage = (chunk as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } }).usage;
           options.diagnosticObserver?.usageUpdate(usage);
           if (usage) {
@@ -499,6 +562,7 @@ export class LLMClient {
           const choice = (chunk as { choices?: Array<{ delta?: Record<string, unknown>; finish_reason?: string }> }).choices?.[0];
           if (choice?.finish_reason) this.finishReason = choice.finish_reason;
           const delta = choice?.delta ?? {};
+          if (delta.content || delta.reasoning_content || delta.reasoning || delta.tool_calls || choice?.finish_reason) markStreamProgress(reader);
           // DeepSeek calls it reasoning_content; other compatible endpoints use
           // the shorter `reasoning`. Neither is part of the visible reply.
           const reasoning = delta.reasoning_content ?? delta.reasoning;
@@ -534,6 +598,7 @@ export class LLMClient {
       }
     }
 
+    if (!stopped && !this.finishReason) throw new Error("Model stream premature close: missing completion marker");
     this.toolCalls = Object.keys(toolCallsByIndex)
       .map((k) => Number(k))
       .sort((a, b) => a - b)
@@ -633,11 +698,11 @@ export class LLMClient {
       // Thrown rather than printed: a 502/503/504/429 is as transient as a
       // reset and deserves the same retries, while a 400/401 must surface at
       // once. `streamTurn` renders the final failure into the transcript.
-      const body = await resp.text().catch(() => "");
+      const body = await responseText(resp, options, 500).catch(() => "");
       throw new HttpStatusError(resp.status, body.slice(0, 500));
     }
     if (this.model.supports_streaming === false || resp.headers.get("content-type")?.includes("application/json")) {
-      const body = await resp.json() as {
+      const body = await responseJson(resp, options) as {
         content?: Array<Record<string, unknown>>;
         stop_reason?: string;
         usage?: { input_tokens?: number; output_tokens?: number };
@@ -670,7 +735,7 @@ export class LLMClient {
 
     try {
       while (!stopped) {
-        const { done, value } = await reader.read();
+        const { done, value } = await readStreamPart(reader, options);
         if (done) break;
         buf += decoder.decode(value, { stream: true });
         let idx: number;
@@ -698,6 +763,7 @@ export class LLMClient {
             error?: { message?: string };
           };
           const type = event.type;
+          if (event.delta?.text || event.delta?.thinking || event.delta?.partial_json || event.content_block || type === "message_stop") markStreamProgress(reader);
           options.diagnosticObserver?.usageUpdate(event.message?.usage ?? event.usage);
           if (event.content_block?.type === "tool_use" || event.delta?.partial_json) options.diagnosticObserver?.content("tool");
           if (event.delta?.thinking || event.content_block?.type === "thinking") options.diagnosticObserver?.content("reasoning");
@@ -743,6 +809,7 @@ export class LLMClient {
         // Already closed / errored; nothing left to release.
       }
     }
+    if (!stopped) throw new Error("Anthropic stream premature close: missing message_stop");
     const content = Object.keys(blocks).map(Number).sort((a, b) => a - b).map((index) => {
       const block = blocks[index];
       if (block.type === "tool_use") {

@@ -65,7 +65,7 @@ export async function startTerminalBridge(): Promise<TerminalBridgeInfo & { clos
       else if (action === "message") {
         if (typeof body.text !== "string" || !body.text.trim()) throw new Error("empty message");
         if (body.agent_mode !== undefined && !isAgentMode(body.agent_mode)) throw new Error("invalid agent mode");
-        const sent = hub.sendConfigured(key, body.text, body.agent_mode);
+        const sent = hub.sendConfigured(key, body.text, body.agent_mode, typeof body.request_id === "string" ? body.request_id : undefined);
         if (!sent.ok) { sendJson(res, 409, { error: sent.error }); return; }
       } else if (action === "approve") {
         if (!hub.approve(key, body.approved === true, typeof body.approval_id === "string" ? body.approval_id : undefined)) { sendJson(res, 409, { error: "no approval is pending" }); return; }
@@ -135,7 +135,13 @@ class RemoteTerminal implements LiveAgent {
   update(snapshot: LiveSnapshot): void {
     if (snapshot.epoch && snapshot.epoch === this.current.epoch && snapshot.revision !== undefined
         && this.current.revision !== undefined && snapshot.revision < this.current.revision) return;
-    this.current = snapshot;
+    this.current = { ...snapshot, connection: "connected", disconnectReason: undefined };
+    hub.notify(this.key);
+  }
+
+  disconnected(reason: string): void {
+    if (this.current.connection === "disconnected") return;
+    this.current = { ...this.current, connection: "disconnected", disconnectReason: reason };
     hub.notify(this.key);
   }
 
@@ -208,11 +214,11 @@ export class TerminalBridges {
         if (!live.has(key)) { session.close(); entry.sessions.delete(key); }
       }
     } catch {
-      // Keep snapshots over brief disconnects, but never expose a dead terminal
-      // indefinitely if its process stays alive after the bridge fails.
+      // A failed transport is not a completed task. Keep the mirror identity
+      // and explicitly report its availability until owner death is confirmed.
       if (++entry.failures >= 4) {
-        for (const session of entry.sessions.values()) session.close();
-        entry.sessions.clear();
+        if (this.entries.get(owner) !== entry) return;
+        for (const session of entry.sessions.values()) session.disconnected("terminal_bridge_unavailable");
       }
     } finally {
       entry.polling = false;
