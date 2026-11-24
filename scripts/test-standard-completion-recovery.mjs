@@ -110,19 +110,18 @@ assert.equal(actual.answer,expected.answer);console.log('DEPENDENCY CHECK PASSED
         case 11: return check([moduleFile]);
         case 12: return finish();
         case 13:
-          assert.equal(resultOf(latest(body, 'Independent review reached its output ceiling')).settled, false);
-          return finish();
-        case 14:
+          assert.equal(body.messages.some(m => m.role === 'tool' && m.content?.includes('Independent review reached its output ceiling')), false,
+            'Reviewer output failures recover internally without an actor/tool round trip');
           assert.equal(resultOf(latest(body, 'Declare and hash the expected.json dependency')).settled, false);
           return call('read_file', { path: expectedFile });
-        case 15: return check([moduleFile, expectedFile]);
-        case 16: return finish();
-        case 17:
+        case 14: return check([moduleFile, expectedFile]);
+        case 15: return finish();
+        case 16:
           assert.equal(resultOf(latest(body, 'Artifacts changed after completion review')).settled, false);
           return call('read_file', { path: moduleFile });
-        case 18: return call('edit_file', { path: moduleFile, expected_sha256: fileHash(fs.readFileSync(moduleFile)), old_text: '43', new_text: '42' });
-        case 19: return check([moduleFile, expectedFile]);
-        case 20: return finish();
+        case 17: return call('edit_file', { path: moduleFile, expected_sha256: fileHash(fs.readFileSync(moduleFile)), old_text: '43', new_text: '42' });
+        case 18: return check([moduleFile, expectedFile]);
+        case 19: return finish();
         default: throw new Error(`Unexpected actor request ${actors}`);
       }
     };
@@ -131,8 +130,9 @@ assert.equal(actual.answer,expected.answer);console.log('DEPENDENCY CHECK PASSED
       session.liveSend('Verify the module result against the expected fixture.'); await waitUntil(() => !session.liveMeta().busy);
       const task = session.liveMeta().task;
       assert.equal(task.state, 'completed', JSON.stringify(session.messages.slice(-3)));
-      assert.equal(actors, 21); assert.equal(reviews, 4);
-      assert.equal(task.standard.metadataRepairs, 5); assert.equal(task.standard.semanticReviews, 4);
+      assert.equal(actors, 20); assert.equal(reviews, 4);
+      assert.equal(task.standard.metadataRepairs, 5); assert.equal(task.standard.semanticReviews, 3);
+      assert.equal(task.standard.reviewErrors, 1); assert.equal(task.standard.reviewRecoveries, 1);
       assert.ok(task.standard.completionAttempts > 6); assert.ok(task.standard.requirements.every(r => r.verified));
       assert.equal(session.messages.at(-1).content, report);
       assert.equal(session.messages.some(m => m.role === 'assistant' && /Task incomplete\.|scope_assessments/.test(m.content)), false);
@@ -159,6 +159,44 @@ assert.equal(actual.answer,expected.answer);console.log('DEPENDENCY CHECK PASSED
       assert.deepEqual(partial.liveMeta().task.standard.unresolved, ['Access is unavailable.']);
       console.log(`PASS ${kind}: explicit partial preserves the user's language and blocker after rejected attempts`);
     } finally { close(kind, partial); }
+
+    // A broken reviewer must settle as pending, without asking the actor to repair working code.
+    let pendingActors = 0, pendingReviews = 0;
+    const pendingReport = '本地检查结果已记录，等待独立审查。';
+    fs.writeFileSync(path.join(dir, 'pending-check.cjs'), "const assert=require('node:assert/strict');assert.equal(require('./module.json').answer,42);console.log('PENDING ORACLE PASSED');");
+    globalThis.fetch = async (url, init) => {
+      assert.equal(new URL(String(url)).hostname, 'fixture.invalid');
+      const body = JSON.parse(init.body);
+      if (body.messages[0].content.includes('independent completion reviewer for Standard')) {
+        pendingReviews++; assert.equal(body.model, model.name); assert.equal(body.reasoning_effort, 'max'); assert.equal(body.max_tokens, 16384);
+        return response('{"accepted":', [], 'length');
+      }
+      const call = (name, args) => response('', [tool(name, args)]);
+      switch (pendingActors++) {
+        case 0: return call('read_file', { path: moduleFile });
+        case 1: return call('run_command', { command: 'node pending-check.cjs' });
+        case 2: return call('finish_standard_task', { status: 'completed', report: pendingReport, artifact_paths: [moduleFile], unresolved: [],
+          checks: [{ requirement_id: 'r1', detail: 'Actual JSON value asserted by Node.', evidence_ids: [evidenceId(latest(body, 'PENDING ORACLE PASSED'))] }] });
+        default: throw new Error('Reviewer execution errors must never dispatch another actor repair turn');
+      }
+    };
+    const pending = open(kind, dir);
+    try {
+      pending.liveSend('Verify the module result.');
+      await waitUntil(() => !pending.liveMeta().busy).catch(error => {
+        console.error(JSON.stringify({ kind, pendingActors, pendingReviews, state: pending.liveMeta().task?.state,
+          messages: pending.messages.slice(-4).map(m => ({ role: m.role, name: m.name,
+            content: String(m.content || '').slice(-1600), result: String(m.result || '').slice(-1600) })) }, null, 2)); throw error;
+      });
+      const task = pending.liveMeta().task;
+      assert.equal(pendingActors, 3); assert.equal(pendingReviews, 3);
+      assert.equal(task.state, 'partial'); assert.equal(task.standard.status, 'verification_pending');
+      assert.equal(task.standard.reviewErrors, 3); assert.equal(task.standard.reviewRecoveries, 2);
+      assert.ok(task.standard.requirements.every(r => !r.verified));
+      assert.match(pending.messages.at(-1).content, /独立审查暂未完成/);
+      assert.match(pending.messages.at(-1).content, /本地检查结果已记录/);
+      console.log(`PASS ${kind}: persistent reviewer truncation stops as verification_pending with no actor repair or false acceptance`);
+    } finally { close(kind, pending); }
   }
   console.log('STANDARD COMPLETION RECOVERY PASSED; external model requests=0');
 } finally {

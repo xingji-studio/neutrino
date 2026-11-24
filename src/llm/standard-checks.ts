@@ -7,8 +7,8 @@ import type { ToolDefinition } from "./tools.js";
 
 export const STANDARD_CHECK_TOOLS = new Set(["create_check_workspace", "run_task_check"]);
 export const STANDARD_CHECK_DEFINITIONS: ToolDefinition[] = [
-  { type: "function", function: { name: "create_check_workspace", description: "Create a unique empty test workspace inside this project. Reuse its ID for checks; create another workspace for a new variant instead of deleting/rebuilding temporary folders. Keep test data for audit.", parameters: {
-    type: "object", properties: { label: { type: "string" }, reason: { type: "string" } }, required: ["reason"],
+  { type: "function", function: { name: "create_check_workspace", description: "Create a unique empty test workspace inside the actual project. project_root explicitly selects an existing project directory; otherwise use the last observed project manifest's directory or the session directory. The actual destination passes the normal write approval and scope checks. Reuse its ID for checks; retain fixtures for audit. A directory permission error is an environment issue, not a failed implementation check.", parameters: {
+    type: "object", properties: { label: { type: "string" }, project_root: { type: "string" }, reason: { type: "string" } }, required: ["reason"],
   } } },
   { type: "function", function: { name: "run_task_check", description: "Run a check in a previously created workspace. input_paths are project files already read/written with file tools, including the implementation under test. Runtime records their actual before/after hashes and the workspace's immutable input snapshot. This is declared dependency evidence, not proof of semantic coverage. Batch related assertions/input variations into one checker. Use reuse:true for ordinary repeated regressions only with the identical command, implementation, complete fixture snapshot and environment. New variants are not automatically independent reruns. Set independent:true only when a fresh execution is actually required; it always bypasses reuse. Cached aliases never satisfy a required independent execution.", parameters: {
     type: "object", properties: { workspace_id: { type: "string" }, command: { type: "string" },
@@ -31,18 +31,47 @@ export class StandardChecks {
   private workspaces = new Map<string, { directory: string; label: string }>();
   private records = new Map<string, RecordedCheck>();
   private evidence = new Map<string, RecordedCheck>();
-  constructor(private runtime: TaskRuntime, private authorizedFile: (raw: string) => string | undefined) {}
+  private prepared = new Map<string, { id: string; root: string; requestedRoot: string; directory: string }>();
+  constructor(private runtime: TaskRuntime, private authorizedFile: (raw: string) => string | undefined,
+    private projectRoot: () => string = () => runtime.cwd) {}
+
+  private prepare(args: Record<string, unknown>) {
+    const key = JSON.stringify(args);
+    const prior = this.prepared.get(key);
+    if (prior) return prior;
+    if (args.project_root !== undefined && (typeof args.project_root !== "string" || !args.project_root.trim())) throw new Error("project_root must be an existing project directory");
+    const requestedRoot = path.resolve(this.runtime.cwd, typeof args.project_root === "string" ? args.project_root : this.projectRoot());
+    const root = fs.realpathSync(requestedRoot);
+    if (!fs.statSync(root).isDirectory()) throw new Error("project_root must be an existing project directory");
+    const id = randomUUID(), directory = path.join(root, `.neutrino-check-${id}`);
+    const prepared = { id, root, requestedRoot, directory };
+    if (this.prepared.size >= 16) this.prepared.delete(this.prepared.keys().next().value!);
+    this.prepared.set(key, prepared);
+    return prepared;
+  }
 
   create(args: Record<string, unknown>): string {
     this.runtime.check();
-    const id = randomUUID();
-    const directory = path.join(fs.realpathSync(this.runtime.cwd), `.neutrino-check-${id}`);
+    const { id, root, requestedRoot, directory } = this.prepare(args);
+    this.prepared.delete(JSON.stringify(args));
+    if (fs.realpathSync(requestedRoot) !== root) throw new Error("Check project directory changed after approval; request a new workspace");
     this.runtime.assertTool("write_file", { path: directory });
-    fs.mkdirSync(directory, { mode: 0o700 });
+    try { fs.mkdirSync(directory, { mode: 0o700 }); }
+    catch (error) {
+      if (["EACCES", "EPERM", "EROFS"].includes((error as NodeJS.ErrnoException).code ?? "")) {
+        throw new Error(`Check workspace directory is not writable: ${root}. Select the intended authorized project with create_check_workspace.project_root; no implementation check ran.`, { cause: error });
+      }
+      throw error;
+    }
     const workspace = { directory, label: String(args.label ?? "check").slice(0, 120) };
     this.workspaces.set(id, workspace);
     this.runtime.note("standard_check_workspace", { id, ...workspace });
-    return JSON.stringify({ workspace_id: id, path: directory, label: workspace.label, retained_for_audit: true });
+    return JSON.stringify({ workspace_id: id, path: directory, project_root: root, label: workspace.label, retained_for_audit: true });
+  }
+
+  workspaceApprovalArguments(args: Record<string, unknown>): Record<string, unknown> {
+    try { return { ...args, path: this.prepare(args).directory }; }
+    catch { return { ...args, path: path.resolve(this.runtime.cwd, typeof args.project_root === "string" ? args.project_root : this.projectRoot()) }; }
   }
 
   approvalArguments(args: Record<string, unknown>): Record<string, unknown> {

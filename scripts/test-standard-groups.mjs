@@ -110,8 +110,13 @@ try {
   for (const mode of ['group-reject', 'global-reject', 'truncated', 'cancelled']) {
     await complex(mode, async ({ runtime, task, args }) => {
       let calls = 0, charged = 0, drained = false;
+      let firstGroup;
       const options = reviewOptions(async (data, client) => {
         calls++;
+        if (data.review_phase === 'focused' && !firstGroup) firstGroup = data.focus_requirement_ids.join(',');
+        if (mode === 'truncated' && data.review_phase === 'focused' && data.focus_requirement_ids.join(',') === firstGroup) {
+          client.outcome = { status: 'failed', error: { code: 'output_limit' } }; return accept;
+        }
         if (data.review_phase === 'focused' && calls === 1 && mode !== 'global-reject') {
           if (mode === 'truncated') { client.outcome = { status: 'failed', error: { code: 'output_limit' } }; return accept; }
           if (mode === 'cancelled') { await delay(2); runtime.cancel('fixture cancellation'); return accept; }
@@ -122,7 +127,11 @@ try {
       }); options.onUsage = q => { charged += q.total; };
       const result = await task.finish(args, options); assert.equal(result.completed, false);
       assert.ok(task.state.requirements.every(r => !r.verified)); assert.equal(charged, calls * 17);
-      if (mode !== 'global-reject') { assert.equal(calls, 2); assert.equal(drained, true); }
+      if (mode === 'truncated') {
+        assert.equal(calls, 4); assert.equal(drained, true); assert.equal(result.outcome, 'verification_pending');
+        assert.equal(result.settled, true); assert.equal(task.state.reviewRecoveries, 2);
+      }
+      else if (mode !== 'global-reject') { assert.equal(calls, 2); assert.equal(drained, true); }
       else assert.equal(calls, 3);
       results.measurements[mode] = { requests: calls, usage_settled: charged, completed: result.completed };
     });

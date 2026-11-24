@@ -68,6 +68,8 @@ export interface StreamOptions {
   diagnostic?: DiagnosticRequestContext;
   diagnosticObserver?: DiagnosticRequest;
   maxOutputTokens?: number;
+  /** Request JSON on known compatible endpoints; other providers retain prompt-based JSON. */
+  jsonOutput?: boolean;
   /** Lightweight auxiliary completions: disable thinking, or use the lowest supported effort. */
   minimizeReasoning?: boolean;
   /** Reserved final request after normal request capacity has been spent. */
@@ -407,6 +409,11 @@ export class LLMClient {
       ...(this.model.supports_streaming !== false ? { stream_options: { include_usage: true } } : {}),
     };
     if (tools && tools.length) payload.tools = tools;
+    if (options.jsonOutput && !tools?.length) {
+      try {
+        if (new URL(this.model.url).hostname === "api.deepseek.com") payload.response_format = { type: "json_object" };
+      } catch { /* Custom/unknown endpoints keep their existing protocol. */ }
+    }
 
     const resp = await postStream(url, {
       method: "POST",

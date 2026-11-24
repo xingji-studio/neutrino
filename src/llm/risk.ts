@@ -397,6 +397,13 @@ export function assessToolCall(
     return assessment ? { ...assessment, tool: name } : null;
   }
 
+  if (name === "create_check_workspace") {
+    const destination = typeof args.path === "string" ? args.path : path.resolve(workingDir,
+      typeof args.project_root === "string" ? args.project_root : ".", ".neutrino-check");
+    const assessment = assessToolCall("write_file", { path: destination }, workingDir);
+    return assessment ? { ...assessment, tool: name, summary: destination } : null;
+  }
+
   if (name === "read_file" || name === "write_file" || name === "edit_file" || name === "list_files") {
     const raw = typeof args.path === "string" && args.path.trim() ? args.path : ".";
     const reasons: string[] = [];

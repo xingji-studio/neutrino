@@ -350,7 +350,7 @@ export class TaskRuntime {
     // A caller returning normally cannot bypass the Standard acceptance checkpoint.
     if (this.standard && status === "completed" && this.standard.status !== "completed") status = "partial";
     if (this.standard && (this.signal.aborted || status !== "completed")) {
-      this.standard.status = "partial";
+      if (this.standard.status !== "verification_pending" || this.signal.aborted || this.budgetStop) this.standard.status = "partial";
       if (!this.standard.unresolved.length) this.standard.unresolved = [this.signal.aborted
         ? `Task cancelled: ${String(this.signal.reason ?? "Task cancelled")}`
         : this.budgetStop ? `Task stopped: ${this.budgetStop.code}` : "Task ended before completion acceptance"];
